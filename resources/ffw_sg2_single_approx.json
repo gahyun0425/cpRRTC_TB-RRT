@@ -1,0 +1,10 @@
+{
+  "name": "FfwSg2Single",
+  "urdf": "ffw_sg2/ffw_sg2_single_spherized_approx.urdf",
+  "srdf": "ffw_sg2/ffw_sg2.srdf",
+  "end_effector": "gripper_r_rh_p12_rn_base",
+  "batch_size": 16,
+  "template": "templates/prrtc_approx_template.hh",
+  "subtemplates": [],
+  "output": "ffw_sg2_single_prrtc_approx.hh"
+}

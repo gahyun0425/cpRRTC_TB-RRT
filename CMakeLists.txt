@@ -21,6 +21,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CUDA_ARCHITECTURES 86)
 
 find_package(Eigen3 3.3 REQUIRED NO_MODULE)
+find_package(CUDAToolkit REQUIRED)
 
 
 # set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -Xptxas -v")
@@ -47,6 +48,7 @@ target_link_libraries(evaluate_mbm
     PRIVATE
     nlohmann_json::nlohmann_json
     Eigen3::Eigen
+    CUDA::cudart
 )
 
 target_compile_options(evaluate_mbm PRIVATE
@@ -71,8 +73,30 @@ target_link_libraries(single_mbm
     PRIVATE
     nlohmann_json::nlohmann_json
     Eigen3::Eigen
+    CUDA::cudart
 )
 
 target_compile_options(single_mbm PRIVATE
+    -Wno-c++11-narrowing
+)
+
+### FFW SG2 CUDA projection validation
+
+add_executable(validate_ffw_sg2_projection
+    scripts/validate_ffw_sg2_projection.cu
+)
+
+target_include_directories(validate_ffw_sg2_projection
+    PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CUDAToolkit_INCLUDE_DIRS}
+)
+
+target_link_libraries(validate_ffw_sg2_projection
+    PRIVATE
+    Eigen3::Eigen
+)
+
+target_compile_options(validate_ffw_sg2_projection PRIVATE
     -Wno-c++11-narrowing
 )

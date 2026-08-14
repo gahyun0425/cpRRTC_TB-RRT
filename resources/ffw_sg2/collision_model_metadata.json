@@ -1,0 +1,91 @@
+{
+  "schema_version": 1,
+  "robot": "ffw_sg2_follower",
+  "active_dof": 15,
+  "active_joint_order": [
+    "lift_joint",
+    "arm_l_joint1",
+    "arm_l_joint2",
+    "arm_l_joint3",
+    "arm_l_joint4",
+    "arm_l_joint5",
+    "arm_l_joint6",
+    "arm_l_joint7",
+    "arm_r_joint1",
+    "arm_r_joint2",
+    "arm_r_joint3",
+    "arm_r_joint4",
+    "arm_r_joint5",
+    "arm_r_joint6",
+    "arm_r_joint7"
+  ],
+  "batch_size": 16,
+  "sources": {
+    "planning_urdf": "ffw_sg2_planning.urdf",
+    "planning_urdf_sha256": "8ddfb95f8b3a8ce4e32ef612c04e66cb326e96178c45c36c42648f69550ea8bf",
+    "fine_sphere_data": "ffw_sg2_fine_spheres.json",
+    "fine_sphere_data_sha256": "6ef6c7e43ae4a50c4927e45180edaa95fdfab37a8ca8b61ffc265cb2c70ad500",
+    "imported_yaml_sha256": "915b4fb919d3c4d779956283ba945a0f44a34df27d9c1e23673706674392ea86"
+  },
+  "fine_model": {
+    "urdf": "ffw_sg2_spherized.urdf",
+    "urdf_sha256": "bb38737999c981d18fdd441709e9b76126b8f0c025c38e69dd2dafa60d11354c",
+    "collision_links": 27,
+    "sphere_count": 124
+  },
+  "approximate_model": {
+    "urdf": "ffw_sg2_spherized_approx.urdf",
+    "urdf_sha256": "f1688bf33034494ec9f9a3e728810002a2a27ee8fca442d333d6676d3730389e",
+    "collision_links": 27,
+    "sphere_count": 27,
+    "construction": "AABB midpoint plus max(center distance + fine radius)",
+    "padding_m": 1e-06,
+    "minimum_fine_sphere_containment_margin_m": 1.000000000001e-06
+  },
+  "unmodeled_planning_collision_links": [
+    "base_link",
+    "camera_l_link",
+    "camera_r_link",
+    "head_link1",
+    "left_wheel_drive_link",
+    "left_wheel_steer_link",
+    "rear_wheel_drive_link",
+    "rear_wheel_steer_link",
+    "right_wheel_drive_link",
+    "right_wheel_steer_link"
+  ],
+  "memory_bytes": {
+    "fine_runtime_positions": 23808,
+    "approximate_runtime_positions": 5184,
+    "joint_flags": 1024,
+    "two_transform_slots": 2048,
+    "model_dependent_shared_total": 32064,
+    "current_static_model_buffers_total": 38608,
+    "right_sizing_savings": 6544,
+    "fine_constant_float4": 1984,
+    "approximate_constant_float4": 432
+  },
+  "required_element_counts": {
+    "fine_runtime_position_floats": 5952,
+    "approximate_runtime_position_floats": 1296,
+    "joint_flag_ints": 256,
+    "transform_floats_for_two_slots": 512
+  },
+  "current_prrtc_static_capacities": {
+    "fine_runtime_position_floats": 6000,
+    "approximate_runtime_position_floats": 2500,
+    "joint_flag_ints": 640,
+    "transform_floats": 512
+  },
+  "capacity_headroom_elements": {
+    "fine_runtime_position_floats": 48,
+    "approximate_runtime_position_floats": 1204,
+    "joint_flag_ints": 384,
+    "transform_floats_for_two_slots": 0
+  },
+  "generated_cricket_layout": {
+    "joint_count_including_universe": 16,
+    "joint_flag_stride": 16,
+    "transform_slots": 2
+  }
+}

@@ -187,6 +187,132 @@ namespace ppln::robots {
         }
     };
 
+    struct FfwSg2
+    {
+        static constexpr auto name = "ffw_sg2";
+        static constexpr auto dimension = 15;
+        using Configuration = std::array<float, dimension>;
+
+        __device__ static constexpr float get_s_m(int i) {
+            constexpr float values[] = {
+                0.5f,
+                6.28f,
+                3.14f,
+                6.28f,
+                4.0147f,
+                6.28f,
+                3.14f,
+                3.4005f,
+                6.28f,
+                3.14f,
+                6.28f,
+                4.0147f,
+                6.28f,
+                3.14f,
+                3.4005f
+            };
+            return values[i];
+        }
+
+        __device__ static constexpr float get_s_a(int i) {
+            constexpr float values[] = {
+                -0.5f,
+                -3.14f,
+                0.0f,
+                -3.14f,
+                -2.9361f,
+                -3.14f,
+                -1.57f,
+                -1.8201f,
+                -3.14f,
+                -3.14f,
+                -3.14f,
+                -2.9361f,
+                -3.14f,
+                -1.57f,
+                -1.5804f
+            };
+            return values[i];
+        }
+
+        inline static void print_robot_config(Configuration &cfg) {
+            for (int i = 0; i < dimension; i++) {
+                std::cout << cfg[i] << ' ';
+            }
+            std::cout << '\n';
+        };
+
+        template<size_t I = 0>
+        __device__ __forceinline__ static void scale_cfg_impl(float *q)
+        {
+            if constexpr (I < dimension) {
+                q[I] = q[I] * get_s_m(I) + get_s_a(I);
+                scale_cfg_impl<I + 1>(q);
+            }
+        }
+
+        __device__ __forceinline__ static void scale_cfg(float *q)
+        {
+            scale_cfg_impl(q);
+        }
+    };
+
+    struct FfwSg2Single
+    {
+        static constexpr auto name = "ffw_sg2_single";
+        static constexpr auto dimension = 8;
+        using Configuration = std::array<float, dimension>;
+
+        __device__ static constexpr float get_s_m(int i) {
+            constexpr float values[] = {
+                0.5f,
+                6.28f,
+                3.14f,
+                6.28f,
+                4.0147f,
+                6.28f,
+                3.14f,
+                3.4005f
+            };
+            return values[i];
+        }
+
+        __device__ static constexpr float get_s_a(int i) {
+            constexpr float values[] = {
+                -0.5f,
+                -3.14f,
+                -3.14f,
+                -3.14f,
+                -2.9361f,
+                -3.14f,
+                -1.57f,
+                -1.5804f
+            };
+            return values[i];
+        }
+
+        inline static void print_robot_config(Configuration &cfg) {
+            for (int i = 0; i < dimension; i++) {
+                std::cout << cfg[i] << ' ';
+            }
+            std::cout << '\n';
+        };
+
+        template<size_t I = 0>
+        __device__ __forceinline__ static void scale_cfg_impl(float *q)
+        {
+            if constexpr (I < dimension) {
+                q[I] = q[I] * get_s_m(I) + get_s_a(I);
+                scale_cfg_impl<I + 1>(q);
+            }
+        }
+
+        __device__ __forceinline__ static void scale_cfg(float *q)
+        {
+            scale_cfg_impl(q);
+        }
+    };
+
     struct Sphere
     {
         static constexpr auto name = "sphere";

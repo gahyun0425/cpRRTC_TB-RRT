@@ -191,6 +191,23 @@ namespace ppln::device_utils {
     __device__ __forceinline__ bool warp_any_full_mask(bool pred) {
         return __any_sync(0xffffffff , pred);
     }
+
+    // Block-wide motion collision early termination
+    // 같은 CUDA block 안에서 어느 thread가 실제 collision을 발견하면
+    // shared flag를 1로 만들고, 다른 waypoint thread들도 이 값을 확인해
+    // 남은 detailed collision primitive 검사를 중단한다.
+    __device__ __forceinline__
+    bool motion_cc_should_stop(volatile unsigned int *motion_cc_flag) {
+        return motion_cc_flag != nullptr &&atomicAdd((unsigned int *)motion_cc_flag,0u) != 0u;
+    }
+
+
+    __device__ __forceinline__
+    void motion_cc_report_collision(volatile unsigned int *motion_cc_flag) {
+        if (motion_cc_flag != nullptr) {
+            atomicOr((unsigned int *)motion_cc_flag,1u);
+        }
+    }
     
     /* math utils */
     __device__ __forceinline__ constexpr float dot_2(const float &ax, const float &ay, const float &bx, const float &by) 
@@ -483,7 +500,9 @@ inline void printCUDADeviceInfo() {
                 << prop.maxGridSize[2] << "\n";
         
         // Memory Clock and Bus Width
+#if CUDART_VERSION < 13000
         std::cout << "Memory Clock Rate: " << prop.memoryClockRate / 1000.0 << " MHz\n";
+#endif
         std::cout << "Memory Bus Width: " << prop.memoryBusWidth << " bits\n";
         
         // Additional Features
@@ -689,4 +708,3 @@ namespace ppln::collision {
         return a_col[0] * b[0] + a_col[M] * b[1] + a_col[M*2] * b[2] + a_col[M*3] * b[3];
     }
 }
-

@@ -1,0 +1,388 @@
+{
+  "robot": "ffw_sg2_single",
+  "joints": [
+    "lift_joint",
+    "arm_r_joint1",
+    "arm_r_joint2",
+    "arm_r_joint3",
+    "arm_r_joint4",
+    "arm_r_joint5",
+    "arm_r_joint6",
+    "arm_r_joint7"
+  ],
+  "problems": {
+    "tray_lift": [
+      {
+        "valid": true,
+        "sphere": [],
+        "cylinder": [],
+        "box": [
+          {
+            "name": "counter_box0",
+            "position": [
+              0.5725,
+              -0.134,
+              0.977
+            ],
+            "orientation_euler_xyz": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "half_extents": [
+              0.20372,
+              0.15,
+              0.012
+            ]
+          },
+          {
+            "name": "counter_box1",
+            "position": [
+              0.57,
+              -0.13,
+              0.475
+            ],
+            "orientation_euler_xyz": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "half_extents": [
+              0.2024,
+              0.15,
+              0.485
+            ]
+          },
+          {
+            "name": "sink0",
+            "position": [
+              0.5756,
+              0.194,
+              0.275
+            ],
+            "orientation_euler_xyz": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "half_extents": [
+              0.1932,
+              0.31,
+              0.568
+            ]
+          },
+          {
+            "name": "sink1",
+            "position": [
+              0.77,
+              0.11,
+              0.967
+            ],
+            "orientation_euler_xyz": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "half_extents": [
+              0.035,
+              0.4,
+              0.024
+            ]
+          },
+          {
+            "name": "sink2",
+            "position": [
+              0.385,
+              0.11,
+              0.967
+            ],
+            "orientation_euler_xyz": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "half_extents": [
+              0.025,
+              0.4,
+              0.024
+            ]
+          },
+          {
+            "name": "sink3",
+            "position": [
+              0.5732,
+              0.48,
+              0.967
+            ],
+            "orientation_euler_xyz": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "half_extents": [
+              0.1632,
+              0.0272,
+              0.024
+            ]
+          },
+          {
+            "name": "sink4",
+            "position": [
+              0.5732,
+              -0.258,
+              0.967
+            ],
+            "orientation_euler_xyz": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "half_extents": [
+              0.1632,
+              0.0272,
+              0.024
+            ]
+          },
+          {
+            "name": "sink5",
+            "position": [
+              0.77,
+              0.11,
+              0.883
+            ],
+            "orientation_euler_xyz": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "half_extents": [
+              0.035,
+              0.4,
+              0.024
+            ]
+          },
+          {
+            "name": "sink6",
+            "position": [
+              0.385,
+              0.11,
+              0.883
+            ],
+            "orientation_euler_xyz": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "half_extents": [
+              0.025,
+              0.4,
+              0.024
+            ]
+          },
+          {
+            "name": "sink7",
+            "position": [
+              0.5732,
+              0.48,
+              0.883
+            ],
+            "orientation_euler_xyz": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "half_extents": [
+              0.1632,
+              0.0272,
+              0.024
+            ]
+          },
+          {
+            "name": "sink8",
+            "position": [
+              0.5732,
+              -0.258,
+              0.883
+            ],
+            "orientation_euler_xyz": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "half_extents": [
+              0.1632,
+              0.0272,
+              0.024
+            ]
+          },
+          {
+            "name": "hinge0",
+            "position": [
+              0.9,
+              -0.38,
+              1.6
+            ],
+            "orientation_euler_xyz": [
+              0.0,
+              0.0,
+              -1.5707963267948963
+            ],
+            "half_extents": [
+              0.02,
+              0.25,
+              0.2
+            ]
+          },
+          {
+            "name": "hinge1",
+            "position": [
+              0.9,
+              0.38,
+              1.6
+            ],
+            "orientation_euler_xyz": [
+              0.0,
+              0.0,
+              -1.5707963267948963
+            ],
+            "half_extents": [
+              0.02,
+              0.25,
+              0.2
+            ]
+          },
+          {
+            "name": "hinge2",
+            "position": [
+              0.9,
+              0.2,
+              1.78
+            ],
+            "orientation_euler_xyz": [
+              0.0,
+              0.0,
+              -1.5707963267948963
+            ],
+            "half_extents": [
+              0.16,
+              0.25,
+              0.02
+            ]
+          },
+          {
+            "name": "hinge3",
+            "position": [
+              0.9,
+              0.2,
+              1.42
+            ],
+            "orientation_euler_xyz": [
+              0.0,
+              0.0,
+              -1.5707963267948963
+            ],
+            "half_extents": [
+              0.16,
+              0.25,
+              0.02
+            ]
+          },
+          {
+            "name": "hinge4",
+            "position": [
+              0.9,
+              -0.16,
+              1.42
+            ],
+            "orientation_euler_xyz": [
+              0.0,
+              0.0,
+              -1.5707963267948963
+            ],
+            "half_extents": [
+              0.2,
+              0.25,
+              0.02
+            ]
+          },
+          {
+            "name": "hinge5",
+            "position": [
+              0.9,
+              -0.16,
+              1.78
+            ],
+            "orientation_euler_xyz": [
+              0.0,
+              0.0,
+              -1.5707963267948963
+            ],
+            "half_extents": [
+              0.2,
+              0.25,
+              0.02
+            ]
+          },
+          {
+            "name": "hinge6",
+            "position": [
+              1.12,
+              0.2,
+              1.6
+            ],
+            "orientation_euler_xyz": [
+              0.0,
+              0.0,
+              -1.5707963267948963
+            ],
+            "half_extents": [
+              0.16,
+              0.02,
+              0.16
+            ]
+          },
+          {
+            "name": "hinge7",
+            "position": [
+              1.12,
+              -0.16,
+              1.6
+            ],
+            "orientation_euler_xyz": [
+              0.0,
+              0.0,
+              -1.5707963267948963
+            ],
+            "half_extents": [
+              0.2,
+              0.02,
+              0.16
+            ]
+          }
+        ],
+        "start": [
+          0.0,
+          -0.18385747075080872,
+          -0.41972222924232483,
+          0.6199638247489929,
+          -1.6583945751190186,
+          -2.021341562271118,
+          -0.59946209192276,
+          0.0061826640740036964
+        ],
+        "goals": [
+          [
+            -0.0450727977,
+            -1.39126396,
+            -0.0917326584,
+            0.348489195,
+            -0.895964622,
+            -1.86537063,
+            -0.209840178,
+            -0.669045746
+          ]
+        ]
+      }
+    ]
+  }
+}

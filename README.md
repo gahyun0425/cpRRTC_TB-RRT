@@ -13,7 +13,11 @@ We introduce pRRTC, a GPU-based, parallel RRT-Connect-based algorithm. Our appro
 Our empirical evaluations show that pRRTC achieves a 10x average speedup on constrained reaching tasks. pRRTC also demonstrates a 5.4x reduction in solution time standard deviation and 1.4x improvement in initial path costs compared to state-of-the-art motion planners in complex environments.
 
 ## Supported Robots
-pRRTC currently supports 7-DoF Franka Emika Panda, 8-DoF Fetch, and 14-DoF Rethink Robotics Baxter. The functions for tracing forward kinematics and collision checking were generated using [Cricket](https://github.com/CoMMALab/cricket.git).
+pRRTC currently supports 7-DoF Franka Emika Panda, 8-DoF Fetch,
+14-DoF Rethink Robotics Baxter, 15-DoF dual-arm FFW-SG2, and an 8-DoF
+FFW-SG2 lift-plus-right-arm model. The functions for
+tracing forward kinematics and collision checking were generated using
+[Cricket](https://github.com/CoMMALab/cricket.git).
 
 ## Building Code
 To build pRRTC, follow the instructions below
@@ -35,6 +39,64 @@ single_mbm.cpp allows users to benchmark pRRTC's performance using Panda, Fetch,
 ```
 build/single_mbm <robot> <MBM problem name> <MBM problem index>
 ```
+
+Repeat planning with `--run N` (`--runs N` is also accepted):
+
+```bash
+./build/single_mbm ffw_sg2 tray_lift 1 --run 100 --no-print-path
+```
+
+After the runs finish, both benchmark executables print the average, minimum,
+maximum, and population standard deviation of end-to-end planner time as
+`time_sec_avg`, `time_sec_min`, `time_sec_max`, and `time_sec_std`. They also
+print `path_length_avg/min/max` and `cost_avg/min/max` over solved runs.
+
+### FFW-SG2 MuJoCo visualization
+
+Install the Python MuJoCo package if it is not already available:
+
+```bash
+python3 -m pip install mujoco
+```
+
+From the repository root, plan the FFW-SG2 `tray_lift` problem and replay the
+result in MuJoCo with:
+
+```bash
+./build/single_mbm ffw_sg2 tray_lift 1 --visualize
+```
+
+Use `ffw_sg2_single` to plan only the lift and seven right-arm joints while the
+left arm remains fixed at its zero pose:
+
+```bash
+./build/single_mbm ffw_sg2_single tray_lift 1 --visualize
+```
+
+The visualizer loads `ffw_lift/ffw_sg2_lift.xml`, maps the selected 15 or 8
+planning joints to MuJoCo `qpos` entries by name, reverses pRRTC's returned
+goal-to-start path, and smoothly replays the resulting start-to-goal path. The
+playback repeats until the MuJoCo window is closed.
+
+### Tree trace HTML
+
+Export the complete bidirectional planning tree to JSON, GraphML, and a
+PATACON-style self-contained HTML viewer with:
+
+```bash
+./build/single_mbm ffw_sg2 tray_lift 1 \
+  --trace-mode tree \
+  --html-trace-mode tree \
+  --html-max-tree-nodes 0
+```
+
+The same options support the 8-DoF lift-plus-right-arm model by replacing the
+robot name with `ffw_sg2_single`. Outputs are written under `traces/` unless
+`--save-json`, `--graphml`, or `--html` supplies an explicit path. A positive
+`--html-max-tree-nodes` samples the HTML view while retaining the full tree in
+JSON and GraphML; zero embeds every tree node and can produce a large file.
+The exporter searches `PATACON_ROOT`, a sibling `patacon` checkout, and
+`~/gh_ws/tb_rrt_ws/src/patacon`, or accepts `--patacon-root PATH`.
 
 The [MotionBenchMaker](https://github.com/KavrakiLab/motion_bench_maker) JSON files are generated using the script detailed [here](https://github.com/KavrakiLab/vamp/blob/35080be604aabd4373cc7db8608297afaa446878/resources/README.md#motionbenchmaker-problems).
 

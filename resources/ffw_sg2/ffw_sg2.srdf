@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<robot name="ffw_sg2_follower">
+  <!-- Canonical pRRTC configuration order: lift, left arm, right arm. -->
+  <group name="ffw_sg2">
+    <joint name="lift_joint"/>
+    <joint name="arm_l_joint1"/>
+    <joint name="arm_l_joint2"/>
+    <joint name="arm_l_joint3"/>
+    <joint name="arm_l_joint4"/>
+    <joint name="arm_l_joint5"/>
+    <joint name="arm_l_joint6"/>
+    <joint name="arm_l_joint7"/>
+    <joint name="arm_r_joint1"/>
+    <joint name="arm_r_joint2"/>
+    <joint name="arm_r_joint3"/>
+    <joint name="arm_r_joint4"/>
+    <joint name="arm_r_joint5"/>
+    <joint name="arm_r_joint6"/>
+    <joint name="arm_r_joint7"/>
+  </group>
+  <group name="lift">
+    <joint name="lift_joint"/>
+  </group>
+  <group name="left_arm">
+    <joint name="arm_l_joint1"/>
+    <joint name="arm_l_joint2"/>
+    <joint name="arm_l_joint3"/>
+    <joint name="arm_l_joint4"/>
+    <joint name="arm_l_joint5"/>
+    <joint name="arm_l_joint6"/>
+    <joint name="arm_l_joint7"/>
+  </group>
+  <group name="right_arm">
+    <joint name="arm_r_joint1"/>
+    <joint name="arm_r_joint2"/>
+    <joint name="arm_r_joint3"/>
+    <joint name="arm_r_joint4"/>
+    <joint name="arm_r_joint5"/>
+    <joint name="arm_r_joint6"/>
+    <joint name="arm_r_joint7"/>
+  </group>
+
+  <!-- Parent-child or rigid-subassembly pairs only. Cross-arm pairs stay enabled. -->
+  <disable_collisions link1="base_link" link2="lift_link" reason="Adjacent"/>
+  <disable_collisions link1="base_link" link2="arm_base_link" reason="Adjacent"/>
+  <disable_collisions link1="lift_link" link2="arm_base_link" reason="FixedSubassembly"/>
+  <disable_collisions link1="arm_base_link" link2="head_link1" reason="Adjacent"/>
+  <disable_collisions link1="head_link1" link2="head_link2" reason="Adjacent"/>
+
+  <disable_collisions link1="arm_base_link" link2="arm_l_link1" reason="Adjacent"/>
+  <disable_collisions link1="arm_l_link1" link2="arm_l_link2" reason="Adjacent"/>
+  <disable_collisions link1="arm_l_link2" link2="arm_l_link3" reason="Adjacent"/>
+  <disable_collisions link1="arm_l_link3" link2="arm_l_link4" reason="Adjacent"/>
+  <disable_collisions link1="arm_l_link4" link2="arm_l_link5" reason="Adjacent"/>
+  <disable_collisions link1="arm_l_link5" link2="arm_l_link6" reason="Adjacent"/>
+  <disable_collisions link1="arm_l_link6" link2="arm_l_link7" reason="Adjacent"/>
+  <disable_collisions link1="arm_l_link7" link2="camera_l_link" reason="FixedSubassembly"/>
+  <disable_collisions link1="arm_l_link7" link2="gripper_l_rh_p12_rn_base" reason="Adjacent"/>
+  <disable_collisions link1="camera_l_link" link2="gripper_l_rh_p12_rn_base" reason="FixedSubassembly"/>
+  <disable_collisions link1="gripper_l_rh_p12_rn_base" link2="gripper_l_rh_p12_rn_r1" reason="Adjacent"/>
+  <disable_collisions link1="gripper_l_rh_p12_rn_r1" link2="gripper_l_rh_p12_rn_r2" reason="Adjacent"/>
+  <disable_collisions link1="gripper_l_rh_p12_rn_base" link2="gripper_l_rh_p12_rn_l1" reason="Adjacent"/>
+  <disable_collisions link1="gripper_l_rh_p12_rn_l1" link2="gripper_l_rh_p12_rn_l2" reason="Adjacent"/>
+
+  <disable_collisions link1="arm_base_link" link2="arm_r_link1" reason="Adjacent"/>
+  <disable_collisions link1="arm_r_link1" link2="arm_r_link2" reason="Adjacent"/>
+  <disable_collisions link1="arm_r_link2" link2="arm_r_link3" reason="Adjacent"/>
+  <disable_collisions link1="arm_r_link3" link2="arm_r_link4" reason="Adjacent"/>
+  <disable_collisions link1="arm_r_link4" link2="arm_r_link5" reason="Adjacent"/>
+  <disable_collisions link1="arm_r_link5" link2="arm_r_link6" reason="Adjacent"/>
+  <disable_collisions link1="arm_r_link6" link2="arm_r_link7" reason="Adjacent"/>
+  <disable_collisions link1="arm_r_link7" link2="camera_r_link" reason="FixedSubassembly"/>
+  <disable_collisions link1="arm_r_link7" link2="gripper_r_rh_p12_rn_base" reason="Adjacent"/>
+  <disable_collisions link1="camera_r_link" link2="gripper_r_rh_p12_rn_base" reason="FixedSubassembly"/>
+  <disable_collisions link1="gripper_r_rh_p12_rn_base" link2="gripper_r_rh_p12_rn_r1" reason="Adjacent"/>
+  <disable_collisions link1="gripper_r_rh_p12_rn_r1" link2="gripper_r_rh_p12_rn_r2" reason="Adjacent"/>
+  <disable_collisions link1="gripper_r_rh_p12_rn_base" link2="gripper_r_rh_p12_rn_l1" reason="Adjacent"/>
+  <disable_collisions link1="gripper_r_rh_p12_rn_l1" link2="gripper_r_rh_p12_rn_l2" reason="Adjacent"/>
+
+  <disable_collisions link1="base_link" link2="left_wheel_steer_link" reason="Adjacent"/>
+  <disable_collisions link1="left_wheel_steer_link" link2="left_wheel_drive_link" reason="Adjacent"/>
+  <disable_collisions link1="base_link" link2="right_wheel_steer_link" reason="Adjacent"/>
+  <disable_collisions link1="right_wheel_steer_link" link2="right_wheel_drive_link" reason="Adjacent"/>
+  <disable_collisions link1="base_link" link2="rear_wheel_steer_link" reason="Adjacent"/>
+  <disable_collisions link1="rear_wheel_steer_link" link2="rear_wheel_drive_link" reason="Adjacent"/>
+</robot>

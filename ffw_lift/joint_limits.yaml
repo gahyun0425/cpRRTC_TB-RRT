@@ -1,0 +1,51 @@
+joint_limits:
+  joint_names:
+    - arm_l_joint1
+    - arm_l_joint2
+    - arm_l_joint3
+    - arm_l_joint4
+    - arm_l_joint5
+    - arm_l_joint6
+    - arm_l_joint7
+    - lift_joint
+    - arm_r_joint1
+    - arm_r_joint2
+    - arm_r_joint3
+    - arm_r_joint4
+    - arm_r_joint5
+    - arm_r_joint6
+    - arm_r_joint7
+
+  lower:
+    - -3.14
+    - 0.0
+    - -3.14
+    - -2.9361
+    - -3.14
+    - -1.57
+    - -1.8201
+    - -0.5
+    - -3.14
+    - -3.14
+    - -3.14
+    - -2.9361
+    - -3.14
+    - -1.57
+    - -1.5804
+
+  upper:
+    - 3.14
+    - 3.14
+    - 3.14
+    - 1.0786
+    - 3.14
+    - 1.57
+    - 1.5804
+    - 0.0
+    - 3.14
+    - 0.0
+    - 3.14
+    - 1.0786
+    - 3.14
+    - 1.57
+    - 1.8201

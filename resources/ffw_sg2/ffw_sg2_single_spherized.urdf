@@ -1,0 +1,1049 @@
+<?xml version='1.0' encoding='utf-8'?>
+<robot name="ffw_sg2_single">
+  <link name="world" />
+  <joint name="world_fixed" type="fixed">
+    <parent link="world" />
+    <child link="base_link" />
+    <origin rpy="0 0 0" xyz="0.0 0 0.0" />
+  </joint>
+  <link name="base_link">
+    </link>
+  <link name="lift_link">
+    <collision name="sphere_000">
+      <origin rpy="0 0 0" xyz="-0.136 0 0.926" />
+      <geometry>
+        <sphere radius="0.07" />
+      </geometry>
+    </collision>
+    <collision name="sphere_001">
+      <origin rpy="0 0 0" xyz="-0.136 0 0.794" />
+      <geometry>
+        <sphere radius="0.07" />
+      </geometry>
+    </collision>
+    <collision name="sphere_002">
+      <origin rpy="0 0 0" xyz="-0.136 0 0.544" />
+      <geometry>
+        <sphere radius="0.07" />
+      </geometry>
+    </collision>
+    <collision name="sphere_003">
+      <origin rpy="0 0 0" xyz="-0.136 0 0.667" />
+      <geometry>
+        <sphere radius="0.07" />
+      </geometry>
+    </collision>
+    <collision name="sphere_004">
+      <origin rpy="0 0 0" xyz="-0.136 0 1.049" />
+      <geometry>
+        <sphere radius="0.07" />
+      </geometry>
+    </collision>
+    <collision name="sphere_005">
+      <origin rpy="0 0 0" xyz="-0.136 0 1.172" />
+      <geometry>
+        <sphere radius="0.07" />
+      </geometry>
+    </collision>
+    <collision name="sphere_006">
+      <origin rpy="0 0 0" xyz="-0.136 0 1.295" />
+      <geometry>
+        <sphere radius="0.07" />
+      </geometry>
+    </collision>
+    <collision name="sphere_007">
+      <origin rpy="0 0 0" xyz="-0.136 0 1.42" />
+      <geometry>
+        <sphere radius="0.07" />
+      </geometry>
+    </collision>
+    <collision name="sphere_008">
+      <origin rpy="0 0 0" xyz="-0.136 0 1.51" />
+      <geometry>
+        <sphere radius="0.07" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="lift_fixed_joint" type="fixed">
+    <parent link="base_link" />
+    <child link="lift_link" />
+    <origin rpy="0 0 0" xyz="0.0 0.0 0.0" />
+  </joint>
+  <material name="aluminum">
+    <color rgba="0.5 0.5 0.5 1" />
+  </material>
+  <material name="plastic">
+    <color rgba="0.1 0.1 0.1 1" />
+  </material>
+  <joint name="lift_joint" type="prismatic">
+    <parent link="base_link" />
+    <child link="arm_base_link" />
+    <origin rpy="0 0 0" xyz="-0.0199 0 1.4316" />
+    <axis xyz="0 0 1" />
+    <limit effort="1000" lower="-0.5" upper="0.0" velocity="4.8" />
+    <dynamics damping="0.1" />
+  </joint>
+  <link name="arm_base_link">
+    <collision name="sphere_009">
+      <origin rpy="0 0 0" xyz="0.009 -0.062 -0.026" />
+      <geometry>
+        <sphere radius="0.1" />
+      </geometry>
+    </collision>
+    <collision name="sphere_010">
+      <origin rpy="0 0 0" xyz="0 0.066 -0.027" />
+      <geometry>
+        <sphere radius="0.1" />
+      </geometry>
+    </collision>
+    <collision name="sphere_011">
+      <origin rpy="0 0 0" xyz="0.021 0.009 -0.023" />
+      <geometry>
+        <sphere radius="0.1" />
+      </geometry>
+    </collision>
+    <collision name="sphere_012">
+      <origin rpy="0 0 0" xyz="0 -0.045 -0.139" />
+      <geometry>
+        <sphere radius="0.1" />
+      </geometry>
+    </collision>
+    <collision name="sphere_013">
+      <origin rpy="0 0 0" xyz="0 0.042 -0.136" />
+      <geometry>
+        <sphere radius="0.1" />
+      </geometry>
+    </collision>
+    <collision name="sphere_014">
+      <origin rpy="0 0 0" xyz="0 0 -0.189" />
+      <geometry>
+        <sphere radius="0.1" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="head_joint1" type="fixed">
+    <parent link="arm_base_link" />
+    <child link="head_link1" />
+    <origin rpy="0 0 0" xyz="0.0494878 0 0.102123" />
+  </joint>
+  <link name="head_link1">
+    </link>
+  <joint name="head_joint2" type="fixed">
+    <parent link="head_link1" />
+    <child link="head_link2" />
+    <origin rpy="0 0 0" xyz="0.0365694 0 0.0563797" />
+  </joint>
+  <link name="head_link2">
+    <collision name="sphere_015">
+      <origin rpy="0 0 0" xyz="0.038 -0.058 -0.02" />
+      <geometry>
+        <sphere radius="0.04" />
+      </geometry>
+    </collision>
+    <collision name="sphere_016">
+      <origin rpy="0 0 0" xyz="0.026 0.069 -0.024" />
+      <geometry>
+        <sphere radius="0.04" />
+      </geometry>
+    </collision>
+    <collision name="sphere_017">
+      <origin rpy="0 0 0" xyz="0.044 0 -0.02" />
+      <geometry>
+        <sphere radius="0.04" />
+      </geometry>
+    </collision>
+    <collision name="sphere_018">
+      <origin rpy="0 0 0" xyz="0 -0.051 -0.018" />
+      <geometry>
+        <sphere radius="0.04" />
+      </geometry>
+    </collision>
+    <collision name="sphere_019">
+      <origin rpy="0 0 0" xyz="0 0.055 -0.013" />
+      <geometry>
+        <sphere radius="0.04" />
+      </geometry>
+    </collision>
+    <collision name="sphere_020">
+      <origin rpy="0 0 0" xyz="-0.076 0 -0.015" />
+      <geometry>
+        <sphere radius="0.04" />
+      </geometry>
+    </collision>
+    <collision name="sphere_021">
+      <origin rpy="0 0 0" xyz="-0.045 -0.048 -0.015" />
+      <geometry>
+        <sphere radius="0.04" />
+      </geometry>
+    </collision>
+    <collision name="sphere_022">
+      <origin rpy="0 0 0" xyz="-0.049 0.045 -0.014" />
+      <geometry>
+        <sphere radius="0.04" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="arm_l_joint1" type="fixed">
+    <parent link="arm_base_link" />
+    <child link="arm_l_link1" />
+    <origin rpy="0 0 0" xyz="0 0.1045 0" />
+  </joint>
+  <link name="arm_l_link1">
+    <collision name="sphere_023">
+      <origin rpy="0 0 0" xyz="-0.035 0.115 0.007" />
+      <geometry>
+        <sphere radius="0.03518" />
+      </geometry>
+    </collision>
+    <collision name="sphere_024">
+      <origin rpy="0 0 0" xyz="-0.032 0.126 -0.008" />
+      <geometry>
+        <sphere radius="0.03518" />
+      </geometry>
+    </collision>
+    <collision name="sphere_025">
+      <origin rpy="0 0 0" xyz="0.032 0.133 -0.002" />
+      <geometry>
+        <sphere radius="0.03518" />
+      </geometry>
+    </collision>
+    <collision name="sphere_026">
+      <origin rpy="0 0 0" xyz="0.011 0.098 0.001" />
+      <geometry>
+        <sphere radius="0.03443" />
+      </geometry>
+    </collision>
+    <collision name="sphere_027">
+      <origin rpy="0 0 0" xyz="-0.017 0.122 -0.013" />
+      <geometry>
+        <sphere radius="0.03443" />
+      </geometry>
+    </collision>
+    <collision name="sphere_028">
+      <origin rpy="0 0 0" xyz="-0.011 0.107 -0.02" />
+      <geometry>
+        <sphere radius="0.03443" />
+      </geometry>
+    </collision>
+    <collision name="sphere_029">
+      <origin rpy="0 0 0" xyz="0.043 0.127 0.013" />
+      <geometry>
+        <sphere radius="0.03443" />
+      </geometry>
+    </collision>
+    <collision name="sphere_030">
+      <origin rpy="0 0 0" xyz="-0.002 0.126 0.012" />
+      <geometry>
+        <sphere radius="0.03443" />
+      </geometry>
+    </collision>
+    <collision name="sphere_031">
+      <origin rpy="0 0 0" xyz="0.027 0.103 0.011" />
+      <geometry>
+        <sphere radius="0.03294" />
+      </geometry>
+    </collision>
+    <collision name="sphere_032">
+      <origin rpy="0 0 0" xyz="0.028 0.131 -0.011" />
+      <geometry>
+        <sphere radius="0.03219" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="arm_l_joint2" type="fixed">
+    <parent link="arm_l_link1" />
+    <child link="arm_l_link2" />
+    <origin rpy="0 0 0" xyz="0 0.123 0" />
+  </joint>
+  <link name="arm_l_link2">
+    <collision name="sphere_033">
+      <origin rpy="0 0 0" xyz="-0.007 0.005 -0.161" />
+      <geometry>
+        <sphere radius="0.03516" />
+      </geometry>
+    </collision>
+    <collision name="sphere_034">
+      <origin rpy="0 0 0" xyz="0.007 0.002 -0.093" />
+      <geometry>
+        <sphere radius="0.03516" />
+      </geometry>
+    </collision>
+    <collision name="sphere_035">
+      <origin rpy="0 0 0" xyz="0.003 0.007 -0.193" />
+      <geometry>
+        <sphere radius="0.03457" />
+      </geometry>
+    </collision>
+    <collision name="sphere_036">
+      <origin rpy="0 0 0" xyz="0.009 -0.001 -0.184" />
+      <geometry>
+        <sphere radius="0.03457" />
+      </geometry>
+    </collision>
+    <collision name="sphere_037">
+      <origin rpy="0 0 0" xyz="0.007 0.002 -0.155" />
+      <geometry>
+        <sphere radius="0.03516" />
+      </geometry>
+    </collision>
+    <collision name="sphere_038">
+      <origin rpy="0 0 0" xyz="-0.01 0 -0.136" />
+      <geometry>
+        <sphere radius="0.03516" />
+      </geometry>
+    </collision>
+    <collision name="sphere_039">
+      <origin rpy="0 0 0" xyz="-0.005 0.002 -0.195" />
+      <geometry>
+        <sphere radius="0.03457" />
+      </geometry>
+    </collision>
+    <collision name="sphere_040">
+      <origin rpy="0 0 0" xyz="0.002 0.004 -0.18" />
+      <geometry>
+        <sphere radius="0.03457" />
+      </geometry>
+    </collision>
+    <collision name="sphere_041">
+      <origin rpy="0 0 0" xyz="-0.004 0.001 -0.145" />
+      <geometry>
+        <sphere radius="0.03339" />
+      </geometry>
+    </collision>
+    <collision name="sphere_042">
+      <origin rpy="0 0 0" xyz="-0.011 -0.006 -0.174" />
+      <geometry>
+        <sphere radius="0.03457" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="arm_l_joint3" type="fixed">
+    <parent link="arm_l_link2" />
+    <child link="arm_l_link3" />
+    <origin rpy="0 0 0" xyz="0 0 -0.165" />
+  </joint>
+  <link name="arm_l_link3">
+    <collision name="sphere_043">
+      <origin rpy="0 0 0" xyz="0.034 -0.019 -0.127" />
+      <geometry>
+        <sphere radius="0.03383" />
+      </geometry>
+    </collision>
+    <collision name="sphere_044">
+      <origin rpy="0 0 0" xyz="0.023 0.001 -0.125" />
+      <geometry>
+        <sphere radius="0.03383" />
+      </geometry>
+    </collision>
+    <collision name="sphere_045">
+      <origin rpy="0 0 0" xyz="0.032 0.018 -0.135" />
+      <geometry>
+        <sphere radius="0.03383" />
+      </geometry>
+    </collision>
+    <collision name="sphere_046">
+      <origin rpy="0 0 0" xyz="0.008 0.004 -0.1" />
+      <geometry>
+        <sphere radius="0.03383" />
+      </geometry>
+    </collision>
+    <collision name="sphere_047">
+      <origin rpy="0 0 0" xyz="0.041 0.004 -0.127" />
+      <geometry>
+        <sphere radius="0.03383" />
+      </geometry>
+    </collision>
+    <collision name="sphere_048">
+      <origin rpy="0 0 0" xyz="0.045 -0.007 -0.142" />
+      <geometry>
+        <sphere radius="0.03222" />
+      </geometry>
+    </collision>
+    <collision name="sphere_049">
+      <origin rpy="0 0 0" xyz="0.043 0.014 -0.137" />
+      <geometry>
+        <sphere radius="0.03383" />
+      </geometry>
+    </collision>
+    <collision name="sphere_050">
+      <origin rpy="0 0 0" xyz="0.045 0.04 -0.13" />
+      <geometry>
+        <sphere radius="0.03142" />
+      </geometry>
+    </collision>
+    <collision name="sphere_051">
+      <origin rpy="0 0 0" xyz="0.04 0.032 -0.129" />
+      <geometry>
+        <sphere radius="0.03303" />
+      </geometry>
+    </collision>
+    <collision name="sphere_052">
+      <origin rpy="0 0 0" xyz="0.027 -0.027 -0.133" />
+      <geometry>
+        <sphere radius="0.03303" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="arm_l_joint4" type="fixed">
+    <parent link="arm_l_link3" />
+    <child link="arm_l_link4" />
+    <origin rpy="0 0 0" xyz="0.041004 0 -0.135" />
+  </joint>
+  <link name="arm_l_link4">
+    <collision name="sphere_053">
+      <origin rpy="0 0 0" xyz="-0.051 -0.009 -0.09" />
+      <geometry>
+        <sphere radius="0.03345" />
+      </geometry>
+    </collision>
+    <collision name="sphere_054">
+      <origin rpy="0 0 0" xyz="-0.046 0.003 -0.14" />
+      <geometry>
+        <sphere radius="0.03345" />
+      </geometry>
+    </collision>
+    <collision name="sphere_055">
+      <origin rpy="0 0 0" xyz="-0.038 -0.003 -0.162" />
+      <geometry>
+        <sphere radius="0.03345" />
+      </geometry>
+    </collision>
+    <collision name="sphere_056">
+      <origin rpy="0 0 0" xyz="-0.043 -0.007 -0.142" />
+      <geometry>
+        <sphere radius="0.03345" />
+      </geometry>
+    </collision>
+    <collision name="sphere_057">
+      <origin rpy="0 0 0" xyz="-0.037 0.025 -0.083" />
+      <geometry>
+        <sphere radius="0.03345" />
+      </geometry>
+    </collision>
+    <collision name="sphere_058">
+      <origin rpy="0 0 0" xyz="-0.036 0 -0.162" />
+      <geometry>
+        <sphere radius="0.03345" />
+      </geometry>
+    </collision>
+    <collision name="sphere_059">
+      <origin rpy="0 0 0" xyz="-0.039 0 -0.167" />
+      <geometry>
+        <sphere radius="0.03232" />
+      </geometry>
+    </collision>
+    <collision name="sphere_060">
+      <origin rpy="0 0 0" xyz="-0.042 -0.006 -0.167" />
+      <geometry>
+        <sphere radius="0.03232" />
+      </geometry>
+    </collision>
+    <collision name="sphere_061">
+      <origin rpy="0 0 0" xyz="-0.04 -0.005 -0.138" />
+      <geometry>
+        <sphere radius="0.03345" />
+      </geometry>
+    </collision>
+    <collision name="sphere_062">
+      <origin rpy="0 0 0" xyz="-0.042 0.001 -0.129" />
+      <geometry>
+        <sphere radius="0.03119" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="arm_l_joint5" type="fixed">
+    <parent link="arm_l_link4" />
+    <child link="arm_l_link5" />
+    <origin rpy="0 0 0" xyz="-0.041004 0 -0.1489" />
+  </joint>
+  <link name="arm_l_link5">
+    <collision name="sphere_063">
+      <origin rpy="0 0 0" xyz="0.004 -0.02 -0.102" />
+      <geometry>
+        <sphere radius="0.03351" />
+      </geometry>
+    </collision>
+    <collision name="sphere_064">
+      <origin rpy="0 0 0" xyz="-0.011 0.02 -0.112" />
+      <geometry>
+        <sphere radius="0.03351" />
+      </geometry>
+    </collision>
+    <collision name="sphere_065">
+      <origin rpy="0 0 0" xyz="0.003 0.03 -0.1" />
+      <geometry>
+        <sphere radius="0.03351" />
+      </geometry>
+    </collision>
+    <collision name="sphere_066">
+      <origin rpy="0 0 0" xyz="-0.003 0.037 -0.098" />
+      <geometry>
+        <sphere radius="0.03351" />
+      </geometry>
+    </collision>
+    <collision name="sphere_067">
+      <origin rpy="0 0 0" xyz="-0.013 0.012 -0.107" />
+      <geometry>
+        <sphere radius="0.03351" />
+      </geometry>
+    </collision>
+    <collision name="sphere_068">
+      <origin rpy="0 0 0" xyz="0.003 0.027 -0.106" />
+      <geometry>
+        <sphere radius="0.03285" />
+      </geometry>
+    </collision>
+    <collision name="sphere_069">
+      <origin rpy="0 0 0" xyz="0.006 -0.019 -0.094" />
+      <geometry>
+        <sphere radius="0.03351" />
+      </geometry>
+    </collision>
+    <collision name="sphere_070">
+      <origin rpy="0 0 0" xyz="0.006 0.016 -0.108" />
+      <geometry>
+        <sphere radius="0.03285" />
+      </geometry>
+    </collision>
+    <collision name="sphere_071">
+      <origin rpy="0 0 0" xyz="0 0.002 -0.082" />
+      <geometry>
+        <sphere radius="0.03219" />
+      </geometry>
+    </collision>
+    <collision name="sphere_072">
+      <origin rpy="0 0 0" xyz="-0.01 0.002 -0.091" />
+      <geometry>
+        <sphere radius="0.03351" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="arm_l_joint6" type="fixed">
+    <parent link="arm_l_link5" />
+    <child link="arm_l_link6" />
+    <origin rpy="0 0 0" xyz="0 0 -0.1041" />
+  </joint>
+  <link name="arm_l_link6">
+    <collision name="sphere_073">
+      <origin rpy="0 0 0" xyz="0.036 0 -0.09" />
+      <geometry>
+        <sphere radius="0.02" />
+      </geometry>
+    </collision>
+    <collision name="sphere_074">
+      <origin rpy="0 0 0" xyz="0.005 0 -0.089" />
+      <geometry>
+        <sphere radius="0.02" />
+      </geometry>
+    </collision>
+    <collision name="sphere_075">
+      <origin rpy="0 0 0" xyz="-0.021 0 -0.09" />
+      <geometry>
+        <sphere radius="0.02" />
+      </geometry>
+    </collision>
+    <collision name="sphere_076">
+      <origin rpy="0 0 0" xyz="0 0 -0.068" />
+      <geometry>
+        <sphere radius="0.02" />
+      </geometry>
+    </collision>
+    <collision name="sphere_077">
+      <origin rpy="0 0 0" xyz="0 0.047 -0.048" />
+      <geometry>
+        <sphere radius="0.02" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="arm_l_joint7" type="fixed">
+    <parent link="arm_l_link6" />
+    <child link="arm_l_link7" />
+    <origin rpy="0 0 0" xyz="0 0 -0.0885" />
+  </joint>
+  <link name="arm_l_link7">
+    <collision name="sphere_078">
+      <origin rpy="0 0 0" xyz="0.044 0 -0.043" />
+      <geometry>
+        <sphere radius="0.02" />
+      </geometry>
+    </collision>
+    <collision name="sphere_079">
+      <origin rpy="0 0 0" xyz="0.026 0 -0.064" />
+      <geometry>
+        <sphere radius="0.02" />
+      </geometry>
+    </collision>
+    <collision name="sphere_080">
+      <origin rpy="0 0 0" xyz="-0.004 0 -0.064" />
+      <geometry>
+        <sphere radius="0.02" />
+      </geometry>
+    </collision>
+    <collision name="sphere_081">
+      <origin rpy="0 0 0" xyz="-0.026 0 -0.054" />
+      <geometry>
+        <sphere radius="0.02" />
+      </geometry>
+    </collision>
+    <collision name="sphere_082">
+      <origin rpy="0 0 0" xyz="0.068 0 -0.054" />
+      <geometry>
+        <sphere radius="0.02" />
+      </geometry>
+    </collision>
+    <collision name="sphere_083">
+      <origin rpy="0 0 0" xyz="0.101 0 -0.064" />
+      <geometry>
+        <sphere radius="0.02" />
+      </geometry>
+    </collision>
+    <collision name="sphere_084">
+      <origin rpy="0 0 0" xyz="0.119 0 -0.065" />
+      <geometry>
+        <sphere radius="0.02" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="camera_l_joint" type="fixed">
+    <origin rpy="-1.57079632679 1.66678943569 0" xyz="0.108236 -0.021 -0.062552" />
+    <parent link="arm_l_link7" />
+    <child link="camera_l_bottom_screw_frame" />
+  </joint>
+  <link name="camera_l_bottom_screw_frame" />
+  <joint name="camera_l_link_joint" type="fixed">
+    <origin rpy="0 0 0" xyz="0.01085 0.009 0.021" />
+    <parent link="camera_l_bottom_screw_frame" />
+    <child link="camera_l_link" />
+  </joint>
+  <link name="camera_l_link">
+    </link>
+  <joint name="arm_r_joint1" type="revolute">
+    <parent link="arm_base_link" />
+    <child link="arm_r_link1" />
+    <origin rpy="0 0 0" xyz="0 -0.1045 0" />
+    <axis xyz="0 1 0" />
+    <limit effort="1000" lower="-3.14" upper="3.14" velocity="4.8" />
+    <dynamics damping="0.1" />
+  </joint>
+  <link name="arm_r_link1">
+    <collision name="sphere_085">
+      <origin rpy="0 0 0" xyz="0 -0.068 -0.002" />
+      <geometry>
+        <sphere radius="0.04" />
+      </geometry>
+    </collision>
+    <collision name="sphere_086">
+      <origin rpy="0 0 0" xyz="-0.022 -0.12 -0.002" />
+      <geometry>
+        <sphere radius="0.04" />
+      </geometry>
+    </collision>
+    <collision name="sphere_087">
+      <origin rpy="0 0 0" xyz="0.036 -0.133 0" />
+      <geometry>
+        <sphere radius="0.04" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="arm_r_joint2" type="revolute">
+    <parent link="arm_r_link1" />
+    <child link="arm_r_link2" />
+    <origin rpy="0 0 0" xyz="0 -0.123 0" />
+    <axis xyz="1 0 0" />
+    <limit effort="1000" lower="-3.14" upper="0" velocity="4.8" />
+    <dynamics damping="0.1" />
+  </joint>
+  <link name="arm_r_link2">
+    <collision name="sphere_088">
+      <origin rpy="0 0 0" xyz="0 0 -0.091" />
+      <geometry>
+        <sphere radius="0.04" />
+      </geometry>
+    </collision>
+    <collision name="sphere_089">
+      <origin rpy="0 0 0" xyz="0.001 0 -0.152" />
+      <geometry>
+        <sphere radius="0.04" />
+      </geometry>
+    </collision>
+    <collision name="sphere_090">
+      <origin rpy="0 0 0" xyz="0 0 -0.192" />
+      <geometry>
+        <sphere radius="0.04" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="arm_r_joint3" type="revolute">
+    <parent link="arm_r_link2" />
+    <child link="arm_r_link3" />
+    <origin rpy="0 0 0" xyz="0 0 -0.165" />
+    <axis xyz="0 0 1" />
+    <limit effort="1000" lower="-3.14" upper="3.14" velocity="4.8" />
+    <dynamics damping="0.1" />
+  </joint>
+  <link name="arm_r_link3">
+    <collision name="sphere_091">
+      <origin rpy="0 0 0" xyz="0.007 0 -0.098" />
+      <geometry>
+        <sphere radius="0.04" />
+      </geometry>
+    </collision>
+    <collision name="sphere_092">
+      <origin rpy="0 0 0" xyz="0.042 -0.027 -0.134" />
+      <geometry>
+        <sphere radius="0.04" />
+      </geometry>
+    </collision>
+    <collision name="sphere_093">
+      <origin rpy="0 0 0" xyz="0.044 0.018 -0.134" />
+      <geometry>
+        <sphere radius="0.04" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="arm_r_joint4" type="revolute">
+    <parent link="arm_r_link3" />
+    <child link="arm_r_link4" />
+    <origin rpy="0 0 0" xyz="0.041004 0 -0.135" />
+    <axis xyz="0 1 0" />
+    <limit effort="1000" lower="-2.9361" upper="1.0786" velocity="4.8" />
+    <dynamics damping="0.1" />
+  </joint>
+  <link name="arm_r_link4">
+    <collision name="sphere_094">
+      <origin rpy="0 0 0" xyz="-0.041 0 -0.095" />
+      <geometry>
+        <sphere radius="0.04" />
+      </geometry>
+    </collision>
+    <collision name="sphere_095">
+      <origin rpy="0 0 0" xyz="-0.041 0 -0.167" />
+      <geometry>
+        <sphere radius="0.04" />
+      </geometry>
+    </collision>
+    <collision name="sphere_096">
+      <origin rpy="0 0 0" xyz="-0.041 0 -0.131" />
+      <geometry>
+        <sphere radius="0.04" />
+      </geometry>
+    </collision>
+    <collision name="sphere_097">
+      <origin rpy="0 0 0" xyz="-0.04 -0.05 -0.064" />
+      <geometry>
+        <sphere radius="0.02" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="arm_r_joint5" type="revolute">
+    <parent link="arm_r_link4" />
+    <child link="arm_r_link5" />
+    <origin rpy="0 0 0" xyz="-0.041004 0 -0.1489" />
+    <axis xyz="0 0 1" />
+    <limit effort="1000" lower="-3.14" upper="3.14" velocity="4.8" />
+    <dynamics damping="0.1" />
+  </joint>
+  <link name="arm_r_link5">
+    <collision name="sphere_098">
+      <origin rpy="0 0 0" xyz="0 0.015 -0.102" />
+      <geometry>
+        <sphere radius="0.04" />
+      </geometry>
+    </collision>
+    <collision name="sphere_099">
+      <origin rpy="0 0 0" xyz="0 -0.039 -0.103" />
+      <geometry>
+        <sphere radius="0.04" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="arm_r_joint6" type="revolute">
+    <parent link="arm_r_link5" />
+    <child link="arm_r_link6" />
+    <origin rpy="0 0 0" xyz="0 0 -0.1041" />
+    <axis xyz="0 1 0" />
+    <limit effort="1000" lower="-1.57" upper="1.57" velocity="4.8" />
+    <dynamics damping="0.1" />
+  </joint>
+  <link name="arm_r_link6">
+    <collision name="sphere_100">
+      <origin rpy="0 0 0" xyz="0 -0.051 -0.049" />
+      <geometry>
+        <sphere radius="0.02" />
+      </geometry>
+    </collision>
+    <collision name="sphere_101">
+      <origin rpy="0 0 0" xyz="-0.022 0 -0.09" />
+      <geometry>
+        <sphere radius="0.02" />
+      </geometry>
+    </collision>
+    <collision name="sphere_102">
+      <origin rpy="0 0 0" xyz="-0.011 0 -0.09" />
+      <geometry>
+        <sphere radius="0.02" />
+      </geometry>
+    </collision>
+    <collision name="sphere_103">
+      <origin rpy="0 0 0" xyz="0.014 0 -0.092" />
+      <geometry>
+        <sphere radius="0.02" />
+      </geometry>
+    </collision>
+    <collision name="sphere_104">
+      <origin rpy="0 0 0" xyz="0.038 0 -0.088" />
+      <geometry>
+        <sphere radius="0.02" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="arm_r_joint7" type="revolute">
+    <parent link="arm_r_link6" />
+    <child link="arm_r_link7" />
+    <origin rpy="0 0 0" xyz="0 0 -0.0885" />
+    <axis xyz="1 0 0" />
+    <limit effort="1000" lower="-1.5804" upper="1.8201" velocity="4.8" />
+    <dynamics damping="0.1" />
+  </joint>
+  <link name="arm_r_link7">
+    <collision name="sphere_105">
+      <origin rpy="0 0 0" xyz="-0.034 0 -0.05" />
+      <geometry>
+        <sphere radius="0.02" />
+      </geometry>
+    </collision>
+    <collision name="sphere_106">
+      <origin rpy="0 0 0" xyz="-0.013 0 -0.064" />
+      <geometry>
+        <sphere radius="0.02" />
+      </geometry>
+    </collision>
+    <collision name="sphere_107">
+      <origin rpy="0 0 0" xyz="0.021 0 -0.066" />
+      <geometry>
+        <sphere radius="0.02" />
+      </geometry>
+    </collision>
+    <collision name="sphere_108">
+      <origin rpy="0 0 0" xyz="0.047 0 -0.054" />
+      <geometry>
+        <sphere radius="0.02" />
+      </geometry>
+    </collision>
+    <collision name="sphere_109">
+      <origin rpy="0 0 0" xyz="0.078 0 -0.057" />
+      <geometry>
+        <sphere radius="0.02" />
+      </geometry>
+    </collision>
+    <collision name="sphere_110">
+      <origin rpy="0 0 0" xyz="0.105 0 -0.062" />
+      <geometry>
+        <sphere radius="0.02" />
+      </geometry>
+    </collision>
+    <collision name="sphere_111">
+      <origin rpy="0 0 0" xyz="0.119 0 -0.065" />
+      <geometry>
+        <sphere radius="0.02" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="camera_r_joint" type="fixed">
+    <origin rpy="-1.57079632679 1.66678943569 0" xyz="0.108236 -0.021 -0.062552" />
+    <parent link="arm_r_link7" />
+    <child link="camera_r_bottom_screw_frame" />
+  </joint>
+  <link name="camera_r_bottom_screw_frame" />
+  <joint name="camera_r_link_joint" type="fixed">
+    <origin rpy="0 0 0" xyz="0.01085 0.009 0.021" />
+    <parent link="camera_r_bottom_screw_frame" />
+    <child link="camera_r_link" />
+  </joint>
+  <link name="camera_r_link">
+    </link>
+  <joint name="gripper_l_joint" type="fixed">
+    <origin rpy="0 3.14159265359 3.14159265359" xyz="0 0 -0.078" />
+    <parent link="arm_l_link7" />
+    <child link="gripper_l_rh_p12_rn_base" />
+  </joint>
+  <link name="gripper_l_rh_p12_rn_base">
+    <collision name="sphere_112">
+      <origin rpy="0 0 0" xyz="0 0.02 0.034" />
+      <geometry>
+        <sphere radius="0.02" />
+      </geometry>
+    </collision>
+    <collision name="sphere_113">
+      <origin rpy="0 0 0" xyz="0 -0.022 0.035" />
+      <geometry>
+        <sphere radius="0.02" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="gripper_l_joint1" type="fixed">
+    <parent link="gripper_l_rh_p12_rn_base" />
+    <child link="gripper_l_rh_p12_rn_r1" />
+    <origin rpy="0 0 0" xyz="0.0 0.008 0.048" />
+  </joint>
+  <link name="gripper_l_rh_p12_rn_r1">
+    <collision name="sphere_114">
+      <origin rpy="0 0 0" xyz="0 0.037 0.007" />
+      <geometry>
+        <sphere radius="0.02" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="gripper_l_joint2" type="fixed">
+    <parent link="gripper_l_rh_p12_rn_r1" />
+    <child link="gripper_l_rh_p12_rn_r2" />
+    <origin rpy="0 0 0" xyz="0.0 0.0493634 0.0285" />
+  </joint>
+  <link name="gripper_l_rh_p12_rn_r2">
+    <collision name="sphere_115">
+      <origin rpy="0 0 0" xyz="0 0.003 0.033" />
+      <geometry>
+        <sphere radius="0.02" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="gripper_l_joint3" type="fixed">
+    <parent link="gripper_l_rh_p12_rn_base" />
+    <child link="gripper_l_rh_p12_rn_l1" />
+    <origin rpy="0 0 0" xyz="0.0 -0.008 0.048" />
+  </joint>
+  <link name="gripper_l_rh_p12_rn_l1">
+    <collision name="sphere_116">
+      <origin rpy="0 0 0" xyz="0 -0.036 0.004" />
+      <geometry>
+        <sphere radius="0.02" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="gripper_l_joint4" type="fixed">
+    <parent link="gripper_l_rh_p12_rn_l1" />
+    <child link="gripper_l_rh_p12_rn_l2" />
+    <origin rpy="0 0 0" xyz="0.0 -0.0493634 0.0285" />
+  </joint>
+  <link name="gripper_l_rh_p12_rn_l2">
+    <collision name="sphere_117">
+      <origin rpy="0 0 0" xyz="0 -0.004 0.032" />
+      <geometry>
+        <sphere radius="0.02" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="gripper_r_joint" type="fixed">
+    <origin rpy="0 3.14159265359 3.14159265359" xyz="0 0 -0.078" />
+    <parent link="arm_r_link7" />
+    <child link="gripper_r_rh_p12_rn_base" />
+  </joint>
+  <link name="gripper_r_rh_p12_rn_base">
+    <collision name="sphere_118">
+      <origin rpy="0 0 0" xyz="0 -0.023 0.038" />
+      <geometry>
+        <sphere radius="0.02" />
+      </geometry>
+    </collision>
+    <collision name="sphere_119">
+      <origin rpy="0 0 0" xyz="0 0.019 0.036" />
+      <geometry>
+        <sphere radius="0.02" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="gripper_r_joint1" type="fixed">
+    <parent link="gripper_r_rh_p12_rn_base" />
+    <child link="gripper_r_rh_p12_rn_r1" />
+    <origin rpy="0 0 0" xyz="0.0 0.008 0.048" />
+  </joint>
+  <link name="gripper_r_rh_p12_rn_r1">
+    <collision name="sphere_120">
+      <origin rpy="0 0 0" xyz="0 0.033 0" />
+      <geometry>
+        <sphere radius="0.02" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="gripper_r_joint2" type="fixed">
+    <parent link="gripper_r_rh_p12_rn_r1" />
+    <child link="gripper_r_rh_p12_rn_r2" />
+    <origin rpy="0 0 0" xyz="0.0 0.0493634 0.0285" />
+  </joint>
+  <link name="gripper_r_rh_p12_rn_r2">
+    <collision name="sphere_121">
+      <origin rpy="0 0 0" xyz="0 0.007 0.029" />
+      <geometry>
+        <sphere radius="0.02" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="gripper_r_joint3" type="fixed">
+    <parent link="gripper_r_rh_p12_rn_base" />
+    <child link="gripper_r_rh_p12_rn_l1" />
+    <origin rpy="0 0 0" xyz="0.0 -0.008 0.048" />
+  </joint>
+  <link name="gripper_r_rh_p12_rn_l1">
+    <collision name="sphere_122">
+      <origin rpy="0 0 0" xyz="0 -0.034 0.001" />
+      <geometry>
+        <sphere radius="0.02" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="gripper_r_joint4" type="fixed">
+    <parent link="gripper_r_rh_p12_rn_l1" />
+    <child link="gripper_r_rh_p12_rn_l2" />
+    <origin rpy="0 0 0" xyz="0.0 -0.0493634 0.0285" />
+  </joint>
+  <link name="gripper_r_rh_p12_rn_l2">
+    <collision name="sphere_123">
+      <origin rpy="0 0 0" xyz="0 0.003 0.031" />
+      <geometry>
+        <sphere radius="0.02" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="left_wheel_steer" type="fixed">
+    <parent link="base_link" />
+    <child link="left_wheel_steer_link" />
+    <origin rpy="0 0 0" xyz="0.1371 0.2554 0.27555" />
+  </joint>
+  <link name="left_wheel_steer_link">
+    </link>
+  <joint name="left_wheel_drive" type="fixed">
+    <parent link="left_wheel_steer_link" />
+    <child link="left_wheel_drive_link" />
+    <origin rpy="0 0 0" xyz="0 0 -0.18905" />
+  </joint>
+  <link name="left_wheel_drive_link">
+    </link>
+  <joint name="right_wheel_steer" type="fixed">
+    <parent link="base_link" />
+    <child link="right_wheel_steer_link" />
+    <origin rpy="0 0 0" xyz="0.1371 -0.2554 0.27555" />
+  </joint>
+  <link name="right_wheel_steer_link">
+    </link>
+  <joint name="right_wheel_drive" type="fixed">
+    <parent link="right_wheel_steer_link" />
+    <child link="right_wheel_drive_link" />
+    <origin rpy="0 0 0" xyz="0 0 -0.18905" />
+  </joint>
+  <link name="right_wheel_drive_link">
+    </link>
+  <joint name="rear_wheel_steer" type="fixed">
+    <parent link="base_link" />
+    <child link="rear_wheel_steer_link" />
+    <origin rpy="0 0 0" xyz="-0.2899 0 0.27555" />
+  </joint>
+  <link name="rear_wheel_steer_link">
+    </link>
+  <joint name="rear_wheel_drive" type="fixed">
+    <parent link="rear_wheel_steer_link" />
+    <child link="rear_wheel_drive_link" />
+    <origin rpy="0 0 0" xyz="0 0 -0.18905" />
+  </joint>
+  <link name="rear_wheel_drive_link">
+    </link>
+</robot>

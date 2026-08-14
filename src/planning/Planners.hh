@@ -23,6 +23,14 @@ struct PlannerResult {
     std::size_t wall_ns = 0; // wall time of the solve function
     std::size_t kernel_ns = 0; // just kernel runtime
     std::size_t copy_ns = 0; // time to copy start/goals to gpu and copy path and path size back
+    std::array<std::vector<typename Robot::Configuration>, 2> tree_nodes;
+    std::array<std::vector<int>, 2> tree_parents;
+    std::array<std::vector<int>, 2> tree_node_ready;
+    int connection_tree_id = -1;
+    int connection_node_idx = -1;
+    int connection_other_tree_id = -1;
+    int connection_other_node_idx = -1;
+    std::vector<std::array<int, 2>> solution_trace;
 };
 
 template <typename Robot>

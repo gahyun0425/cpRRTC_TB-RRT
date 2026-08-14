@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "robot": "ffw_sg2_single",
+  "active_dof": 8,
+  "active_joint_order": [
+    "lift_joint",
+    "arm_r_joint1",
+    "arm_r_joint2",
+    "arm_r_joint3",
+    "arm_r_joint4",
+    "arm_r_joint5",
+    "arm_r_joint6",
+    "arm_r_joint7"
+  ],
+  "fixed_left_arm_joints": [
+    "arm_l_joint1",
+    "arm_l_joint2",
+    "arm_l_joint3",
+    "arm_l_joint4",
+    "arm_l_joint5",
+    "arm_l_joint6",
+    "arm_l_joint7"
+  ],
+  "fixed_left_arm_configuration": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+  ],
+  "batch_size": 16,
+  "fine_model": {
+    "urdf": "ffw_sg2_single_spherized.urdf",
+    "urdf_sha256": "58df962e26b256cb4de235f704d620f214a503177ce7bf9416d18065ed509d1d",
+    "sphere_count": 124
+  },
+  "approximate_model": {
+    "urdf": "ffw_sg2_single_spherized_approx.urdf",
+    "urdf_sha256": "73f92fe3155a2a3f9171fdeb34d62ee0f9db64424bfbc8b82936db515c97c4af",
+    "sphere_count": 27,
+    "minimum_fine_sphere_containment_margin_m": 1.000000000001e-06
+  },
+  "generated_cricket_layout": {
+    "joint_count_including_universe": 9,
+    "joint_flag_stride": 9,
+    "transform_slots": 1
+  },
+  "memory_bytes": {
+    "fine_runtime_positions": 23808,
+    "approximate_runtime_positions": 5184,
+    "joint_flags": 576,
+    "transform_slots": 1024,
+    "model_dependent_shared_total": 30592
+  },
+  "sources": {
+    "planning_urdf": "ffw_sg2_single_planning.urdf",
+    "planning_urdf_sha256": "97e86c0a45603fe2cd3f42476a2be39b394a19f81322aa8fbec325c15f9ab21e",
+    "sphere_data": "ffw_sg2_fine_spheres.json",
+    "sphere_data_sha256": "6ef6c7e43ae4a50c4927e45180edaa95fdfab37a8ca8b61ffc265cb2c70ad500",
+    "problem_file": "ffw_sg2_problems.json",
+    "problem_file_sha256": "9bb3452fcc50936692de05a40e851cabb407358cb3e964774a5028da07b0d373"
+  }
+}
