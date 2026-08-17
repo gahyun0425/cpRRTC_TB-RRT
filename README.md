@@ -46,6 +46,29 @@ Repeat planning with `--run N` (`--runs N` is also accepted):
 ./build/single_mbm ffw_sg2 tray_lift 1 --run 100 --no-print-path
 ```
 
+### Optional AORRTC-style anytime optimization
+
+`single_mbm` keeps the original first-solution planner as the default. Enable
+the separate anytime path with `--aorrtc`:
+
+```bash
+./build/single_mbm ffw_sg2 tray_lift 1 --aorrtc --time 5
+```
+
+`--time` is the AORRTC tree-expansion budget in seconds and defaults to 5.
+It is accepted only together with `--aorrtc`. After the first solution, the
+start and goal trees are retained and expanded; a solution replaces the saved
+one only when its cost is lower. The output reports the initial cost, number of
+best-cost updates, and the first/best solution times. A single GPU expansion
+round is not interrupted midway, so the measured search time can exceed the
+requested budget by that final round.
+
+This is a tree-reuse variant of the attached AORRTC method: unlike the paper's
+restart-based procedure, it deliberately does not clear and restart the trees
+after a solution. Therefore, asymptotic-optimality claims that depend on the
+paper's exact restart procedure should not be transferred to this variant
+without a separate proof.
+
 After the runs finish, both benchmark executables print the average, minimum,
 maximum, and population standard deviation of end-to-end planner time as
 `time_sec_avg`, `time_sec_min`, `time_sec_max`, and `time_sec_std`. They also

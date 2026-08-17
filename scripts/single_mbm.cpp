@@ -19,6 +19,7 @@
 #include "src/collision/environment.hh"
 #include "src/collision/factory.hh"
 #include "src/planning/Planners.hh"
+#include "src/planning/AORRTC.hh"
 #include "src/planning/pRRTC_settings.hh"
 #include "scripts/planner_result_json.hh"
 
@@ -277,7 +278,7 @@ template <typename Robot>
 int run_planner(
     json &data,
     Environment<float> &env,
-    struct pRRTC_settings &settings,
+    AORRTC_settings &settings,
     bool visualize,
     bool print_path,
     const std::string &robot_name,
@@ -303,7 +304,14 @@ int run_planner(
         }
 
         const std::size_t warmup_ns = measure_planner_warmup_ns();
-        auto result = pRRTC::solve<Robot>(start, goals, env, settings);
+        AORRTCResult<Robot> result;
+        if (settings.aorrtc) {
+            result = AORRTC::solve<Robot>(start, goals, env, settings);
+        }
+        else {
+            static_cast<PlannerResult<Robot> &>(result) =
+                pRRTC::solve<Robot>(start, goals, env, settings);
+        }
         if (print_path) {
             for (auto& cfg : result.path) {
                 print_cfg<Robot>(cfg);
@@ -321,6 +329,17 @@ int run_planner(
         const double warmup_sec = static_cast<double>(warmup_ns) / 1.0e9;
         times_sec.push_back(elapsed_sec);
         std::cout << "cost: " << result.cost << "\n";
+        if (settings.aorrtc) {
+            std::cout << "aorrtc_initial_cost: " << result.initial_cost << "\n";
+            std::cout << "aorrtc_solution_updates: "
+                      << result.solution_updates << "\n";
+            std::cout << "aorrtc_initial_solution_sec: "
+                      << static_cast<double>(result.initial_solution_ns) / 1.0e9
+                      << "\n";
+            std::cout << "aorrtc_best_solution_sec: "
+                      << static_cast<double>(result.best_solution_ns) / 1.0e9
+                      << "\n";
+        }
         if (runs > 1) {
             std::cout << "warmup_s: " << warmup_sec << "\n";
             std::cout << "planning_s: " << elapsed_sec << "\n";
@@ -465,7 +484,10 @@ int main(int argc, char* argv[]) {
     bool rigid_orientation = false;
     bool projection_smoothness = true;
     bool print_path = true;
+    bool aorrtc = false;
+    bool time_option_provided = false;
     int runs = 1;
+    double time_limit_sec = 5.0;
     std::string save_json_path;
     TraceExportOptions trace_options;
 
@@ -473,6 +495,7 @@ int main(int argc, char* argv[]) {
         std::cout
             << "Usage: ./single_mbm <robot_name> <problem_name> <problem_idx> "
             << "[--visualize] [--save-json PATH] [--run N|--runs N] "
+            << "[--aorrtc] [--time SECONDS] "
             << "[--rigid-orientation] "
             << "[--no-waypoint-smoothing] "
             << "[--trace-mode auto|path|tree] "
@@ -492,9 +515,22 @@ int main(int argc, char* argv[]) {
                 visualize = true;
             } else if (argument == "--save-json" && index + 1 < argc) {
                 save_json_path = argv[++index];
-            } else if ((argument == "--run" || argument == "--runs")
-                       && index + 1 < argc) {
+            } else if ((argument == "--run" || argument == "--runs") && index + 1 < argc) {
                 runs = std::max(1, std::stoi(argv[++index]));
+            } else if (argument == "--aorrtc") {
+                aorrtc = true;
+            } else if (argument == "--time" && index + 1 < argc) {
+                const std::string value = argv[++index];
+                std::size_t consumed = 0;
+
+                time_limit_sec = std::stod(value, &consumed);
+                time_option_provided = true;
+
+                if (consumed != value.size() || !std::isfinite(time_limit_sec) || time_limit_sec <= 0.0) {
+                    throw std::invalid_argument(
+                        "--time must be a finite number greater than 0"
+                    );
+                }
             } else if (argument == "--trace-trees") {
                 trace_trees = true;
             } else if (argument == "--trace-mode" && index + 1 < argc) {
@@ -550,6 +586,9 @@ int main(int argc, char* argv[]) {
                 throw std::invalid_argument("unknown or incomplete option: " + argument);
             }
         }
+        if (time_option_provided && !aorrtc) {
+            throw std::invalid_argument("--time requires --aorrtc");
+        }
     } catch (const std::exception &error) {
         std::cerr << "single_mbm option error: " << error.what() << "\n";
         return 1;
@@ -598,11 +637,13 @@ int main(int argc, char* argv[]) {
         return -1;
     }
     auto env = problem_dict_to_env(data, name);
-    struct pRRTC_settings settings;
+    AORRTC_settings settings;
     settings.num_new_configs = 512; //usually:512
     settings.max_iters = 100000000;
+    settings.aorrtc = aorrtc;
+    settings.time_limit_sec = time_limit_sec;
     settings.granularity = 16;
-    settings.range = 0.15;
+    settings.range = 0.3;
     settings.lift_distance_weight = 1.0f;
     settings.rigid_orientation = rigid_orientation;
     settings.projection_smoothness = projection_smoothness;

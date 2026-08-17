@@ -58,7 +58,7 @@ target_compile_options(evaluate_mbm PRIVATE
 ### single_mbm
 add_executable(single_mbm
     scripts/single_mbm.cpp
-    src/planning/pRRTC.cu
+    src/planning/AORRTC.cu
 )
 
 target_include_directories(single_mbm

@@ -12,6 +12,7 @@
 #include <nlohmann/json.hpp>
 
 #include "src/collision/environment.hh"
+#include "src/planning/AORRTC.hh"
 #include "src/planning/Planners.hh"
 #include "src/planning/pRRTC_settings.hh"
 
@@ -236,7 +237,7 @@ json tree_trace_to_json(const PlannerResult<Robot> &result) {
 }
 
 inline json settings_to_json(const pRRTC_settings &settings) {
-    return {
+    json output = {
         {"max_samples", settings.max_samples},
         {"max_tangent_spaces", settings.max_tangent_spaces},
         {"max_iters", settings.max_iters},
@@ -252,6 +253,22 @@ inline json settings_to_json(const pRRTC_settings &settings) {
         {"dd_radius", settings.dd_radius},
         {"dd_min_radius", settings.dd_min_radius},
     };
+    return output;
+}
+
+inline json settings_to_json(const AORRTC_settings &settings) {
+    json output = settings_to_json(
+        static_cast<const pRRTC_settings &>(settings)
+    );
+    if (settings.aorrtc) {
+        output["aorrtc"] = true;
+        output["time_limit_sec"] = settings.time_limit_sec;
+        output["aorrtc_config_weight"] = settings.aorrtc_config_weight;
+        output["aorrtc_cost_weight"] = settings.aorrtc_cost_weight;
+        output["cost_improvement_epsilon"] =
+            settings.cost_improvement_epsilon;
+    }
+    return output;
 }
 
 inline json environment_summary_json(
@@ -266,8 +283,8 @@ inline json environment_summary_json(
 
 template <typename Robot>
 json result_to_json(
-    const PlannerResult<Robot> &result,
-    const pRRTC_settings &settings,
+    const AORRTCResult<Robot> &result,
+    const AORRTC_settings &settings,
     const ppln::collision::Environment<float> &environment,
     const typename Robot::Configuration &start,
     const std::vector<typename Robot::Configuration> &goals,
@@ -287,7 +304,7 @@ json result_to_json(
 
     json payload = {
         {"format", "pRRTC_result_v1"},
-        {"planner", "pRRTC"},
+        {"planner", settings.aorrtc ? "pRRTC-AORRTC" : "pRRTC"},
         {"robot", robot_name},
         {"problem_name", problem_name},
         {"problem_idx", problem_index},
@@ -312,6 +329,12 @@ json result_to_json(
         {"settings", settings_to_json(settings)},
         {"environment", environment_summary_json(environment)},
     };
+    if (settings.aorrtc) {
+        payload["initial_cost"] = result.initial_cost;
+        payload["initial_solution_ns"] = result.initial_solution_ns;
+        payload["best_solution_ns"] = result.best_solution_ns;
+        payload["solution_updates"] = result.solution_updates;
+    }
     if (!result.tree_nodes[0].empty() || !result.tree_nodes[1].empty()) {
         payload["tree_trace"] = tree_trace_to_json<Robot>(result);
     }

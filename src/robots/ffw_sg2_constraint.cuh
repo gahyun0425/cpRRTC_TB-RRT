@@ -1384,11 +1384,16 @@ namespace ppln::collision {
                             )
                             : 0.0f;
 
+                        const float inv_smooth_dist =
+                            smooth_dist > 1.0e-8f
+                                ? 1.0f / smooth_dist
+                                : 0.0f;
+
                         float combined_norm2 = 0.0f;
                         float combined[15];
                         for (int j = 0; j < 15; j++) {
                             const float grad_smooth =
-                                diff[j] * smooth_error;
+                                diff[j] * inv_smooth_dist * smooth_error;
                             combined[j] = alpha * (
                                 correction[j] +
                                 smoothness_weight * grad_smooth
