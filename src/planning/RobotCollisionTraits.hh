@@ -52,4 +52,13 @@ namespace ppln::robots {
         static constexpr int transform_slots = 1;
     };
 
+    template<>
+    struct CollisionTraits<G1> {
+        static constexpr int batch_size = G1::resolution;
+        static constexpr int fine_sphere_count = G1::n_spheres;
+        static constexpr int approximate_sphere_count = 1;
+        static constexpr int joint_flag_stride = 1;
+        static constexpr int transform_slots = 1;
+    };
+
 }

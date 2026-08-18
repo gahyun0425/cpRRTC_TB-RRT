@@ -198,6 +198,24 @@ def has_tree_trace(result: dict[str, Any]) -> bool:
     return isinstance(trace, dict) and isinstance(trace.get("trees"), list)
 
 
+def solution_history_rows(result: dict[str, Any]) -> list[dict[str, Any]]:
+    rows = result.get("solution_history")
+    if not isinstance(rows, list):
+        return []
+    output = [row for row in rows if isinstance(row, dict)]
+    output.sort(key=lambda row: int(row.get("update_index", 0)))
+    return output
+
+
+def solution_node_rows(row: dict[str, Any]) -> list[dict[str, Any]]:
+    raw_order = row.get("solution_order")
+    if not isinstance(raw_order, list):
+        return []
+    output = [item for item in raw_order if isinstance(item, dict)]
+    output.sort(key=lambda item: int(item.get("order", 0)))
+    return output
+
+
 def tree_depth(nodes_by_idx: dict[int, dict[str, Any]], idx: int) -> int:
     depth = 0
     current = idx
@@ -214,7 +232,7 @@ def tree_depth(nodes_by_idx: dict[int, dict[str, Any]], idx: int) -> int:
 
 def compact_tree_nodes(
     nodes_by_tree: dict[str, dict[int, dict[str, Any]]],
-    solution_order_by_id: dict[str, int],
+    protected_node_ids: set[str],
     max_tree_nodes: int | None,
 ) -> dict[str, dict[int, dict[str, Any]]]:
     if max_tree_nodes is None or max_tree_nodes <= 0:
@@ -225,7 +243,7 @@ def compact_tree_nodes(
         return nodes_by_tree
 
     selected_by_tree: dict[str, set[int]] = {tree: set() for tree in nodes_by_tree}
-    for node_id in solution_order_by_id:
+    for node_id in protected_node_ids:
         for tree_name, nodes in nodes_by_tree.items():
             prefix = f"n_{tree_name}_i"
             if node_id.startswith(prefix):
@@ -303,6 +321,29 @@ def tree_trace_graphml_text(
         frozenset((solution_ids[i], solution_ids[i + 1]))
         for i in range(max(0, len(solution_ids) - 1))
     }
+    history_paths: list[dict[str, Any]] = []
+    history_node_ids: set[str] = set()
+    for history_index, row in enumerate(solution_history_rows(result)):
+        ordered_nodes: list[tuple[str, str, int]] = []
+        for node in solution_node_rows(row):
+            tree_name = str(
+                node.get("tree")
+                or ("start" if int(node.get("tree_id", 0)) == 0 else "goal")
+            )
+            node_idx = int(node.get("idx"))
+            node_id = tree_node_id(tree_name, node_idx)
+            ordered_nodes.append((node_id, tree_name, node_idx))
+            history_node_ids.add(node_id)
+        if len(ordered_nodes) >= 2:
+            history_paths.append({
+                "update_index": int(row.get("update_index", history_index)),
+                "iteration": int(row.get("iteration", row.get("iter", 0))),
+                "cost": float(row.get("cost", 0.0)),
+                "final": bool(row.get("final", False)),
+                "nodes": ordered_nodes,
+            })
+    if history_paths and not any(path["final"] for path in history_paths):
+        history_paths[-1]["final"] = True
 
     root = ET.Element(tag("graphml"))
     add_graphml_keys(root, dimension)
@@ -323,7 +364,7 @@ def tree_trace_graphml_text(
         total_nodes += len(nodes)
     ready_nodes_by_tree = compact_tree_nodes(
         ready_nodes_by_tree,
-        solution_order_by_id,
+        set(solution_ids) | history_node_ids,
         max_tree_nodes,
     )
 
@@ -332,7 +373,17 @@ def tree_trace_graphml_text(
     data(graph, GRAPH_KEYS["dimension"], dimension)
     data(graph, GRAPH_KEYS["max_grow_step"], max_step)
     data(graph, GRAPH_KEYS["max_display_step"], max_step)
-    data(graph, GRAPH_KEYS["max_parallel_step"], max_step)
+    data(
+        graph,
+        GRAPH_KEYS["max_parallel_step"],
+        max(
+            max_step,
+            max(
+                (int(path["update_index"]) for path in history_paths),
+                default=0,
+            ),
+        ),
+    )
     data(graph, GRAPH_KEYS["joint_names"], json.dumps(joint_names))
     data(graph, GRAPH_KEYS["solution_order"], json.dumps(solution_ids))
     data(graph, GRAPH_KEYS["slot_steps_json"], "[]")
@@ -354,6 +405,9 @@ def tree_trace_graphml_text(
             )
             node_id = tree_node_id(tree_name, idx)
             order_index = solution_order_by_id.get(node_id, -1)
+            is_solution_node = (
+                node_id in history_node_ids or order_index >= 0
+            )
             elem = ET.SubElement(graph, tag("node"), {"id": node_id})
             node_values = {
                 "seq": seq,
@@ -364,7 +418,7 @@ def tree_trace_graphml_text(
                 "parent_id": parent_id,
                 "iter": idx,
                 "phase": "tree_growth",
-                "step_type": "connect" if order_index >= 0 else "extend",
+                "step_type": "connect" if is_solution_node else "extend",
                 "slot_idx": 0,
                 "escape_step": -1,
                 "ts_id": -1,
@@ -377,7 +431,7 @@ def tree_trace_graphml_text(
                 "parallel_step_finished_at_sec": 0.0,
                 "parallel_step_duration_sec": 0.0,
                 "depth": tree_depth(nodes, idx),
-                "solution": order_index >= 0,
+                "solution": is_solution_node,
                 "event_kind": "node_add",
                 "active": 1,
                 "advanced": 1 if parent_id else 0,
@@ -459,6 +513,47 @@ def tree_trace_graphml_text(
             }
             for key, value in edge_values.items():
                 data(elem, EDGE_KEYS[key], value)
+            edge_idx += 1
+
+    retained_node_ids = {
+        tree_node_id(tree_name, node_idx)
+        for tree_name, nodes in ready_nodes_by_tree.items()
+        for node_idx in nodes
+    }
+    for history_path in history_paths:
+        update_index = int(history_path["update_index"])
+        iteration = int(history_path["iteration"])
+        is_final = bool(history_path["final"])
+        ordered_nodes = history_path["nodes"]
+        for path_edge_index in range(len(ordered_nodes) - 1):
+            source, source_tree, source_idx = ordered_nodes[path_edge_index]
+            target, target_tree, target_idx = ordered_nodes[path_edge_index + 1]
+            if source not in retained_node_ids or target not in retained_node_ids:
+                continue
+            elem = ET.SubElement(
+                graph,
+                tag("edge"),
+                {
+                    "id": f"e_aorrtc_update_{update_index}_{path_edge_index}_{edge_idx}",
+                    "source": source,
+                    "target": target,
+                },
+            )
+            step = max(source_idx, target_idx)
+            edge_values = {
+                "kind": "solution_final" if is_final else "solution_update",
+                "tree": source_tree if source_tree == target_tree else "connection",
+                "batch_idx": update_index,
+                "iter": iteration,
+                "phase": "aorrtc_solution_update",
+                "grow_step": step,
+                "display_step": step,
+                "parallel_step": update_index,
+                "solution": True,
+            }
+            for key, value in edge_values.items():
+                data(elem, EDGE_KEYS[key], value)
+            edge_idx += 1
 
     ET.indent(root, space="  ")
     return ET.tostring(root, encoding="unicode", xml_declaration=True)
@@ -585,9 +680,14 @@ def generated_paths_graphml_text(
     *,
     max_paths: int | None = None,
 ) -> tuple[str, int, int]:
-    raw_paths = result.get("generated_paths")
+    raw_paths = result.get("solution_history")
     if not isinstance(raw_paths, list) or not raw_paths:
-        raise ValueError("result does not contain generated_paths; rerun with --aorrtc and --trace-mode paths")
+        raw_paths = result.get("generated_paths")
+    if not isinstance(raw_paths, list) or not raw_paths:
+        raise ValueError(
+            "result does not contain solution_history or generated_paths; "
+            "rerun AORRTC with tracing enabled"
+        )
 
     paths: list[tuple[dict[str, Any], list[list[float]]]] = []
     for row in raw_paths:
@@ -738,6 +838,191 @@ def generated_paths_graphml_text(
     return ET.tostring(root, encoding="unicode", xml_declaration=True), len(paths), node_seq
 
 
+def add_aorrtc_update_colors(html_path: Path) -> None:
+    html = html_path.read_text(encoding="utf-8")
+    if "aorrtcUpdateColor" in html:
+        return
+
+    draw_marker = "function draw() {"
+    stroke_marker = (
+        'ctx.strokeStyle = edge.kind === "connection" ? "#c084fc" '
+        ': edge.solution ? "#4ade80" :'
+    )
+    width_marker = (
+        'ctx.lineWidth = edge.solution ? 4.2 '
+        ': edge.kind === "connection" ? 3.6 : 1.15;'
+    )
+    if draw_marker not in html or stroke_marker not in html or width_marker not in html:
+        raise RuntimeError(
+            "PATACON HTML viewer is incompatible with AORRTC update coloring"
+        )
+
+    color_script = """
+function aorrtcUpdateColor(index) {
+  const safeIndex = Math.max(0, Number(index) || 0);
+  const hue = (safeIndex * 137.508) % 360;
+  return `hsla(${hue}, 85%, 62%, 0.82)`;
+}
+"""
+    html = html.replace(draw_marker, color_script + "\n" + draw_marker, 1)
+    html = html.replace(
+        stroke_marker,
+        'ctx.strokeStyle = edge.kind === "solution_final" ? "#22c55e" '
+        ': edge.kind === "solution_update" ? aorrtcUpdateColor(edge.batch_idx) '
+        ': edge.kind === "connection" ? "#c084fc" '
+        ': edge.solution ? "#4ade80" :',
+        1,
+    )
+    html = html.replace(
+        width_marker,
+        'ctx.lineWidth = edge.kind === "solution_final" ? 6.2 '
+        ': edge.kind === "solution_update" ? 3.0 '
+        ': edge.solution ? 4.2 '
+        ': edge.kind === "connection" ? 3.6 : 1.15;',
+        1,
+    )
+    html_path.write_text(html, encoding="utf-8")
+
+
+def add_invalid_configuration_guard(html_path: Path) -> None:
+    html = html_path.read_text(encoding="utf-8")
+    if "validPcaConfiguration" in html:
+        return
+
+    compute_marker = "function computePca(nodes) {"
+    samples_marker = "const samples = nodes.filter(n => n.q && n.q.length);"
+    projection_marker = (
+        "  for (const n of nodes) {\n"
+        "    const centered = n.q.map((x,i) => (x || 0) - (mean[i] || 0));"
+    )
+    visible_marker = "function visibleNode(n) {"
+    if any(
+        marker not in html
+        for marker in (
+            compute_marker,
+            samples_marker,
+            projection_marker,
+            visible_marker,
+        )
+    ):
+        raise RuntimeError(
+            "PATACON HTML viewer is incompatible with PCA configuration validation"
+        )
+
+    guard_script = """
+function validPcaConfiguration(n) {
+  return Array.isArray(n.q) && n.q.length > 0 && n.q.every(value =>
+    Number.isFinite(value) && Math.abs(value - (-9999.0)) > 1.0e-3
+  );
+}
+"""
+    html = html.replace(
+        compute_marker,
+        guard_script + "\n" + compute_marker,
+        1,
+    )
+    html = html.replace(
+        samples_marker,
+        "const samples = nodes.filter(validPcaConfiguration);",
+        1,
+    )
+    html = html.replace(
+        projection_marker,
+        "  for (const n of nodes) {\n"
+        "    if (!validPcaConfiguration(n)) { n.pca = null; continue; }\n"
+        "    const centered = n.q.map((x,i) => (x || 0) - (mean[i] || 0));",
+        1,
+    )
+    html = html.replace(
+        visible_marker,
+        visible_marker
+        + "\n\t  if (layoutSelect.value === \"pca\" && !n.pca) return false;",
+        1,
+    )
+    html_path.write_text(html, encoding="utf-8")
+
+
+def add_white_canvas_theme(html_path: Path) -> None:
+    html = html_path.read_text(encoding="utf-8")
+    theme_marker = "/* cpRRTC white trace canvas */"
+    if theme_marker in html:
+        return
+
+    style_end_marker = "</style>"
+    root_stroke_marker = (
+        'if (root || solution || current) { ctx.strokeStyle = "#f8fafc";'
+    )
+    simultaneous_stroke_marker = (
+        'ctx.strokeStyle = halo || (n.simultaneous ? "#f8fafc" : "#94a3b8");'
+    )
+    edge_color_marker = (
+        'a.tree === "start" ? "rgba(56,189,248,.38)" '
+        ': "rgba(251,146,60,.38)"'
+    )
+    node_color_marker = (
+        'ctx.fillStyle = solution ? "#4ade80" '
+        ': n.tree === "start" ? "#38bdf8" : "#fb923c";'
+    )
+    solution_edge_marker = ': edge.solution ? "#4ade80" :'
+    if any(
+        marker not in html
+        for marker in (
+            style_end_marker,
+            root_stroke_marker,
+            simultaneous_stroke_marker,
+            edge_color_marker,
+            node_color_marker,
+            solution_edge_marker,
+        )
+    ):
+        raise RuntimeError(
+            "PATACON HTML viewer is incompatible with the white canvas theme"
+        )
+
+    html = html.replace(
+        style_end_marker,
+        (
+            f"{theme_marker}\n"
+            "#canvas{background:#fff}\n"
+            "#slotPanel{display:none}\n"
+            f"{style_end_marker}"
+        ),
+        1,
+    )
+    html = html.replace(
+        root_stroke_marker,
+        'if (root || solution || current) { ctx.strokeStyle = "#0f172a";',
+        1,
+    )
+    html = html.replace(
+        simultaneous_stroke_marker,
+        'ctx.strokeStyle = halo || (n.simultaneous ? "#0f172a" : "#64748b");',
+        1,
+    )
+    html = html.replace(
+        edge_color_marker,
+        'a.tree === "start" ? "rgba(3,105,161,.72)" '
+        ': "rgba(194,65,12,.72)"',
+    )
+    html = html.replace(
+        solution_edge_marker,
+        ': edge.solution ? "#15803d" :',
+        1,
+    )
+    html = html.replace(
+        'style="background:#4ade80"></span>solution chain',
+        'style="background:#15803d"></span>solution chain',
+        1,
+    )
+    if "aorrtcUpdateColor" in html:
+        html = html.replace(
+            "return `hsla(${hue}, 85%, 62%, 0.82)`;",
+            "return `hsla(${hue}, 85%, 42%, 0.88)`;",
+            1,
+        )
+    html_path.write_text(html, encoding="utf-8")
+
+
 def save_patacon_html(graphml: str, html_path: Path, patacon_root: Path, title: str) -> None:
     exporter = patacon_root / "patacon" / "planner" / "tbrrt" / "trace_graphml.py"
     if not exporter.is_file():
@@ -749,6 +1034,10 @@ def save_patacon_html(graphml: str, html_path: Path, patacon_root: Path, title: 
     from patacon.planner.tbrrt.trace_graphml import save_trace_html
 
     save_trace_html(graphml, html_path, title=title)
+    add_invalid_configuration_guard(html_path)
+    if "solution_update" in graphml or "solution_final" in graphml:
+        add_aorrtc_update_colors(html_path)
+    add_white_canvas_theme(html_path)
 
 
 def default_output_path(result_json: Path, suffix: str) -> Path:

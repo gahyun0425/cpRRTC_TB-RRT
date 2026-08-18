@@ -1,5 +1,7 @@
 #pragma once
 
+#include "G1ConstraintParameters.hh"
+
 struct pRRTC_settings {
     int max_samples = 1000000;
     // Tree 하나가 만들 수 있는 최대 Tangent Space 개수
@@ -21,13 +23,15 @@ struct pRRTC_settings {
     // cpRRTC projection
     bool rigid_orientation = false;
 
-    int projection_max_iters = 20;
+    int projection_max_iters = 60;
     float projection_alpha = 1.0f;
     float projection_damping = 1.0e-4f;
     float projection_task_tolerance = 1.0e-3f;
 
     float projection_smoothness_threshold = 0.03f;
     float projection_smoothness_weight = 1.0f;
+    float beta = 8.0f;
+    float gamma = 1.0f;
     bool projection_smoothness = true;
 
     float projection_max_step = 0.20f;
@@ -48,4 +52,6 @@ struct pRRTC_settings {
 
     // opposite-tree target과 이 거리 이내이면 connected로 판단
     float connect_reached_tolerance = 1.0e-3f;
+
+    ppln::constraints::G1ConstraintParameters g1_constraints{};
 };

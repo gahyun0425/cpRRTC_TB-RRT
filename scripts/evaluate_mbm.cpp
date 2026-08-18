@@ -4,6 +4,7 @@
 #include <chrono>
 #include <fstream>
 #include <iostream>
+#include <type_traits>
 
 #include <cuda_runtime.h>
 
@@ -11,6 +12,7 @@
 #include "src/collision/factory.hh"
 #include "src/planning/Planners.hh"
 #include "src/planning/pRRTC_settings.hh"
+#include "scripts/g1_problem.hh"
 
 using json = nlohmann::json;
 using namespace ppln::collision;
@@ -163,6 +165,10 @@ void run_planning(
             auto env = problem_dict_to_env(data, name);
             Configuration start = data["start"];
             std::vector<Configuration> goals = data["goals"];
+            if constexpr (std::is_same_v<Robot, robots::G1>) {
+                settings.g1_constraints =
+                    g1_constraint_parameters_from_problem(data);
+            }
 
             for (int run_index = 1; run_index <= runs; run_index++) {
                 total_runs++;
@@ -291,6 +297,12 @@ int main(int argc, char* argv[]) {
     std::ifstream f(path);
     json all_data = json::parse(f);
     json problems = all_data["problems"];
+    if (robot_name == "g1") {
+        settings.granularity = robots::G1::resolution;
+        settings.range = 0.4f;
+        settings.projection_max_iters = 60;
+        settings.max_concon_nodes = 4;
+    }
     if (robot_name == "fetch") {
         run_planning<robots::Fetch>(problems, settings, run_name, robot_name, runs);
     } else if (robot_name == "panda") {
@@ -301,6 +313,8 @@ int main(int argc, char* argv[]) {
         run_planning<robots::FfwSg2>(problems, settings, run_name, robot_name, runs);
     } else if (robot_name == "ffw_sg2_single") {
         run_planning<robots::FfwSg2Single>(problems, settings, run_name, robot_name, runs);
+    } else if (robot_name == "g1") {
+        run_planning<robots::G1>(problems, settings, run_name, robot_name, runs);
     } else {
         std::cerr << "Unsupported robot type: " << robot_name << "\n";
         return 1;

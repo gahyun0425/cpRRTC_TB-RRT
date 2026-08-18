@@ -100,3 +100,48 @@ target_link_libraries(validate_ffw_sg2_projection
 target_compile_options(validate_ffw_sg2_projection PRIVATE
     -Wno-c++11-narrowing
 )
+
+### G1 scalar FK / self and environment collision validation
+
+add_executable(validate_g1_collision
+    scripts/validate_g1_collision.cu
+)
+
+target_include_directories(validate_g1_collision
+    PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CUDAToolkit_INCLUDE_DIRS}
+)
+
+target_link_libraries(validate_g1_collision
+    PRIVATE
+    nlohmann_json::nlohmann_json
+    Eigen3::Eigen
+    CUDA::cudart
+)
+
+target_compile_options(validate_g1_collision PRIVATE
+    -Wno-c++11-narrowing
+)
+
+### G1 feet / center-of-mass / bimanual constraint validation
+
+add_executable(validate_g1_constraints
+    scripts/validate_g1_constraints.cu
+)
+
+target_include_directories(validate_g1_constraints
+    PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CUDAToolkit_INCLUDE_DIRS}
+)
+
+target_link_libraries(validate_g1_constraints
+    PRIVATE
+    nlohmann_json::nlohmann_json
+    CUDA::cudart
+)
+
+target_compile_options(validate_g1_constraints PRIVATE
+    -Wno-c++11-narrowing
+)

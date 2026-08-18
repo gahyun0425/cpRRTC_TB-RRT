@@ -14,6 +14,7 @@ problems.pkl
 !resources/ffw_sg2/ffw_sg2_single_collision_metadata.json
 !scripts/ffw_sg2_problems.json
 !scripts/ffw_sg2_single_problems.json
+!scripts/g1_problems.json
 *.sqlite
 *.nsys-rep
 Pipfile

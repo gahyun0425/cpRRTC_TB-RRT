@@ -10,6 +10,8 @@
 #include "src/robots/ffw_sg2.cuh"
 #include "src/robots/ffw_sg2_single.cuh"
 #include "src/robots/ffw_sg2_constraint.cuh"
+#include "src/robots/g1_collision.cuh"
+#include "src/robots/g1_constraint.cuh"
 
 #include <curand.h>
 #include <curand_kernel.h>
@@ -21,6 +23,7 @@
 #include <algorithm>
 #include <numeric>
 #include <stdexcept>
+#include <type_traits>
 
 
 
@@ -62,12 +65,34 @@ namespace pRRTC {
     static_assert(robots::CollisionTraits<robots::FfwSg2Single>::transform_slots== FFW_SG2_SINGLE_TRANSFORM_SLOTS,
         "FFW-SG2 single transform slot count differs from the generated Cricket code"
     );
+    static_assert(
+        robots::CollisionTraits<robots::G1>::batch_size == collision::G1_BATCH_SIZE,
+        "G1 batch size differs from the generated collision code"
+    );
+    static_assert(
+        robots::CollisionTraits<robots::G1>::fine_sphere_count == collision::G1_SPHERE_COUNT,
+        "G1 sphere count differs from the generated collision code"
+    );
+    static_assert(
+        robots::CollisionTraits<robots::G1>::approximate_sphere_count == collision::G1_APPROX_SPHERE_COUNT,
+        "G1 approximate sphere count differs from the generated collision code"
+    );
+    static_assert(
+        robots::CollisionTraits<robots::G1>::joint_flag_stride == collision::G1_JOINT_FLAG_STRIDE,
+        "G1 joint flag stride differs from the generated collision code"
+    );
+    static_assert(
+        robots::CollisionTraits<robots::G1>::transform_slots == collision::G1_TRANSFORM_SLOTS,
+        "G1 transform slot count differs from the generated collision code"
+    );
     __device__ volatile int solved = 0;
     __device__ volatile int atomic_free_index[2]; // separate for tree_a and tree_b
     __device__ volatile int nodes_size[2];
     __device__ volatile int completed_nodes[2]; // track completed nodes for each tree
-    constexpr int MAX_PATH_SIZE = 5000;
-    __device__ float path[2][MAX_PATH_SIZE]; // solution path segments for tree_a, and tree_b
+    constexpr int MAX_PATH_NODES = 5000;
+    constexpr int MAX_PATH_STORAGE =
+        MAX_PATH_NODES * ppln::robots::G1::dimension;
+    __device__ float path[2][MAX_PATH_STORAGE]; // solution path segments for tree_a, and tree_b
     __device__ int path_size[2] = {0, 0};
     __device__ float cost = 0.0;
     __device__ int reached_goal_idx = 0;
@@ -82,12 +107,44 @@ namespace pRRTC {
     constexpr int MAX_THREADS_PER_BLOCK = 4*MAX_GRANULARITY;
 
     // cpRRTC projected motion shared buffer용
-    constexpr int MAX_ROBOT_DIM = 16; // 커널의 공유 메모리 버퍼가 수용할 수 있는 최대 로봇 configuration 차원 (ffw는 15차원)
+    constexpr int MAX_ROBOT_DIM = ppln::robots::G1::dimension;
     constexpr int FFW_SG2_TANGENT_DIM = 9; // 기본 constraint에 따른 tangent dim 15 - 6 = 9. 최대로 필요한 tangent 차원
+    constexpr int MAX_TANGENT_DIM = ppln::collision::G1_TANGENT_DIM;
 
     constexpr int FFW_SG2_TANGENT_BASIS_SIZE = ppln::robots::FfwSg2::dimension * FFW_SG2_TANGENT_DIM;
     constexpr int BLOCK_SIZE = 64; // RNG와 Halton 상태 초기화 커널의 thread block 크기. halton 수열의 random성을 위해 RNG 사용
     constexpr float UNWRITTEN_VAL = -9999.0f; // 미작성 configuration 메모리 표기 sentinel 값. 유효성 판단을 위한 flag로 사용
+
+    template <typename Robot>
+    struct TangentSpaceTraits {
+        static constexpr bool enabled = false;
+        static constexpr int max_tangent_dim = 1;
+        static constexpr int basis_size = 1;
+    };
+
+    template <>
+    struct TangentSpaceTraits<robots::FfwSg2> {
+        static constexpr bool enabled = true;
+        static constexpr int max_tangent_dim = FFW_SG2_TANGENT_DIM;
+        static constexpr int basis_size = FFW_SG2_TANGENT_BASIS_SIZE;
+    };
+
+    template <>
+    struct TangentSpaceTraits<robots::G1> {
+        static constexpr bool enabled = true;
+        static constexpr int max_tangent_dim = collision::G1_TANGENT_DIM;
+        static constexpr int basis_size = collision::G1_TANGENT_BASIS_SIZE;
+    };
+
+    template <typename Robot>
+    __device__ __forceinline__ int cprrtc_active_tangent_dim() {
+        if constexpr (std::is_same_v<Robot, robots::FfwSg2>) {
+            return d_settings.rigid_orientation ? 7 : FFW_SG2_TANGENT_DIM;
+        } else if constexpr (std::is_same_v<Robot, robots::G1>) {
+            return collision::G1_TANGENT_DIM;
+        }
+        return 0;
+    }
 
 
     // 일반 로봇은 모든 관절 가중치가 1
@@ -175,18 +232,34 @@ namespace pRRTC {
     // 각 CUDA block이 사용할 Halton 수열의 초기 상태 한 번 설정
     template<typename Robot>
     __device__ void halton_initialize(HaltonState<Robot>& state, size_t skip_iterations, curandState& rng_state, int idx) {
-        
-        float primes[16] = {
-            3.f, 5.f, 7.f, 11.f, 13.f, 17.f, 19.f, 23.f,
-            29.f, 31.f, 37.f, 41.f, 43.f, 47.f, 53.f, 59.f
-        };
-        if (idx != 0) shuffle_array(primes, 16, rng_state);
-        
-        // Initialize bases from primes
-        for (size_t i = 0; i < Robot::dimension; i++) {
-            state.b[i] = primes[i];
-            state.n[i] = 0.0f;
-            state.d[i] = 1.0f;
+        if constexpr (std::is_same_v<Robot, robots::G1>) {
+            float primes[robots::G1::dimension] = {
+                3.f, 5.f, 7.f, 11.f, 13.f, 17.f, 19.f,
+                23.f, 29.f, 31.f, 37.f, 41.f, 43.f, 47.f,
+                53.f, 59.f, 61.f, 67.f, 71.f, 73.f, 79.f,
+                83.f, 89.f, 97.f, 101.f, 103.f, 107.f,
+                109.f, 113.f, 127.f, 131.f, 137.f, 139.f,
+                149.f, 151.f
+            };
+            if (idx != 0) {
+                shuffle_array(primes, robots::G1::dimension, rng_state);
+            }
+            for (size_t i = 0; i < Robot::dimension; i++) {
+                state.b[i] = primes[i];
+                state.n[i] = 0.0f;
+                state.d[i] = 1.0f;
+            }
+        } else {
+            float primes[16] = {
+                3.f, 5.f, 7.f, 11.f, 13.f, 17.f, 19.f, 23.f,
+                29.f, 31.f, 37.f, 41.f, 43.f, 47.f, 53.f, 59.f
+            };
+            if (idx != 0) shuffle_array(primes, 16, rng_state);
+            for (size_t i = 0; i < Robot::dimension; i++) {
+                state.b[i] = primes[i];
+                state.n[i] = 0.0f;
+                state.d[i] = 1.0f;
+            }
         }
         
         // Skip iterations if requested
@@ -363,13 +436,6 @@ namespace pRRTC {
         completed_nodes[1] = 0;
         path_size[0] = 0;
         path_size[1] = 0;
-        
-        for (int tree = 0; tree < 2; tree++) {
-            for (int i = 0; i < MAX_PATH_SIZE; i++) {
-                path[tree][i] = 0.0f;
-            }
-        }
-        
         cost = 0.0f;
         reached_goal_idx = 0;
         connection_tree_id = -1;
@@ -496,27 +562,90 @@ namespace pRRTC {
         );
     }
 
+    template <>
+    __device__ __forceinline__ bool cprrtc_project_motion<ppln::robots::G1>(
+        volatile const float *q_start,
+        volatile const float *q_step,
+        volatile float *motion_segment,
+        volatile float *motion_segment_next,
+        volatile unsigned char *projection_valid,
+        volatile int *projection_prog,
+        volatile unsigned int *projection_success,
+        int tid
+    ) {
+        static constexpr int dim = ppln::robots::G1::dimension;
+        const int waypoint = tid / 4 + 1;
+        const int lane = tid % 4;
+
+        if (tid < dim) {
+            motion_segment[tid] = q_start[tid];
+        }
+        if (waypoint <= d_settings.granularity) {
+            for (int joint = lane; joint < dim; joint += 4) {
+                motion_segment[waypoint * dim + joint] =
+                    q_start[joint] + static_cast<float>(waypoint) * q_step[joint];
+            }
+        }
+        __syncthreads();
+
+        return ppln::collision::g1_project_motion(
+            motion_segment,
+            motion_segment_next,
+            d_settings.granularity,
+            d_settings.g1_constraints,
+            projection_valid,
+            projection_prog,
+            projection_success,
+            d_settings.projection_max_iters,
+            d_settings.projection_alpha,
+            d_settings.beta,
+            d_settings.gamma,
+            d_settings.projection_damping,
+            d_settings.projection_task_tolerance,
+            d_settings.projection_smoothness_threshold,
+            d_settings.projection_smoothness_weight,
+            d_settings.projection_smoothness,
+            d_settings.projection_max_step,
+            tid
+        );
+    }
+
     template <typename Robot>
     __device__ __forceinline__ bool cprrtc_store_tangent_basis(
         const float *q,
         float *tree_tangent_bases,
         int node_idx
     ) {
-        if constexpr (Robot::dimension ==ppln::robots::FfwSg2::dimension) {
+        if constexpr (TangentSpaceTraits<Robot>::enabled) {
             if (tree_tangent_bases == nullptr) {
                 return false;
             }
 
-            float basis[FFW_SG2_TANGENT_BASIS_SIZE];
+            constexpr int basis_size = TangentSpaceTraits<Robot>::basis_size;
+            float basis[basis_size];
 
             // 현재 node q에서 Jacobian을 새로 계산하고 tangent basis까지 생성
-            if (!ppln::collision::ffw_sg2_tangent_basis(q, d_settings.rigid_orientation, basis)) {
+            bool basis_ok = false;
+            if constexpr (std::is_same_v<Robot, robots::FfwSg2>) {
+                basis_ok = ppln::collision::ffw_sg2_tangent_basis(
+                    q,
+                    d_settings.rigid_orientation,
+                    basis
+                );
+            } else if constexpr (std::is_same_v<Robot, robots::G1>) {
+                basis_ok = ppln::collision::g1_tangent_basis(
+                    q,
+                    d_settings.g1_constraints,
+                    basis
+                );
+            }
+            if (!basis_ok) {
                 return false;
             }
 
-            float *dst =&tree_tangent_bases[node_idx *FFW_SG2_TANGENT_BASIS_SIZE];
+            float *dst = &tree_tangent_bases[node_idx * basis_size];
 
-            for (int i = 0; i < FFW_SG2_TANGENT_BASIS_SIZE; i++) {
+            for (int i = 0; i < basis_size; i++) {
                 dst[i] = basis[i];
             }
         }
@@ -525,7 +654,7 @@ namespace pRRTC {
     }
 
     template <typename Robot>
-    __device__ __forceinline__ void cprrtc_sample_ffw_sg2_tangent_config(
+    __device__ __forceinline__ void cprrtc_sample_tangent_config(
         float *tree_nodes,
         float *ts_bases,
         int ts_root_node_idx,
@@ -538,15 +667,19 @@ namespace pRRTC {
         int tid
     )
     {
-        if constexpr (Robot::dimension ==ppln::robots::FfwSg2::dimension) {
-            static constexpr auto dim =ppln::robots::FfwSg2::dimension;
-            const int active_tangent_dim =d_settings.rigid_orientation? 7: FFW_SG2_TANGENT_DIM;
+        if constexpr (TangentSpaceTraits<Robot>::enabled) {
+            static constexpr auto dim = Robot::dimension;
+            static constexpr int basis_stride =
+                TangentSpaceTraits<Robot>::max_tangent_dim;
+            static constexpr int basis_size =
+                TangentSpaceTraits<Robot>::basis_size;
+            const int active_tangent_dim = cprrtc_active_tangent_dim<Robot>();
 
             // 선택된 Tangent Space의 root configuration
             const float *base_q =&tree_nodes[ts_root_node_idx * dim];
 
             // 선택된 Tangent Space의 tangent basis
-            const float *basis =&ts_bases[selected_ts_id *FFW_SG2_TANGENT_BASIS_SIZE];
+            const float *basis = &ts_bases[selected_ts_id * basis_size];
             float alpha_limit = FLT_MAX;
 
             if (tid < dim) {
@@ -554,14 +687,14 @@ namespace pRRTC {
                 float dir = 0.0f;
 
                 for (int k = 0; k < active_tangent_dim; k++) {
-                    dir +=basis[tid *FFW_SG2_TANGENT_DIM+ k]*ts_coeff[k];
+                    dir += basis[tid * basis_stride + k] * ts_coeff[k];
                 }
 
                 ts_tangent_dir[tid] = dir;
 
                 // joint limit 안에서 최대 이동 가능 거리 계산
-                const float lo =ppln::robots::FfwSg2::get_s_a(tid); // 해당 차원의 최솟값
-                const float hi =lo +ppln::robots::FfwSg2::get_s_m(tid); // 해당 차원의 max값
+                const float lo = Robot::get_s_a(tid); // 해당 차원의 최솟값
+                const float hi = lo + Robot::get_s_m(tid); // 해당 차원의 max값
 
                 if (dir > 1.0e-8f) {
                     alpha_limit =(hi - base_q[tid])/ dir;
@@ -613,7 +746,7 @@ namespace pRRTC {
     template <typename Robot>
     __device__ __forceinline__ float cprrtc_constraint_error_norm(const float *q)
     {
-        if constexpr (Robot::dimension ==ppln::robots::FfwSg2::dimension) {
+        if constexpr (std::is_same_v<Robot, robots::FfwSg2>) {
             float h[FFW_SG2_MAX_RESIDUAL_DIM];
 
             // 현재 configuration q의 constraint residual h(q) 계산
@@ -624,6 +757,11 @@ namespace pRRTC {
 
             // EM = ||h(q)||
             return ppln::collision::ffw_sg2_residual_norm(h,residual_dim);
+        } else if constexpr (std::is_same_v<Robot, robots::G1>) {
+            return ppln::collision::g1_equality_residual_norm(
+                q,
+                d_settings.g1_constraints
+            );
         }
 
         return 0.0f;
@@ -644,7 +782,7 @@ namespace pRRTC {
         int goal_count
     )
     {
-        if constexpr (Robot::dimension ==ppln::robots::FfwSg2::dimension) {
+        if constexpr (TangentSpaceTraits<Robot>::enabled) {
             const int global_idx = blockIdx.x;
 
             // 지금 처리하고 있는 것이 start tree인지 goal tree인지 결정
@@ -864,10 +1002,12 @@ namespace pRRTC {
         float *sdata,
         int tid
     ) {
-        if constexpr (Robot::dimension == ppln::robots::FfwSg2::dimension) {
-            static constexpr int dim =ppln::robots::FfwSg2::dimension;
+        if constexpr (TangentSpaceTraits<Robot>::enabled) {
+            static constexpr int dim = Robot::dimension;
+            static constexpr int basis_stride =
+                TangentSpaceTraits<Robot>::max_tangent_dim;
 
-            const int active_tangent_dim =d_settings.rigid_orientation? 7: FFW_SG2_TANGENT_DIM;
+            const int active_tangent_dim = cprrtc_active_tangent_dim<Robot>();
 
             // 1. q_current -> q_target 방향을 Tangent basis 좌표계의 coefficient로 변환
             // ts_coeff = B^T * (q_target - q_current)
@@ -876,7 +1016,7 @@ namespace pRRTC {
 
                 for (int j = 0; j < dim; j++) {
                     const float target_vector =q_target[j] - q_current[j];
-                    coeff +=basis[j * FFW_SG2_TANGENT_DIM+ tid]* target_vector;
+                    coeff += basis[j * basis_stride + tid] * target_vector;
                 }
 
                 ts_coeff[tid] = coeff;
@@ -891,7 +1031,7 @@ namespace pRRTC {
             if (tid < dim) {
 
                 for (int k = 0; k < active_tangent_dim; k++) {
-                    projected_component +=basis[tid * FFW_SG2_TANGENT_DIM+ k]* ts_coeff[k];
+                    projected_component += basis[tid * basis_stride + k] * ts_coeff[k];
                 }
 
                 projected_dir[tid] =projected_component;
@@ -999,7 +1139,7 @@ namespace pRRTC {
         __shared__ int *t_node_ready; // 현재 TREE의 node 배열
         __shared__ int *o_node_ready;
         __shared__ int t_tree_size; // 현재 tree에 index가 할당된 node 수
-        __shared__ float ts_coeff[FFW_SG2_TANGENT_DIM]; // Tangent basis들을 어떤 비율로 조합할지
+        __shared__ float ts_coeff[MAX_TANGENT_DIM]; // Tangent basis들을 어떤 비율로 조합할지
         __shared__ float ts_alpha_fraction; // Tangent 방향으로 얼마나 이동할지
         __shared__ float ts_tangent_dir[MAX_ROBOT_DIM]; // 최종 15차원 Tangent 방향
         __shared__ float scale;
@@ -1041,8 +1181,6 @@ namespace pRRTC {
         __shared__ bool connect_made_progress;
         // target 도달 여부
         __shared__ bool connection_reached_shared;
-        // 다른 CUDA block이 이미 solution을 찾았는지
-        __shared__ bool stop_due_to_solution;
         __shared__ unsigned int n_extensions;
         // CONNECT 시작 시 상대 tree에서 한 번 선택하고 끝까지 유지할 target
         __shared__ int connect_target_idx;
@@ -1103,7 +1241,7 @@ namespace pRRTC {
                 o_nodes = nodes[o_tree_id];
                 t_parents = parents[t_tree_id];
                 o_parents = parents[o_tree_id];
-                if constexpr (Robot::dimension ==ppln::robots::FfwSg2::dimension) {
+                if constexpr (TangentSpaceTraits<Robot>::enabled) {
                     // 현재 확장할 tree에 속한 node들의 TS 정보
                     t_node_ts_id =node_ts_id[t_tree_id];
                     t_node_ts_q =node_ts_q[t_tree_id];
@@ -1122,7 +1260,7 @@ namespace pRRTC {
                 t_tree_size = atomic_free_index[t_tree_id];
 
                 // FFW-SG2 → Tangent Space sampling. q_rand 생성에서 사용할 파라미터 생성
-                if constexpr (Robot::dimension ==ppln::robots::FfwSg2::dimension) {
+                if constexpr (TangentSpaceTraits<Robot>::enabled) {
                     float halton_sample[dim];
                     halton_next(halton_states[bid],halton_sample);
 
@@ -1149,7 +1287,7 @@ namespace pRRTC {
                     }
 
                     // 2. 현재 constraint의 tangent dimension
-                    const int active_tangent_dim =d_settings.rigid_orientation? 7: FFW_SG2_TANGENT_DIM;
+                    const int active_tangent_dim = cprrtc_active_tangent_dim<Robot>();
 
                     // 3. Tangent Space 안에서 random direction 생성
                     float coeff_norm2 = 0.0f;
@@ -1183,12 +1321,20 @@ namespace pRRTC {
 
             __syncthreads();
 
-            // 해 찾았으면 커널 종료
-            if (solved != 0) {
+            if constexpr (TraceTrees) {
+                if (tid == 0) {
+                    should_skip = (solved != 0);
+                }
+                __syncthreads();
+                if (should_skip) {
+                    return;
+                }
+            }
+            else if (solved != 0) {
                 return;
             }
 
-            if constexpr (Robot::dimension ==ppln::robots::FfwSg2::dimension) {
+            if constexpr (TangentSpaceTraits<Robot>::enabled) {
                 // 사용할 수 있는 Tangent Space를 찾지 못했으면 이번 EXTEND iteration을 버린다.
                 if (selected_ts_id < 0) {
                     continue;
@@ -1196,8 +1342,8 @@ namespace pRRTC {
             }
 
             // q_rand 생성 생성
-            if constexpr (Robot::dimension ==ppln::robots::FfwSg2::dimension) {
-                cprrtc_sample_ffw_sg2_tangent_config<Robot>(
+            if constexpr (TangentSpaceTraits<Robot>::enabled) {
+                cprrtc_sample_tangent_config<Robot>(
                     t_nodes, 
                     t_ts_bases, // node별 basis가 아니라 TSBank
                     selected_ts_root_idx, // 선택한 TS root
@@ -1223,7 +1369,7 @@ namespace pRRTC {
             int local_near_idx = 0;
             float dist;
 
-            if constexpr (Robot::dimension ==ppln::robots::FfwSg2::dimension) {
+            if constexpr (TangentSpaceTraits<Robot>::enabled) {
                 // selected TS에서 이 thread에 미리 배정된 node 목록만 검사한다.
                 int node_idx =t_ts_lane_head[selected_ts_id * MAX_THREADS_PER_BLOCK + tid]; // 선택된 TS에서 현재 thread tid가 담당하는 첫 번째 노드 번호를 가져와라
 
@@ -1298,7 +1444,7 @@ namespace pRRTC {
                     // 실제 tree node 가져오기 (q_near)
                     nearest_node =&t_nodes[sindex[0] * dim];
 
-                    if constexpr (Robot::dimension ==ppln::robots::FfwSg2::dimension) {
+                    if constexpr (TangentSpaceTraits<Robot>::enabled) {
                         // 같은 node의 Tangent Space상 nominal 위치
                         nearest_ts_node =&t_node_ts_q[sindex[0] * dim];
                     }
@@ -1307,7 +1453,7 @@ namespace pRRTC {
                     const bool zero_direction =q_rand_dist <= 1.0e-8f; // 방향 벡터가 0인지 확인
 
                     // 기존 single q_steer를 사용하는 다른 로봇에서만 scale 계산
-                    if constexpr (Robot::dimension != ppln::robots::FfwSg2::dimension) {
+                    if constexpr (!TangentSpaceTraits<Robot>::enabled) {
                             if (!zero_direction) {
                                 scale = min(1.0f, d_settings.range / q_rand_dist);
                             }
@@ -1327,7 +1473,7 @@ namespace pRRTC {
             }
             __syncthreads();
 
-            if constexpr (Robot::dimension ==ppln::robots::FfwSg2::dimension) {
+            if constexpr (TangentSpaceTraits<Robot>::enabled) {
                 if (tid < dim) {
                     // q_rand 자체를 목표점으로 사용하지 않는다. q_rand - q_near_TS에서 방향만 얻는다.
                     extend_dir[tid] =(config[tid]-nearest_ts_node[tid])/q_rand_dist;
@@ -1335,7 +1481,7 @@ namespace pRRTC {
             }
 
             // 시작 전 상태 초기화
-            if constexpr (Robot::dimension ==ppln::robots::FfwSg2::dimension) {
+            if constexpr (TangentSpaceTraits<Robot>::enabled) {
                 if (tid == 0) {
                     concon_count = 0;
                     concon_em_stop = false;
@@ -1344,7 +1490,7 @@ namespace pRRTC {
 
             __syncthreads();
 
-            if constexpr (Robot::dimension ==ppln::robots::FfwSg2::dimension) {
+            if constexpr (TangentSpaceTraits<Robot>::enabled) {
                 for (int step = 1; step <= d_settings.max_concon_nodes; step++) {
                     // Tangent Space 위의 nominal candidate 생성
                     // q_step = q_near_TS + step * range * extend_dir
@@ -1386,7 +1532,7 @@ namespace pRRTC {
                 // 첫 edge의 실제 parent는 NN node
                 concon_parent_idx = sindex[0];
 
-                if constexpr (Robot::dimension ==ppln::robots::FfwSg2::dimension) {
+                if constexpr (TangentSpaceTraits<Robot>::enabled) {
                     // FFW-SG2는 앞에서 EM으로 구한 candidate 전부 검사
                     extend_edge_count = concon_count;
                 }
@@ -1398,7 +1544,7 @@ namespace pRRTC {
 
             // config를 "현재 실제 edge 시작점"으로 바꾼다.
             if (tid < dim) {
-                if constexpr (Robot::dimension ==ppln::robots::FfwSg2::dimension) {
+                if constexpr (TangentSpaceTraits<Robot>::enabled) {
                     // 첫 edge 시작점 = 실제 projected q_near
                     config[tid] =nearest_node[tid];
                 }
@@ -1418,7 +1564,7 @@ namespace pRRTC {
             for (int edge_step = 1; edge_step <= extend_edge_count; edge_step++) {
                 // 이번 edge의 target 설정
                 if (tid < dim) {
-                    if constexpr (Robot::dimension ==ppln::robots::FfwSg2::dimension) {
+                    if constexpr (TangentSpaceTraits<Robot>::enabled) {
                         // selected Tangent Space 위 nominal target
                         // q_k =q_near_TS + k * range * extend_dir
                         concon_probe[tid] =nearest_ts_node[tid]+((float)edge_step*d_settings.range*extend_dir[tid]);
@@ -1638,7 +1784,7 @@ namespace pRRTC {
                     }
                     __syncthreads();
 
-                    if constexpr (Robot::dimension ==ppln::robots::FfwSg2::dimension) {
+                    if constexpr (TangentSpaceTraits<Robot>::enabled) {
                         // 이 node가 EM threshold를 넘어서 만들어진 마지막 ConCon node인지 확인
                         const bool is_em_boundary_node =concon_em_stop&&(edge_step == concon_count);
 
@@ -1714,7 +1860,28 @@ namespace pRRTC {
                     __threadfence();
                     __syncthreads();
 
-                    if constexpr (Robot::dimension ==ppln::robots::FfwSg2::dimension) {
+                    if constexpr (TraceTrees) {
+                        if (tid == 0) {
+                            should_skip = false;
+                            for (int joint = 0; joint < dim; joint++) {
+                                const float value = t_nodes[index * dim + joint];
+                                if (!isfinite(value) || value == UNWRITTEN_VAL) {
+                                    should_skip = true;
+                                    break;
+                                }
+                            }
+                            if (should_skip) {
+                                atomicCAS((int *)&solved, 0, -1);
+                            }
+                        }
+                        __syncthreads();
+
+                        if (should_skip) {
+                            return;
+                        }
+                    }
+
+                    if constexpr (TangentSpaceTraits<Robot>::enabled) {
                         if (tid == 0) {
                             const int assigned_ts_id =t_node_ts_id[index];
 
@@ -1726,12 +1893,16 @@ namespace pRRTC {
                     if (tid == 0) {
                         // 먼저 tree node 공개
                         node_ready[t_tree_id][index] = 1;
-                        atomicAdd((int *)&completed_nodes[t_tree_id],1);
+                        if constexpr (TraceTrees) {
+                            __threadfence();
+                            atomicAdd((int *)&completed_nodes[t_tree_id],1);
+                        }
+                        else {
+                            atomicAdd((int *)&completed_nodes[t_tree_id],1);
+                            __threadfence();
+                        }
 
-                        // node ready가 다른 block에 보이게
-                        __threadfence();
-
-                        if constexpr (Robot::dimension ==ppln::robots::FfwSg2::dimension) {
+                        if constexpr (TangentSpaceTraits<Robot>::enabled) {
                             const bool is_em_boundary_node =concon_em_stop&&(edge_step == concon_count);
 
                             // 새 TS는 모든 데이터가 준비된 가장 마지막에 ready = 1로 공개
@@ -1813,13 +1984,16 @@ namespace pRRTC {
                 int connect_chunk_count = 0;
 
                 while (connect_chunk_count< d_settings.max_connect_concon_chunks) { // 상대 tree의 target 향해 계속 확장
-                    if (tid == 0) {
-                        stop_due_to_solution = (solved != 0);
+                    if constexpr (TraceTrees) {
+                        if (tid == 0) {
+                            should_skip = (solved != 0);
+                        }
+                        __syncthreads();
+                        if (should_skip) {
+                            return;
+                        }
                     }
-
-                    __syncthreads();
-
-                    if (stop_due_to_solution) {
+                    else if (solved != 0) {
                         return;
                     }
 
@@ -1862,7 +2036,9 @@ namespace pRRTC {
                     const float *connect_basis = nullptr;
 
                     if (!connect_failed) {
-                        connect_basis =&t_ts_bases[selected_ts_id* FFW_SG2_TANGENT_BASIS_SIZE];
+                        connect_basis = &t_ts_bases[
+                            selected_ts_id * TangentSpaceTraits<Robot>::basis_size
+                        ];
                     }
 
                     __syncthreads();
@@ -1949,12 +2125,16 @@ namespace pRRTC {
                     // 이번 chunk에서 생성한 ConCon candidate들을 앞에서부터 하나씩 검증
                     for (int edge_step = 1; edge_step <= concon_count; edge_step++) {
 
-                        if (tid == 0) {
-                            stop_due_to_solution = (solved != 0);
+                        if constexpr (TraceTrees) {
+                            if (tid == 0) {
+                                should_skip = (solved != 0);
+                            }
+                            __syncthreads();
+                            if (should_skip) {
+                                return;
+                            }
                         }
-                        __syncthreads();
-
-                        if (stop_due_to_solution) {
+                        else if (solved != 0) {
                             return;
                         }
 
@@ -2130,7 +2310,7 @@ namespace pRRTC {
                         __syncthreads();
 
                         // CONNECT node의 Tangent Space 정보 저장
-                        if constexpr (Robot::dimension==ppln::robots::FfwSg2::dimension) {
+                        if constexpr (TangentSpaceTraits<Robot>::enabled) {
                             // EM threshold를 처음 넘은 마지막 node인가?
                             const bool is_connect_em_boundary_node =concon_em_stop&&(edge_step == concon_count);
 
@@ -2205,7 +2385,28 @@ namespace pRRTC {
                         __threadfence();
                         __syncthreads();
 
-                        if constexpr (Robot::dimension ==ppln::robots::FfwSg2::dimension) {
+                        if constexpr (TraceTrees) {
+                            if (tid == 0) {
+                                should_skip = false;
+                                for (int joint = 0; joint < dim; joint++) {
+                                    const float value = t_nodes[index * dim + joint];
+                                    if (!isfinite(value) || value == UNWRITTEN_VAL) {
+                                        should_skip = true;
+                                        break;
+                                    }
+                                }
+                                if (should_skip) {
+                                    atomicCAS((int *)&solved, 0, -1);
+                                }
+                            }
+                            __syncthreads();
+
+                            if (should_skip) {
+                                return;
+                            }
+                        }
+
+                        if constexpr (TangentSpaceTraits<Robot>::enabled) {
                             if (tid == 0) {
                                 const int assigned_ts_id =t_node_ts_id[index];
 
@@ -2217,11 +2418,16 @@ namespace pRRTC {
                         if (tid == 0) {
                             // 먼저 tree node 공개
                             t_node_ready[index] = 1;
-                            atomicAdd((int *)&completed_nodes[t_tree_id],1);
+                            if constexpr (TraceTrees) {
+                                __threadfence();
+                                atomicAdd((int *)&completed_nodes[t_tree_id],1);
+                            }
+                            else {
+                                atomicAdd((int *)&completed_nodes[t_tree_id],1);
+                                __threadfence();
+                            }
 
-                            __threadfence();
-
-                            if constexpr (Robot::dimension==ppln::robots::FfwSg2::dimension) {
+                            if constexpr (TangentSpaceTraits<Robot>::enabled) {
                                 const bool is_connect_em_boundary_node =concon_em_stop&&(edge_step == concon_count);
 
                                 // 모든 TS 정보가 저장된 후 마지막으로 ready
@@ -2318,8 +2524,8 @@ namespace pRRTC {
                         while(o_parents[current] != current) { // 반대편 tree의 root에 도달할 때까지 부모 node 따라감
                             parent = o_parents[current];
                             cost += cprrtc_config_distance<Robot>(
-                                (float *)&t_nodes[current * dim],
-                                (float *)&t_nodes[parent * dim]
+                                &o_nodes[current * dim],
+                                &o_nodes[parent * dim]
                             );
                             for (int i = 0; i < dim; i++) path[o_tree_id][o_path_size * dim + i] = o_nodes[current * dim + i];
                             o_path_size++;
@@ -2351,7 +2557,16 @@ namespace pRRTC {
             }
         __syncthreads();
 
-        if (solved != 0) return;
+        if constexpr (TraceTrees) {
+            if (tid == 0) {
+                should_skip = (solved != 0);
+            }
+            __syncthreads();
+            if (should_skip) return;
+        }
+        else if (solved != 0) {
+            return;
+        }
         }
     }
 
@@ -2463,7 +2678,7 @@ namespace pRRTC {
                 "pRRTC granularity must match the selected robot's collision batch size"
             );
         }
-        if constexpr (Robot::dimension ==ppln::robots::FfwSg2::dimension) {
+        if constexpr (TangentSpaceTraits<Robot>::enabled) {
             if (settings.max_tangent_spaces <= 0) {
                 throw std::invalid_argument(
                     "max_tangent_spaces must be positive"
@@ -2531,8 +2746,10 @@ namespace pRRTC {
         const std::size_t config_size = dim * sizeof(float);
 
         for (int i = 0; i < 2; i++) {
-            if constexpr (Robot::dimension ==ppln::robots::FfwSg2::dimension) {
-                const std::size_t basis_bytes =static_cast<std::size_t>(settings.max_tangent_spaces)*FFW_SG2_TANGENT_BASIS_SIZE*sizeof(float);
+            if constexpr (TangentSpaceTraits<Robot>::enabled) {
+                const std::size_t basis_bytes =
+                    static_cast<std::size_t>(settings.max_tangent_spaces) *
+                    TangentSpaceTraits<Robot>::basis_size * sizeof(float);
                 const std::size_t ts_count_bytes =static_cast<std::size_t>(settings.max_tangent_spaces)*sizeof(int);
                 const std::size_t ts_lane_head_bytes =static_cast<std::size_t>(settings.max_tangent_spaces)*MAX_THREADS_PER_BLOCK*sizeof(int);
                 const std::size_t node_next_bytes =static_cast<std::size_t>(settings.max_samples)*sizeof(int);
@@ -2642,7 +2859,7 @@ namespace pRRTC {
         cudaMemcpy(node_ready[0],&start_ready,sizeof(int),cudaMemcpyHostToDevice);
         cudaMemcpy(node_ready[1],goals_ready.data(),sizeof(int) * num_goals,cudaMemcpyHostToDevice);
         // root tangent basis 초기화
-        if constexpr (Robot::dimension ==ppln::robots::FfwSg2::dimension) {
+        if constexpr (TangentSpaceTraits<Robot>::enabled) {
             // Initial Tangent Space Bank
             // start tree: q_start 하나 → TS 하나
             // goal tree: 각 initial goal → TS 하나
@@ -2742,22 +2959,42 @@ namespace pRRTC {
         res.goal_tree_size = current_samples[1];
         if (*h_solved) {
             int h_path_size[2];
-            float h_paths[2][MAX_PATH_SIZE];
+            std::vector<float> h_paths[2];
             float h_cost;
             int h_reached_goal_idx;
             cudaMemcpyFromSymbol(h_path_size, path_size, sizeof(int) * 2, 0, cudaMemcpyDeviceToHost);
-            cudaMemcpyFromSymbol(h_paths, path, sizeof(float) * 2 * MAX_PATH_SIZE, 0, cudaMemcpyDeviceToHost);
+            for (int tree = 0; tree < 2; ++tree) {
+                if (h_path_size[tree] < 0
+                    || h_path_size[tree] > MAX_PATH_NODES) {
+                    throw std::runtime_error(
+                        "pRRTC device path size is outside its valid range"
+                    );
+                }
+                h_paths[tree].resize(
+                    static_cast<std::size_t>(h_path_size[tree]) * dim
+                );
+                if (!h_paths[tree].empty()) {
+                    cudaMemcpyFromSymbol(
+                        h_paths[tree].data(),
+                        path,
+                        sizeof(float) * h_paths[tree].size(),
+                        sizeof(float) * static_cast<std::size_t>(tree)
+                            * MAX_PATH_STORAGE,
+                        cudaMemcpyDeviceToHost
+                    );
+                }
+            }
             cudaMemcpyFromSymbol(&h_cost, cost, sizeof(float), 0, cudaMemcpyDeviceToHost);
             cudaMemcpyFromSymbol(&h_reached_goal_idx, reached_goal_idx, sizeof(int), 0, cudaMemcpyDeviceToHost);
             cudaCheckError(cudaGetLastError());
             res.path.emplace_back(goals[h_reached_goal_idx]);
             typename Robot::Configuration config;
             for (int i = h_path_size[1] - 1; i >= 0; i--) {
-                std::copy_n(h_paths[1] + i * dim, dim, config.begin());
+                std::copy_n(h_paths[1].data() + i * dim, dim, config.begin());
                 res.path.emplace_back(config);
             }
             for (int i = 0; i < h_path_size[0]; i++) {
-                std::copy_n(h_paths[0] + i * dim, dim, config.begin());
+                std::copy_n(h_paths[0].data() + i * dim, dim, config.begin());
                 res.path.emplace_back(config);
             }
             res.path.emplace_back(start);
@@ -2885,5 +3122,6 @@ namespace pRRTC {
     template PlannerResult<typename ppln::robots::Baxter> solve<ppln::robots::Baxter>(std::array<float, 14>&, std::vector<std::array<float, 14>>&, ppln::collision::Environment<float>&, pRRTC_settings&);
     template PlannerResult<typename ppln::robots::FfwSg2> solve<ppln::robots::FfwSg2>(std::array<float, 15>&, std::vector<std::array<float, 15>>&, ppln::collision::Environment<float>&, pRRTC_settings&);
     template PlannerResult<typename ppln::robots::FfwSg2Single> solve<ppln::robots::FfwSg2Single>(std::array<float, 8>&, std::vector<std::array<float, 8>>&, ppln::collision::Environment<float>&, pRRTC_settings&);
+    template PlannerResult<typename ppln::robots::G1> solve<ppln::robots::G1>(std::array<float, 35>&, std::vector<std::array<float, 35>>&, ppln::collision::Environment<float>&, pRRTC_settings&);
 
 }

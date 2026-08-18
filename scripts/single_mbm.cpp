@@ -21,6 +21,7 @@
 #include "src/planning/Planners.hh"
 #include "src/planning/AORRTC.hh"
 #include "src/planning/pRRTC_settings.hh"
+#include "scripts/g1_problem.hh"
 #include "scripts/planner_result_json.hh"
 
 using json = nlohmann::json;
@@ -274,6 +275,76 @@ void visualize_ffw_sg2_path(
 }
 
 
+void visualize_g1_path(
+    const PlannerResult<robots::G1> &result,
+    const robots::G1::Configuration &start,
+    const json &problem
+) {
+    if (result.path.size() < 2) {
+        throw std::runtime_error("cannot visualize an unsolved or empty G1 path");
+    }
+
+    auto squared_distance = [](const auto &a, const auto &b) {
+        float distance = 0.0f;
+        for (std::size_t index = 0; index < a.size(); ++index) {
+            const float difference = a[index] - b[index];
+            distance += difference * difference;
+        }
+        return distance;
+    };
+
+    json trajectory;
+    trajectory["start"] = start;
+    trajectory["waypoints"] = json::array();
+    trajectory["environment"] = {
+        {"sphere", problem.value("sphere", json::array())},
+        {"cylinder", problem.value("cylinder", json::array())},
+        {"box", problem.value("box", json::array())}
+    };
+
+    const bool path_is_start_to_goal =
+        squared_distance(result.path.front(), start)
+        <= squared_distance(result.path.back(), start);
+    if (path_is_start_to_goal) {
+        for (const auto &configuration : result.path) {
+            trajectory["waypoints"].push_back(configuration);
+        }
+    } else {
+        for (auto iterator = result.path.rbegin(); iterator != result.path.rend(); ++iterator) {
+            trajectory["waypoints"].push_back(*iterator);
+        }
+    }
+
+    const auto timestamp = std::chrono::steady_clock::now()
+        .time_since_epoch().count();
+    const auto trajectory_path = std::filesystem::temp_directory_path()
+        / ("prrtc_g1_trajectory_" + std::to_string(timestamp) + ".json");
+    {
+        std::ofstream trajectory_file(trajectory_path);
+        if (!trajectory_file) {
+            throw std::runtime_error("failed to create temporary G1 trajectory");
+        }
+        trajectory_file << trajectory.dump(2) << '\n';
+    }
+
+    const auto visualizer_path = std::filesystem::absolute(
+        "scripts/visualize_g1.py"
+    );
+    const std::string command =
+        "python3 " + shell_quote(visualizer_path.string())
+        + " --trajectory " + shell_quote(trajectory_path.string());
+
+    std::cout.flush();
+    std::cerr.flush();
+    const int status = std::system(command.c_str());
+    std::error_code remove_error;
+    std::filesystem::remove(trajectory_path, remove_error);
+    if (status != 0) {
+        throw std::runtime_error("G1 MuJoCo visualizer exited with an error");
+    }
+}
+
+
 template <typename Robot>
 int run_planner(
     json &data,
@@ -466,9 +537,11 @@ int run_planner(
                 "arm_r_joint1", "arm_r_joint2", "arm_r_joint3", "arm_r_joint4",
                 "arm_r_joint5", "arm_r_joint6", "arm_r_joint7"
             });
+        } else if constexpr (std::is_same_v<Robot, robots::G1>) {
+            visualize_g1_path(visualization_result, start, data);
         } else {
             throw std::runtime_error(
-                "--visualize supports only ffw_sg2 and ffw_sg2_single"
+                "--visualize supports only ffw_sg2, ffw_sg2_single, and g1"
             );
         }
     }
@@ -607,8 +680,11 @@ int main(int argc, char* argv[]) {
             problem_idx
         );
     }
-    if (visualize && robot_name != "ffw_sg2" && robot_name != "ffw_sg2_single") {
-        std::cerr << "--visualize supports only ffw_sg2 and ffw_sg2_single\n";
+    if (visualize
+        && robot_name != "ffw_sg2"
+        && robot_name != "ffw_sg2_single"
+        && robot_name != "g1") {
+        std::cerr << "--visualize supports only ffw_sg2, ffw_sg2_single, and g1\n";
         return 1;
     }
     std::string path = "scripts/" + robot_name + "_problems.json";
@@ -643,7 +719,7 @@ int main(int argc, char* argv[]) {
     settings.aorrtc = aorrtc;
     settings.time_limit_sec = time_limit_sec;
     settings.granularity = 16;
-    settings.range = 0.3;
+    settings.range = 0.4;
     settings.lift_distance_weight = 1.0f;
     settings.rigid_orientation = rigid_orientation;
     settings.projection_smoothness = projection_smoothness;
@@ -655,10 +731,14 @@ int main(int argc, char* argv[]) {
     settings.dd_min_radius = 1.0;
     settings.dd_alpha = 0.0001;
     settings.em_threshold = 0.1f;
-    settings.max_concon_nodes = 16;
+    settings.max_concon_nodes = 4;
     settings.max_connect_concon_chunks = 16;
 
     try {
+        if (robot_name == "g1") {
+            settings.granularity = robots::G1::resolution;
+            settings.g1_constraints = g1_constraint_parameters_from_problem(data);
+        }
         if (robot_name == "fetch") {
             return run_planner<robots::Fetch>(data, env, settings, visualize, print_path,
                 robot_name, name, problem_idx, save_json_path, trace_options, runs);
@@ -673,6 +753,9 @@ int main(int argc, char* argv[]) {
                 robot_name, name, problem_idx, save_json_path, trace_options, runs);
         } else if (robot_name == "ffw_sg2_single") {
             return run_planner<robots::FfwSg2Single>(data, env, settings, visualize, print_path,
+                robot_name, name, problem_idx, save_json_path, trace_options, runs);
+        } else if (robot_name == "g1") {
+            return run_planner<robots::G1>(data, env, settings, visualize, print_path,
                 robot_name, name, problem_idx, save_json_path, trace_options, runs);
         } else {
             std::cerr << "Unsupported robot type: " << robot_name << "\n";
