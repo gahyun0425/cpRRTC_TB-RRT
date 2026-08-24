@@ -13,6 +13,7 @@
 #include <type_traits>
 #include <utility>
 #include <vector>
+#include <iomanip>
 
 #include <cuda_runtime.h>
 
@@ -50,6 +51,108 @@ std::string shell_quote(const std::string &value) {
     }
     output += "'";
     return output;
+}
+
+template <typename Robot>
+void plot_aorrtc_cost_history(
+    const AORRTCResult<Robot> &result,
+    const std::string &robot_name,
+    const std::string &problem_name,
+    int problem_index,
+    int run_index
+) {
+    // AORRTC가 solution을 하나도 찾지 못한 경우
+    if (result.solution_history.empty()) {
+        std::cout
+            << "AORRTC plot skipped: no solution history.\n";
+        return;
+    }
+
+    // 임시 CSV 파일 이름을 겹치지 않게 생성
+    const auto timestamp =
+        std::chrono::steady_clock::now()
+            .time_since_epoch()
+            .count();
+
+    const auto csv_path =
+        std::filesystem::temp_directory_path()
+        / (
+            "aorrtc_cost_history_"
+            + std::to_string(timestamp)
+            + ".csv"
+        );
+
+    // CSV 파일 생성
+    std::ofstream csv(csv_path);
+
+    if (!csv) {
+        throw std::runtime_error(
+            "failed to create temporary AORRTC plot CSV"
+        );
+    }
+
+    csv << "time_sec,cost\n";
+    csv << std::setprecision(12);
+
+    for (const auto &update : result.solution_history) {
+        const double time_sec =
+            static_cast<double>(update.found_ns) / 1.0e9;
+
+        csv
+            << time_sec
+            << ","
+            << update.cost
+            << "\n";
+    }
+
+    csv.close();
+
+    // Python plotting script의 절대 경로
+    const auto script_path =
+        std::filesystem::absolute(
+            "scripts/plot_aorrtc.py"
+        );
+
+    const std::string title =
+        "AORRTC Cost Convergence - "
+        + robot_name
+        + " / "
+        + problem_name
+        + " #"
+        + std::to_string(problem_index)
+        + " / run "
+        + std::to_string(run_index);
+
+    // python3 scripts/plot_aorrtc.py <csv> --title "..."
+    const std::string command =
+        "python3 "
+        + shell_quote(script_path.string())
+        + " "
+        + shell_quote(csv_path.string())
+        + " --title "
+        + shell_quote(title);
+
+    std::cout
+        << "plotting AORRTC cost history...\n";
+
+    std::cout.flush();
+    std::cerr.flush();
+
+    const int status =
+        std::system(command.c_str());
+
+    // Python이 끝났으면 임시 CSV 삭제
+    std::error_code remove_error;
+    std::filesystem::remove(
+        csv_path,
+        remove_error
+    );
+
+    if (status != 0) {
+        throw std::runtime_error(
+            "AORRTC plotting script exited with an error"
+        );
+    }
 }
 
 
@@ -352,6 +455,7 @@ int run_planner(
     AORRTC_settings &settings,
     bool visualize,
     bool print_path,
+     bool plot,
     const std::string &robot_name,
     const std::string &problem_name,
     int problem_index,
@@ -378,8 +482,7 @@ int run_planner(
         AORRTCResult<Robot> result;
         if (settings.aorrtc) {
             result = AORRTC::solve<Robot>(start, goals, env, settings);
-        }
-        else {
+        } else {
             static_cast<PlannerResult<Robot> &>(result) =
                 pRRTC::solve<Robot>(start, goals, env, settings);
         }
@@ -396,14 +499,36 @@ int run_planner(
             costs.push_back(result.cost);
         }
 
-        const double elapsed_sec = static_cast<double>(result.wall_ns) / 1.0e9;
+        double planning_sec = 0.0;
+
+        if (settings.aorrtc) {
+            // 실제 AORRTC planning 시작부터 cleanup 직전까지
+            planning_sec =
+                static_cast<double>(result.planning_ns) / 1.0e9;
+        } else {
+            // 기존 pRRTC 동작은 그대로 유지
+            planning_sec =
+                static_cast<double>(result.kernel_ns) / 1.0e9;
+        }
+
         const double warmup_sec = static_cast<double>(warmup_ns) / 1.0e9;
-        times_sec.push_back(elapsed_sec);
+
+        if (result.solved) {
+            times_sec.push_back(planning_sec);
+        }
         std::cout << "cost: " << result.cost << "\n";
+        if (runs > 1) {
+            std::cout << "warmup_s: " << warmup_sec << "\n";
+        }
+        std::cout << "planning_s: " << planning_sec << "\n";
+        // std::cout << "time (us): " << result.kernel_ns/1000.0f << "\n";
+        // std::cout << "time (s): " << static_cast<double>(result.kernel_ns) / 1.0e9 << "\n";
         if (settings.aorrtc) {
             std::cout << "aorrtc_initial_cost: " << result.initial_cost << "\n";
             std::cout << "aorrtc_solution_updates: "
                       << result.solution_updates << "\n";
+            std::cout << "aorrtc_search_restarts: "
+                      << result.search_restarts << "\n";
             std::cout << "aorrtc_initial_solution_sec: "
                       << static_cast<double>(result.initial_solution_ns) / 1.0e9
                       << "\n";
@@ -411,14 +536,6 @@ int run_planner(
                       << static_cast<double>(result.best_solution_ns) / 1.0e9
                       << "\n";
         }
-        if (runs > 1) {
-            std::cout << "warmup_s: " << warmup_sec << "\n";
-            std::cout << "planning_s: " << elapsed_sec << "\n";
-            std::cout << "total_s: " << warmup_sec + elapsed_sec << "\n";
-        }
-        // std::cout << "time (us): " << result.kernel_ns/1000.0f << "\n";
-        // std::cout << "time (s): " << static_cast<double>(result.kernel_ns) / 1.0e9 << "\n";
-        std::cout << "time_sec: " << elapsed_sec << "\n";
 
         if (!save_json_path.empty()) {
             auto payload = planner_result_json::result_to_json<Robot>(
@@ -434,6 +551,17 @@ int run_planner(
             payload["run_idx"] = run_index;
             payload["run_count"] = runs;
             saved_results.push_back(payload);
+        }
+
+        if (plot&& settings.aorrtc && run_index == runs) {
+
+            plot_aorrtc_cost_history(
+                result,
+                robot_name,
+                problem_name,
+                problem_index,
+                run_index
+            );
         }
 
         if (visualize && run_index == runs) {
@@ -464,10 +592,10 @@ int run_planner(
             squared_deviation_sum / static_cast<double>(times_sec.size())
         );
 
-        std::cout << "time_sec_avg: " << average << "\n";
-        std::cout << "time_sec_min: " << *minimum << "\n";
-        std::cout << "time_sec_max: " << *maximum << "\n";
-        std::cout << "time_sec_std: " << standard_deviation << "\n";
+        std::cout << "planning_s_avg: " << average << "\n";
+        std::cout << "planning_s_min: " << *minimum << "\n";
+        std::cout << "planning_s_max: " << *maximum << "\n";
+        std::cout << "planning_s_std: " << standard_deviation << "\n";
     }
 
     if (runs > 1 && !path_lengths.empty()) {
@@ -553,14 +681,15 @@ int main(int argc, char* argv[]) {
     std::string name = "cage";
     int problem_idx = 1;
     bool visualize = false;
+    bool plot = false;
     bool trace_trees = false;
     bool rigid_orientation = false;
     bool projection_smoothness = true;
     bool print_path = true;
     bool aorrtc = false;
     bool time_option_provided = false;
-    int runs = 1;
     double time_limit_sec = 5.0;
+    int runs = 1;
     std::string save_json_path;
     TraceExportOptions trace_options;
 
@@ -568,7 +697,7 @@ int main(int argc, char* argv[]) {
         std::cout
             << "Usage: ./single_mbm <robot_name> <problem_name> <problem_idx> "
             << "[--visualize] [--save-json PATH] [--run N|--runs N] "
-            << "[--aorrtc] [--time SECONDS] "
+            << "[--aorrtc] [--time SECONDS] [--plot] "
             << "[--rigid-orientation] "
             << "[--no-waypoint-smoothing] "
             << "[--trace-mode auto|path|tree] "
@@ -590,16 +719,18 @@ int main(int argc, char* argv[]) {
                 save_json_path = argv[++index];
             } else if ((argument == "--run" || argument == "--runs") && index + 1 < argc) {
                 runs = std::max(1, std::stoi(argv[++index]));
+            } else if (argument == "--plot") {
+                plot = true;
             } else if (argument == "--aorrtc") {
                 aorrtc = true;
             } else if (argument == "--time" && index + 1 < argc) {
                 const std::string value = argv[++index];
                 std::size_t consumed = 0;
-
                 time_limit_sec = std::stod(value, &consumed);
                 time_option_provided = true;
-
-                if (consumed != value.size() || !std::isfinite(time_limit_sec) || time_limit_sec <= 0.0) {
+                if (consumed != value.size()
+                    || !std::isfinite(time_limit_sec)
+                    || time_limit_sec <= 0.0) {
                     throw std::invalid_argument(
                         "--time must be a finite number greater than 0"
                     );
@@ -662,6 +793,13 @@ int main(int argc, char* argv[]) {
         if (time_option_provided && !aorrtc) {
             throw std::invalid_argument("--time requires --aorrtc");
         }
+
+        if (plot && !aorrtc) {
+            throw std::invalid_argument(
+                "--plot requires --aorrtc"
+            );
+        }
+
     } catch (const std::exception &error) {
         std::cerr << "single_mbm option error: " << error.what() << "\n";
         return 1;
@@ -740,22 +878,22 @@ int main(int argc, char* argv[]) {
             settings.g1_constraints = g1_constraint_parameters_from_problem(data);
         }
         if (robot_name == "fetch") {
-            return run_planner<robots::Fetch>(data, env, settings, visualize, print_path,
+            return run_planner<robots::Fetch>(data, env, settings, visualize, print_path, plot,
                 robot_name, name, problem_idx, save_json_path, trace_options, runs);
         } else if (robot_name == "panda") {
-            return run_planner<robots::Panda>(data, env, settings, visualize, print_path,
+            return run_planner<robots::Panda>(data, env, settings, visualize, print_path, plot,
                 robot_name, name, problem_idx, save_json_path, trace_options, runs);
         } else if (robot_name == "baxter") {
-            return run_planner<robots::Baxter>(data, env, settings, visualize, print_path,
+            return run_planner<robots::Baxter>(data, env, settings, visualize, print_path, plot,
                 robot_name, name, problem_idx, save_json_path, trace_options, runs);
         } else if (robot_name == "ffw_sg2") {
-            return run_planner<robots::FfwSg2>(data, env, settings, visualize, print_path,
+            return run_planner<robots::FfwSg2>(data, env, settings, visualize, print_path, plot,
                 robot_name, name, problem_idx, save_json_path, trace_options, runs);
         } else if (robot_name == "ffw_sg2_single") {
-            return run_planner<robots::FfwSg2Single>(data, env, settings, visualize, print_path,
+            return run_planner<robots::FfwSg2Single>(data, env, settings, visualize, print_path, plot,
                 robot_name, name, problem_idx, save_json_path, trace_options, runs);
         } else if (robot_name == "g1") {
-            return run_planner<robots::G1>(data, env, settings, visualize, print_path,
+            return run_planner<robots::G1>(data, env, settings, visualize, print_path, plot,
                 robot_name, name, problem_idx, save_json_path, trace_options, runs);
         } else {
             std::cerr << "Unsupported robot type: " << robot_name << "\n";
