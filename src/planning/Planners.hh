@@ -69,6 +69,33 @@ inline void print_cfg_to_ss(typename Robot::Configuration &config, std::stringst
     out << "\\n";
 }
 
+template <typename Robot>
+inline float configuration_space_path_arclength(
+    const std::vector<typename Robot::Configuration>& path
+) {
+    if (path.size() < 2) {
+        return 0.0f;
+    }
+
+    double total_length = 0.0;
+
+    for (std::size_t k = 1; k < path.size(); ++k) {
+        double squared_distance = 0.0;
+
+        for (int j = 0; j < Robot::dimension; ++j) {
+            const double dq =
+                static_cast<double>(path[k][j])
+                - static_cast<double>(path[k - 1][j]);
+
+            squared_distance += dq * dq;
+        }
+
+        total_length += std::sqrt(squared_distance);
+    }
+
+    return static_cast<float>(total_length);
+}
+
 
 
 inline std::size_t get_elapsed_nanoseconds(const std::chrono::time_point<std::chrono::steady_clock> &start)

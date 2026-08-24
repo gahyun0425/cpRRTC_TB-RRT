@@ -46,28 +46,35 @@ Repeat planning with `--run N` (`--runs N` is also accepted):
 ./build/single_mbm ffw_sg2 tray_lift 1 --run 100 --no-print-path
 ```
 
-### Optional AORRTC-style anytime optimization
+### Optional AORRTC anytime optimization
 
 `single_mbm` keeps the original first-solution planner as the default. Enable
-the separate anytime path with `--aorrtc`:
+the cost-augmented AORRTC path with `--aorrtc`:
 
 ```bash
-./build/single_mbm ffw_sg2 tray_lift 1 --aorrtc --time 5
+./build/single_mbm ffw_sg2 tray_lift 1 --aorrtc
 ```
 
-`--time` is the AORRTC tree-expansion budget in seconds and defaults to 5.
-It is accepted only together with `--aorrtc`. After the first solution, the
-start and goal trees are retained and expanded; a solution replaces the saved
-one only when its cost is lower. The output reports the initial cost, number of
-best-cost updates, and the first/best solution times. A single GPU expansion
-round is not interrupted midway, so the measured search time can exceed the
-requested budget by that final round.
+The AORRTC search budget defaults to 5 seconds. Override it with `--time`:
 
-This is a tree-reuse variant of the attached AORRTC method: unlike the paper's
-restart-based procedure, it deliberately does not clear and restart the trees
-after a solution. Therefore, asymptotic-optimality claims that depend on the
-paper's exact restart procedure should not be transferred to this variant
-without a separate proof.
+```bash
+./build/single_mbm ffw_sg2 tray_lift 1 --aorrtc --time 10
+```
+
+`--time` is accepted only together with `--aorrtc`. The first search is the
+current bidirectional planner without a cost bound. Every node records its
+cost-to-come. After a solution is found, subsequent fresh-tree searches use
+AORRTC cost sampling, cost-aware nearest-neighbour selection, lower-cost parent
+resampling, and the remaining solution-cost budget during CONNECT. When a
+better solution is found, both trees and Tangent-Space membership are cleared
+and the search restarts with the tighter cost bound. GPU allocations and the
+RNG/Halton sequence are reused, but tree nodes are not reused.
+
+The current constrained planner does not provide a manifold-safe shortcut or
+B-spline simplifier, so AORRTC uses identity path simplification. See
+`AORRTC_IMPLEMENTATION.md` for the algorithm-to-code mapping and output fields.
+A single GPU expansion round cannot be interrupted halfway, so observed wall
+time can exceed the requested search budget slightly.
 
 After the runs finish, both benchmark executables print the average, minimum,
 maximum, and population standard deviation of end-to-end planner time as

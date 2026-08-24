@@ -1192,6 +1192,7 @@ __device__ __forceinline__ bool g1_project_motion(
                     float task_error_norm = 1.0e30f;
                     for (int joint = 0; joint < G1_JOINT_DIM; ++joint) {
                         q[joint] = motion_segment[waypoint * G1_JOINT_DIM + joint];
+                        correction[joint] = 0.0f;
                     }
 
                     const bool correction_ok = g1_task_correction(
@@ -1210,7 +1211,10 @@ __device__ __forceinline__ bool g1_project_motion(
                         smoothness_distance_squared += difference[joint] * difference[joint];
                     }
                     const float smoothness_distance = sqrtf(smoothness_distance_squared);
-                    const float smoothness_error = use_smoothness? fmaxf(0.0f, smoothness_distance - smoothness_threshold): 0.0f;
+                    const float smoothness_error =
+                        correction_ok && use_smoothness
+                            ? fmaxf(0.0f, smoothness_distance - smoothness_threshold)
+                            : 0.0f;
 
                     const float inv_smoothness_distance = smoothness_distance > 1.0e-8f ? 1.0f / smoothness_distance : 0.0f;
 
@@ -1220,7 +1224,9 @@ __device__ __forceinline__ bool g1_project_motion(
                         // const float smoothness_gradient =
                         //     difference[joint] * smoothness_error;
                         const float smoothness_gradient = difference[joint] * inv_smoothness_distance * smoothness_error;
-                        combined[joint] = alpha * (correction[joint] + smoothness_weight * smoothness_gradient);
+                        combined[joint] = correction_ok
+                            ? alpha * (correction[joint] + smoothness_weight * smoothness_gradient)
+                            : 0.0f;
                         // combined[joint] =
                         //     alpha * correction[joint]
                         //     + beta * smoothness_gradient;

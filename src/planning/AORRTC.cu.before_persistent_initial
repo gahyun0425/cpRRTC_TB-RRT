@@ -1,30 +1,11 @@
-#include "Planners.hh"
-#include "Robots.hh"
-#include "RobotCollisionTraits.hh"
-#include "utils.cuh"
-#include "pRRTC_settings.hh"
-#include "src/collision/environment.hh"
-#include "src/robots/panda.cuh"
-#include "src/robots/fetch.cuh"
-#include "src/robots/baxter.cuh"
-#include "src/robots/ffw_sg2.cuh"
-#include "src/robots/ffw_sg2_single.cuh"
-#include "src/robots/ffw_sg2_constraint.cuh"
-#include "src/robots/g1_collision.cuh"
-#include "src/robots/g1_constraint.cuh"
+// Compile the untouched legacy planner and the opt-in planner in one CUDA
+// translation unit.  The generated robot headers contain device definitions,
+// so separate CUDA objects would otherwise define them twice at device link.
+#include "pRRTC.cu"
 
-#include <curand.h>
-#include <curand_kernel.h>
-#include <float.h>
+#include "AORRTC.hh"
 
-#include <vector>
-#include <iostream>
-#include <cassert>
-#include <algorithm>
-#include <numeric>
-#include <stdexcept>
-#include <type_traits>
-
+#include <climits>
 
 
 /*
@@ -32,7 +13,7 @@ Parallelized RRTC: Each block works to add a config to the tree (either start or
 */
 
 
-namespace pRRTC {
+namespace AORRTC {
     using namespace ppln;
 
     static_assert(robots::CollisionTraits<robots::FfwSg2>::batch_size== FFW_SG2_BATCH_SIZE,
@@ -101,7 +82,34 @@ namespace pRRTC {
     __device__ int connection_other_tree_id = -1;
     __device__ int connection_other_node_idx = -1;
     __device__ int solved_iters = 0; // value of iters in the block that solves the problem
-    __constant__ pRRTC_settings d_settings;
+
+    // AORRTC has independent state so the legacy first-solution planner keeps
+    // its original signaling and path buffers.
+    __device__ volatile int aorrtc_stop_requested = 0;
+    __device__ volatile int aorrtc_solution_found = 0;
+    // Set only for the current fresh-tree search.  The host clears this when
+    // Algorithm 1 restarts RRT-Connect with a tighter c_max.
+    __device__ volatile int aorrtc_search_solution_found = 0;
+    __device__ int aorrtc_best_lock = 0;
+    __device__ int aorrtc_solution_updates = 0;
+    __device__ int aorrtc_best_iters = 0;
+    __device__ float aorrtc_best_cost = FLT_MAX;
+    __device__ float aorrtc_initial_cost = 0.0f;
+
+    struct AORRTCDeviceSolutionUpdate {
+        int update_index;
+        int source_tree_id;
+        int source_node_idx;
+        int target_tree_id;
+        int target_node_idx;
+        int iteration;
+        float cost;
+    };
+
+    __device__ AORRTCDeviceSolutionUpdate *aorrtc_update_records = nullptr;
+    __device__ int aorrtc_update_capacity = 0;
+    __device__ int aorrtc_update_overflow = 0;
+    __constant__ AORRTC_settings d_settings;
 
     constexpr int MAX_GRANULARITY = 16;
     constexpr int MAX_THREADS_PER_BLOCK = 4*MAX_GRANULARITY;
@@ -210,6 +218,113 @@ namespace pRRTC {
         return sqrtf(
             cprrtc_sq_config_distance<Robot>(q_a, q_b)
         );
+    }
+
+
+    template <typename Robot>
+    __device__ __forceinline__ float aorrtc_root_distance_lower_bound(
+        int tree_id,
+        float **nodes,
+        int num_goals,
+        const float *configuration
+    ) {
+        if (tree_id == 0) {
+            return cprrtc_config_distance<Robot>(
+                nodes[0],
+                configuration
+            );
+        }
+
+        float minimum = FLT_MAX;
+        for (int goal_index = 0; goal_index < num_goals; goal_index++) {
+            minimum = fminf(
+                minimum,
+                cprrtc_config_distance<Robot>(
+                    &nodes[1][goal_index * Robot::dimension],
+                    configuration
+                )
+            );
+        }
+        return minimum;
+    }
+
+
+    __device__ __forceinline__ float aorrtc_read_best_cost() {
+        return atomicAdd(&aorrtc_best_cost, 0.0f);
+    }
+
+
+    template <typename Robot, bool TRACE_SOLUTION_UPDATES>
+    __device__ __forceinline__ void aorrtc_try_store_solution(
+        int current_tree_id,
+        int other_tree_id,
+        int current_node_index,
+        int other_node_index,
+        float *current_costs,
+        float *other_costs,
+        float bridge_cost,
+        int iteration
+    ) {
+        // Algorithm 1 returns the first feasible path for the current bounded
+        // RRT-Connect search, then the host restarts with the new c_max.
+        if (aorrtc_search_solution_found != 0) {
+            return;
+        }
+
+        const float candidate_cost =
+            current_costs[current_node_index]
+            + other_costs[other_node_index]
+            + bridge_cost;
+
+        if (candidate_cost + d_settings.cost_improvement_epsilon
+            >= aorrtc_read_best_cost()) {
+            return;
+        }
+
+        while (atomicCAS(&aorrtc_best_lock, 0, 1) != 0) {
+        }
+
+        if (aorrtc_search_solution_found == 0
+            && candidate_cost + d_settings.cost_improvement_epsilon
+                < aorrtc_best_cost) {
+            const int update_index = aorrtc_solution_updates;
+            if (update_index == 0) {
+                aorrtc_initial_cost = candidate_cost;
+            }
+            connection_tree_id = current_tree_id;
+            connection_node_idx = current_node_index;
+            connection_other_tree_id = other_tree_id;
+            connection_other_node_idx = other_node_index;
+            aorrtc_best_iters = iteration;
+            aorrtc_best_cost = candidate_cost;
+            if constexpr (TRACE_SOLUTION_UPDATES) {
+                if (aorrtc_update_records != nullptr
+                    && update_index < aorrtc_update_capacity) {
+                    AORRTCDeviceSolutionUpdate &record =
+                        aorrtc_update_records[update_index];
+                    record.update_index = update_index;
+                    record.source_tree_id = current_tree_id;
+                    record.source_node_idx = current_node_index;
+                    record.target_tree_id = other_tree_id;
+                    record.target_node_idx = other_node_index;
+                    record.iteration = iteration;
+                    record.cost = candidate_cost;
+                }
+                else {
+                    aorrtc_update_overflow = 1;
+                }
+            }
+            aorrtc_solution_updates = update_index + 1;
+            __threadfence();
+            aorrtc_solution_found = 1;
+            aorrtc_search_solution_found = 1;
+            // A fresh AORRTC search returns its first feasible solution.
+            // Ask the remaining blocks in this launch to exit at their next
+            // block-uniform stop check; the host then restarts with tighter c_max.
+            aorrtc_stop_requested = 1;
+        }
+
+        atomicExch(&aorrtc_best_lock, 0);
     }
 
     template<typename Robot>
@@ -428,6 +543,7 @@ namespace pRRTC {
 
     __global__ void reset_device_variables_kernel() {
         solved = 0;
+        solved_iters = 0;
         atomic_free_index[0] = 0;
         atomic_free_index[1] = 0;
         nodes_size[0] = 0;
@@ -442,6 +558,18 @@ namespace pRRTC {
         connection_node_idx = -1;
         connection_other_tree_id = -1;
         connection_other_node_idx = -1;
+
+        aorrtc_stop_requested = 0;
+        aorrtc_solution_found = 0;
+        aorrtc_search_solution_found = 0;
+        aorrtc_best_lock = 0;
+        aorrtc_solution_updates = 0;
+        aorrtc_best_iters = 0;
+        aorrtc_best_cost = FLT_MAX;
+        aorrtc_initial_cost = 0.0f;
+        aorrtc_update_records = nullptr;
+        aorrtc_update_capacity = 0;
+        aorrtc_update_overflow = 0;
     }
 
     void reset_device_variables() {
@@ -937,6 +1065,391 @@ namespace pRRTC {
             );
     }
 
+    // Conservative validator used only by Algorithm 1 Lines 27-32 when a
+    // newly projected x_new is reconsidered with a lower-cost parent.  The
+    // endpoint is kept fixed; the interpolated edge must already satisfy the
+    // equality constraint and collision checks.  This avoids silently changing
+    // x_new during parent resampling.
+    template <typename Robot>
+    __device__ __forceinline__ bool aorrtc_validate_fixed_edge(
+        const float *q_start,
+        const float *q_target,
+        volatile unsigned char *waypoint_valid,
+        volatile float *sphere_pos,
+        volatile float *sphere_pos_approx,
+        volatile int *link_CC,
+        float *T,
+        ppln::collision::Environment<float> *env,
+        volatile unsigned int *local_cc_result,
+        int tid
+    ) {
+        static constexpr int dim = Robot::dimension;
+        using Collision = robots::CollisionTraits<Robot>;
+
+        const int waypoint = tid / 4 + 1;
+        float interp_cfg[dim];
+        const float alpha = static_cast<float>(waypoint)
+            / static_cast<float>(d_settings.granularity);
+
+        #pragma unroll
+        for (int joint = 0; joint < dim; joint++) {
+            interp_cfg[joint] = q_start[joint]
+                + alpha * (q_target[joint] - q_start[joint]);
+        }
+
+        if ((tid & 3) == 0) {
+            bool valid = true;
+            if constexpr (TangentSpaceTraits<Robot>::enabled) {
+                const float residual =
+                    cprrtc_constraint_error_norm<Robot>(interp_cfg);
+                valid = isfinite(residual)
+                    && residual <= d_settings.projection_task_tolerance;
+            }
+            waypoint_valid[waypoint] = valid ? 1u : 0u;
+        }
+        __syncthreads();
+
+        if (tid == 0) {
+            local_cc_result[0] = 0;
+            for (int wp = 1; wp <= d_settings.granularity; wp++) {
+                if (waypoint_valid[wp] == 0u) {
+                    local_cc_result[0] = 1u;
+                    break;
+                }
+            }
+        }
+        __syncthreads();
+
+        if (local_cc_result[0] != 0u) {
+            return false;
+        }
+
+        for (int r = tid;
+             r < Collision::joint_flag_stride * Collision::batch_size;
+             r += blockDim.x) {
+            link_CC[r] = 0;
+        }
+        __syncthreads();
+
+        int detailed_FK = 0;
+        ppln::collision::fk_approx<Robot>(
+            interp_cfg,
+            sphere_pos_approx,
+            T,
+            tid
+        );
+        __syncthreads();
+
+        const bool env_collision_approx =
+            not ppln::collision::env_collision_check_approx<Robot>(
+                sphere_pos_approx,
+                link_CC,
+                env,
+                tid
+            );
+        atomicOr(
+            (unsigned int *)&local_cc_result[0],
+            env_collision_approx ? 1u : 0u
+        );
+        __syncthreads();
+
+        if (local_cc_result[0] == 1u) {
+            if (tid == 0) {
+                local_cc_result[0] = 0u;
+            }
+            __syncthreads();
+
+            ppln::collision::fk<Robot>(interp_cfg, sphere_pos, T, tid);
+            detailed_FK = 1;
+            __syncthreads();
+
+            const bool env_collision =
+                not cprrtc_detailed_env_collision_check<Robot>(
+                    sphere_pos,
+                    link_CC,
+                    env,
+                    tid,
+                    local_cc_result
+                );
+            atomicOr(
+                (unsigned int *)&local_cc_result[0],
+                env_collision ? 1u : 0u
+            );
+            __syncthreads();
+        }
+
+        for (int r = tid;
+             r < Collision::joint_flag_stride * Collision::batch_size;
+             r += blockDim.x) {
+            link_CC[r] = 0;
+        }
+        __syncthreads();
+
+        if (local_cc_result[0] == 0u) {
+            const bool self_collision_approx =
+                not ppln::collision::self_collision_check_approx<Robot>(
+                    sphere_pos_approx,
+                    link_CC,
+                    tid
+                );
+            atomicOr(
+                (unsigned int *)&local_cc_result[0],
+                self_collision_approx ? 1u : 0u
+            );
+            __syncthreads();
+
+            if (local_cc_result[0] == 1u) {
+                if (tid == 0) {
+                    local_cc_result[0] = 0u;
+                }
+                __syncthreads();
+
+                if (detailed_FK == 0) {
+                    ppln::collision::fk<Robot>(
+                        interp_cfg,
+                        sphere_pos,
+                        T,
+                        tid
+                    );
+                    detailed_FK = 1;
+                    __syncthreads();
+                }
+
+                const bool self_collision =
+                    not cprrtc_detailed_self_collision_check<Robot>(
+                        sphere_pos,
+                        link_CC,
+                        tid,
+                        local_cc_result
+                    );
+                atomicOr(
+                    (unsigned int *)&local_cc_result[0],
+                    self_collision ? 1u : 0u
+                );
+                __syncthreads();
+            }
+        }
+
+        return local_cc_result[0] == 0u;
+    }
+
+
+    // Algorithm 1 Lines 27-32.  Starting from the already validated parent,
+    // repeatedly sample a lower cost bound and look for a lower-cost parent.
+    // A replacement parent is accepted only after validating the exact fixed
+    // edge to x_new.  Tangent-bundle planners keep the replacement in the same
+    // tangent-space lane set so the current planner's TS semantics are kept.
+    template <typename Robot>
+    __device__ __forceinline__ int aorrtc_resample_parent(
+        int tree_id,
+        float **all_nodes,
+        float *tree_nodes,
+        float *tree_costs,
+        int *tree_ready,
+        int *tree_ts_lane_head,
+        int *tree_next_in_ts,
+        int selected_ts_id,
+        int tree_size,
+        int initial_parent,
+        const float *x_new,
+        int num_goals,
+        curandState *rng_states,
+        int bid,
+        float *sdata,
+        int *sindex,
+        int *shared_parent,
+        float *shared_parent_cost,
+        float *shared_c_rand,
+        bool *shared_done,
+        volatile unsigned char *waypoint_valid,
+        volatile float *sphere_pos,
+        volatile float *sphere_pos_approx,
+        volatile int *link_CC,
+        float *T,
+        ppln::collision::Environment<float> *env,
+        volatile unsigned int *local_cc_result,
+        int tid
+    ) {
+        if (tid == 0) {
+            *shared_parent = initial_parent;
+            *shared_parent_cost =
+                tree_costs[initial_parent]
+                + cprrtc_config_distance<Robot>(
+                    &tree_nodes[initial_parent * Robot::dimension],
+                    x_new
+                );
+            *shared_done = false;
+        }
+        __syncthreads();
+
+        for (int attempt = 0;
+             attempt < d_settings.aorrtc_max_parent_resamples;
+             attempt++) {
+            if (tid == 0) {
+                const float lower =
+                    aorrtc_root_distance_lower_bound<Robot>(
+                        tree_id,
+                        all_nodes,
+                        num_goals,
+                        x_new
+                    );
+
+                if (!isfinite(lower)
+                    || lower + d_settings.cost_improvement_epsilon
+                        >= *shared_parent_cost) {
+                    *shared_done = true;
+                }
+                else {
+                    const float unit = fminf(
+                        curand_uniform(&rng_states[bid]),
+                        1.0f - FLT_EPSILON
+                    );
+                    *shared_c_rand = lower
+                        + unit * (*shared_parent_cost - lower);
+                    *shared_done = false;
+                }
+            }
+            __syncthreads();
+
+            if (*shared_done) {
+                break;
+            }
+
+            float local_score = FLT_MAX;
+            int local_index = -1;
+
+            if constexpr (TangentSpaceTraits<Robot>::enabled) {
+                int node_idx = tree_ts_lane_head[
+                    selected_ts_id * MAX_THREADS_PER_BLOCK + tid
+                ];
+                while (node_idx >= 0) {
+                    if (tree_ready[node_idx] != 0) {
+                        const float distance =
+                            cprrtc_config_distance<Robot>(
+                                &tree_nodes[node_idx * Robot::dimension],
+                                x_new
+                            );
+                        const float candidate_cost =
+                            tree_costs[node_idx] + distance;
+                        if (candidate_cost
+                            + d_settings.cost_improvement_epsilon
+                            < *shared_c_rand) {
+                            const float score =
+                                d_settings.aorrtc_config_weight * distance
+                                + d_settings.aorrtc_cost_weight
+                                    * fabsf(
+                                        *shared_c_rand
+                                        - tree_costs[node_idx]
+                                    );
+                            if (score < local_score) {
+                                local_score = score;
+                                local_index = node_idx;
+                            }
+                        }
+                    }
+                    node_idx = tree_next_in_ts[node_idx];
+                }
+            }
+            else {
+                for (int node_idx = tid;
+                     node_idx < tree_size;
+                     node_idx += blockDim.x) {
+                    if (tree_ready[node_idx] == 0) {
+                        continue;
+                    }
+                    const float distance =
+                        cprrtc_config_distance<Robot>(
+                            &tree_nodes[node_idx * Robot::dimension],
+                            x_new
+                        );
+                    const float candidate_cost =
+                        tree_costs[node_idx] + distance;
+                    if (candidate_cost
+                        + d_settings.cost_improvement_epsilon
+                        < *shared_c_rand) {
+                        const float score =
+                            d_settings.aorrtc_config_weight * distance
+                            + d_settings.aorrtc_cost_weight
+                                * fabsf(
+                                    *shared_c_rand - tree_costs[node_idx]
+                                );
+                        if (score < local_score) {
+                            local_score = score;
+                            local_index = node_idx;
+                        }
+                    }
+                }
+            }
+
+            sdata[tid] = local_score;
+            sindex[tid] = local_index;
+            __syncthreads();
+
+            for (unsigned int stride = blockDim.x / 2;
+                 stride > 0;
+                 stride >>= 1) {
+                if (tid < static_cast<int>(stride)
+                    && sdata[tid + stride] < sdata[tid]) {
+                    sdata[tid] = sdata[tid + stride];
+                    sindex[tid] = sindex[tid + stride];
+                }
+                __syncthreads();
+            }
+
+            if (tid == 0) {
+                if (sindex[0] < 0 || sindex[0] == *shared_parent) {
+                    *shared_done = true;
+                }
+            }
+            __syncthreads();
+
+            if (*shared_done) {
+                break;
+            }
+
+            const int candidate_parent = sindex[0];
+            const bool valid = aorrtc_validate_fixed_edge<Robot>(
+                &tree_nodes[candidate_parent * Robot::dimension],
+                x_new,
+                waypoint_valid,
+                sphere_pos,
+                sphere_pos_approx,
+                link_CC,
+                T,
+                env,
+                local_cc_result,
+                tid
+            );
+            __syncthreads();
+
+            if (tid == 0) {
+                if (!valid) {
+                    // Algorithm 1 stops and keeps x_p, the previous valid parent.
+                    *shared_done = true;
+                }
+                else {
+                    *shared_parent = candidate_parent;
+                    *shared_parent_cost =
+                        tree_costs[candidate_parent]
+                        + cprrtc_config_distance<Robot>(
+                            &tree_nodes[
+                                candidate_parent * Robot::dimension
+                            ],
+                            x_new
+                        );
+                }
+            }
+            __syncthreads();
+
+            if (*shared_done) {
+                break;
+            }
+        }
+
+        return *shared_parent;
+    }
+
+
     __device__ __forceinline__
     int cprrtc_reserve_slot(volatile int *counter,int capacity){
         int current =atomicAdd((int *)counter,0);
@@ -1084,12 +1597,13 @@ namespace pRRTC {
         return 0.0f;
     }
         
-    template <typename Robot, bool TraceTrees>
+    template <typename Robot, bool TraceTrees, bool AORRTC>
     __global__ void
     // __launch_bounds__(128, 8)
     rrtc(
         float **nodes,
         int **parents,
+        float **node_costs,
         int **node_ready,
         // Tangent Space membership
         int **node_ts_id,
@@ -1106,7 +1620,10 @@ namespace pRRTC {
         float **radii,
         HaltonState<Robot> *halton_states,
         curandState *rng_states,
-        ppln::collision::Environment<float> *env
+        int *block_tree_ids,
+        ppln::collision::Environment<float> *env,
+        int num_goals,
+        int round_index
     )
     {
         static constexpr auto dim = Robot::dimension;
@@ -1119,13 +1636,12 @@ namespace pRRTC {
         __shared__ float sdata[MAX_THREADS_PER_BLOCK];
         __shared__ int sindex[MAX_THREADS_PER_BLOCK];
         __shared__ volatile unsigned int local_cc_result[1];
-        __shared__ bool run_detailed_env_check;
-        __shared__ bool run_self_collision_check;
-        __shared__ bool run_detailed_self_check;
         __shared__ float *t_nodes;
         __shared__ float *o_nodes;
         __shared__ int *t_parents;
         __shared__ int *o_parents;
+        __shared__ float *t_node_costs;
+        __shared__ float *o_node_costs;
         // 현재 선택된 tree의 Tangent Space 정보
         __shared__ int *t_node_ts_id;
         __shared__ float *t_node_ts_q;
@@ -1169,12 +1685,22 @@ namespace pRRTC {
         __shared__ bool new_ts_basis_ok;
         // 다음 새 node가 연결될 실제 tree parent
         __shared__ int concon_parent_idx;
+        // AORRTC Algorithm 1 Lines 27-32 parent-resampling state.
+        __shared__ float aorrtc_new_config[MAX_ROBOT_DIM];
+        __shared__ int aorrtc_resample_parent_idx;
+        __shared__ float aorrtc_resample_parent_cost;
+        __shared__ float aorrtc_resample_crand;
+        __shared__ bool aorrtc_resample_done;
         // 실제로 검사할 edge 개수
         // FFW-SG2에서는 concon_count, 다른 robot에서는 기존처럼 1
         __shared__ int extend_edge_count;
         __shared__ int index;
         __shared__ float vec[dim];
         __shared__ bool should_skip;
+        __shared__ bool aorrtc_bound_active;
+        __shared__ bool aorrtc_sample_valid;
+        __shared__ float aorrtc_sample_cost;
+        __shared__ float aorrtc_best_cost_snapshot;
         // cpRRTC CONNECT state
         // projection 전 target까지 거리
         __shared__ float connect_distance_before;
@@ -1184,6 +1710,11 @@ namespace pRRTC {
         __shared__ bool connect_made_progress;
         // target 도달 여부
         __shared__ bool connection_reached_shared;
+        // Make collision-check branch decisions block-uniform before thread 0
+        // resets the shared collision accumulator.
+        __shared__ bool run_detailed_env_check;
+        __shared__ bool run_self_collision_check;
+        __shared__ bool run_detailed_self_check;
         __shared__ unsigned int n_extensions;
         // CONNECT 시작 시 상대 tree에서 한 번 선택하고 끝까지 유지할 target
         __shared__ int connect_target_idx;
@@ -1203,40 +1734,104 @@ namespace pRRTC {
         __align__(16) __shared__ volatile int link_CC[Collision::joint_flag_stride * Collision::batch_size];
         __align__(16) __shared__ float T[Collision::batch_size * Collision::transform_slots * 16];
 
-        int iter = 0;
+        int iter = AORRTC ? round_index - 1 : 0;
 
         while (true) {
             if (tid == 0) {
                 // printf("iter: %d\n", iter);
                 // printf("tree size: %d\n", atomic_free_index[0]);
                 iter++;
-                if (iter > d_settings.max_iters) {
-                    atomicCAS((int *)&solved, 0, -1);
+                if constexpr (!AORRTC) {
+                    if (iter > d_settings.max_iters) {
+                        atomicCAS((int *)&solved, 0, -1);
+                    }
                 }
 
-                // tree 선택. 더 작은 tree 선택
-                if (d_settings.balance == 0 || iter == 1) {
-                    t_tree_id = (bid < (d_settings.num_new_configs / 2))? 0 : 1;
-                    o_tree_id = 1 - t_tree_id;
-                }
-                else if (d_settings.balance == 1 && abs(atomic_free_index[0]-atomic_free_index[1]) < 1.5 * d_settings.num_new_configs) { // dynamic balance
-                    float ratio = atomic_free_index[0] / (float)(atomic_free_index[0]+atomic_free_index[1]);
-                    float balance_factor = 1 - ratio;
-                    t_tree_id = (bid < (d_settings.num_new_configs * balance_factor))? 0 : 1;
-                    o_tree_id = 1 - t_tree_id;
-                }
-                else if (d_settings.balance == 1) {
-                    float ratio = atomic_free_index[0] / (float)(atomic_free_index[0] + atomic_free_index[1]);
-                    if (ratio < d_settings.tree_ratio) t_tree_id = 0;
-                    else t_tree_id = 1;
-                    o_tree_id = 1 - t_tree_id;
-                }
-                else if (d_settings.balance == 2) { // vamp balance
-                    float ratio = abs(atomic_free_index[t_tree_id] - atomic_free_index[o_tree_id]) / (float) atomic_free_index[t_tree_id]; // |현재 tree 크기 - 반대 tree 크기| / 현재 tree 크기 (두 tree의 상대적인 크기 차이)
-                    if (ratio < d_settings.tree_ratio) // tree size가 비슷한 경우에는 번갈아 확장. tree size 차이가 많이 날 경우에는 작은 tree 계속 확장
-                    {
-                        t_tree_id = 1 - t_tree_id;
+                // tree 선택. AORRTC도 현재 pRRTC의 balance 규칙을 그대로
+                // 사용한다. AORRTC kernel은 host round마다 다시 launch되므로
+                // 각 block의 이전 t_tree_id를 block_tree_ids에 보존한다.
+                if constexpr (AORRTC) {
+                    if (d_settings.balance == 0 || round_index == 1) {
+                        t_tree_id =
+                            (bid < (d_settings.num_new_configs / 2)) ? 0 : 1;
                         o_tree_id = 1 - t_tree_id;
+                    }
+                    else {
+                        t_tree_id = block_tree_ids[bid];
+                        if (t_tree_id != 0 && t_tree_id != 1) {
+                            t_tree_id =
+                                (bid < (d_settings.num_new_configs / 2))
+                                ? 0 : 1;
+                        }
+                        o_tree_id = 1 - t_tree_id;
+
+                        if (d_settings.balance == 1
+                            && abs(atomic_free_index[0] - atomic_free_index[1])
+                                < 1.5f * d_settings.num_new_configs) {
+                            const float ratio = atomic_free_index[0]
+                                / static_cast<float>(
+                                    atomic_free_index[0]
+                                    + atomic_free_index[1]
+                                );
+                            const float balance_factor = 1.0f - ratio;
+                            t_tree_id =
+                                bid < static_cast<int>(
+                                    d_settings.num_new_configs
+                                    * balance_factor
+                                )
+                                ? 0 : 1;
+                            o_tree_id = 1 - t_tree_id;
+                        }
+                        else if (d_settings.balance == 1) {
+                            const float ratio = atomic_free_index[0]
+                                / static_cast<float>(
+                                    atomic_free_index[0]
+                                    + atomic_free_index[1]
+                                );
+                            t_tree_id =
+                                ratio < d_settings.tree_ratio ? 0 : 1;
+                            o_tree_id = 1 - t_tree_id;
+                        }
+                        else if (d_settings.balance == 2) {
+                            const float ratio =
+                                abs(atomic_free_index[t_tree_id]
+                                    - atomic_free_index[o_tree_id])
+                                / static_cast<float>(
+                                    atomic_free_index[t_tree_id]
+                                );
+                            if (ratio < d_settings.tree_ratio) {
+                                t_tree_id = 1 - t_tree_id;
+                                o_tree_id = 1 - t_tree_id;
+                            }
+                        }
+                    }
+
+                    block_tree_ids[bid] = t_tree_id;
+                }
+                else {
+                    if (d_settings.balance == 0 || iter == 1) {
+                        t_tree_id = (bid < (d_settings.num_new_configs / 2))? 0 : 1;
+                        o_tree_id = 1 - t_tree_id;
+                    }
+                    else if (d_settings.balance == 1 && abs(atomic_free_index[0]-atomic_free_index[1]) < 1.5 * d_settings.num_new_configs) { // dynamic balance
+                        float ratio = atomic_free_index[0] / (float)(atomic_free_index[0]+atomic_free_index[1]);
+                        float balance_factor = 1 - ratio;
+                        t_tree_id = (bid < (d_settings.num_new_configs * balance_factor))? 0 : 1;
+                        o_tree_id = 1 - t_tree_id;
+                    }
+                    else if (d_settings.balance == 1) {
+                        float ratio = atomic_free_index[0] / (float)(atomic_free_index[0] + atomic_free_index[1]);
+                        if (ratio < d_settings.tree_ratio) t_tree_id = 0;
+                        else t_tree_id = 1;
+                        o_tree_id = 1 - t_tree_id;
+                    }
+                    else if (d_settings.balance == 2) { // vamp balance
+                        float ratio = abs(atomic_free_index[t_tree_id] - atomic_free_index[o_tree_id]) / (float) atomic_free_index[t_tree_id]; // |현재 tree 크기 - 반대 tree 크기| / 현재 tree 크기 (두 tree의 상대적인 크기 차이)
+                        if (ratio < d_settings.tree_ratio) // tree size가 비슷한 경우에는 번갈아 확장. tree size 차이가 많이 날 경우에는 작은 tree 계속 확장
+                        {
+                            t_tree_id = 1 - t_tree_id;
+                            o_tree_id = 1 - t_tree_id;
+                        }
                     }
                 }
 
@@ -1244,6 +1839,10 @@ namespace pRRTC {
                 o_nodes = nodes[o_tree_id];
                 t_parents = parents[t_tree_id];
                 o_parents = parents[o_tree_id];
+                if constexpr (AORRTC) {
+                    t_node_costs = node_costs[t_tree_id];
+                    o_node_costs = node_costs[o_tree_id];
+                }
                 if constexpr (TangentSpaceTraits<Robot>::enabled) {
                     // 현재 확장할 tree에 속한 node들의 TS 정보
                     t_node_ts_id =node_ts_id[t_tree_id];
@@ -1257,10 +1856,14 @@ namespace pRRTC {
                     t_node_next_in_ts =node_next_in_ts[t_tree_id];
                     // 현재 tree에 존재하는 Tangent Space 개수
                     t_ts_count =ts_count[t_tree_id];
+                } else {
+                    t_ts_lane_head = nullptr;
+                    t_node_next_in_ts = nullptr;
+                    selected_ts_id = -1;
                 }
                 t_node_ready =node_ready[t_tree_id];
                 o_node_ready = node_ready[o_tree_id];
-                t_tree_size = min((int)atomic_free_index[t_tree_id], d_settings.max_samples);
+                t_tree_size = atomic_free_index[t_tree_id];
 
                 // FFW-SG2 → Tangent Space sampling. q_rand 생성에서 사용할 파라미터 생성
                 if constexpr (TangentSpaceTraits<Robot>::enabled) {
@@ -1326,7 +1929,12 @@ namespace pRRTC {
 
             if constexpr (TraceTrees) {
                 if (tid == 0) {
-                    should_skip = (solved != 0);
+                    if constexpr (AORRTC) {
+                        should_skip = aorrtc_stop_requested != 0;
+                    }
+                    else {
+                        should_skip = (solved != 0);
+                    }
                 }
                 __syncthreads();
                 if (should_skip) {
@@ -1334,11 +1942,10 @@ namespace pRRTC {
                 }
             }
             else {
-                if (tid == 0) {
-                    should_skip = (solved != 0);
+                if constexpr (AORRTC) {
+                    if (aorrtc_stop_requested != 0) return;
                 }
-                __syncthreads();
-                if (should_skip) {
+                else if (solved != 0) {
                     return;
                 }
             }
@@ -1346,7 +1953,12 @@ namespace pRRTC {
             if constexpr (TangentSpaceTraits<Robot>::enabled) {
                 // 사용할 수 있는 Tangent Space를 찾지 못했으면 이번 EXTEND iteration을 버린다.
                 if (selected_ts_id < 0) {
-                    continue;
+                    if constexpr (AORRTC) {
+                        return;
+                    }
+                    else {
+                        continue;
+                    }
                 }
             }
 
@@ -1364,6 +1976,54 @@ namespace pRRTC {
                     (float *)config,
                     tid
                 );
+            }
+
+            if constexpr (AORRTC) {
+                __syncthreads();
+                if (tid == 0) {
+                    aorrtc_best_cost_snapshot = aorrtc_read_best_cost();
+                    aorrtc_bound_active =
+                        aorrtc_solution_found != 0
+                        && aorrtc_best_cost_snapshot < FLT_MAX;
+                    aorrtc_sample_valid = true;
+                    aorrtc_sample_cost = FLT_MAX;
+
+                    if (aorrtc_bound_active) {
+                        const float lower_from =
+                            aorrtc_root_distance_lower_bound<Robot>(
+                                t_tree_id,
+                                nodes,
+                                num_goals,
+                                (float *)config
+                            );
+                        const float lower_to =
+                            aorrtc_root_distance_lower_bound<Robot>(
+                                o_tree_id,
+                                nodes,
+                                num_goals,
+                                (float *)config
+                            );
+                        const float available_cost =
+                            aorrtc_best_cost_snapshot - lower_to - lower_from;
+
+                        if (available_cost <= d_settings.cost_improvement_epsilon) {
+                            aorrtc_sample_valid = false;
+                        }
+                        else {
+                            const float unit_sample = fminf(
+                                curand_uniform(&rng_states[bid]),
+                                1.0f - FLT_EPSILON
+                            );
+                            aorrtc_sample_cost =
+                                lower_from + unit_sample * available_cost;
+                        }
+                    }
+                }
+                __syncthreads();
+
+                if (!aorrtc_sample_valid) {
+                    return;
+                }
             }
 
             // reset link_CC every iteration
@@ -1390,9 +2050,31 @@ namespace pRRTC {
                                 (float *)&t_node_ts_q[node_idx * dim],
                                 (float *)config
                             );
+                        float candidate_score = candidate_dist;
+                        bool candidate_allowed = true;
+                        if constexpr (AORRTC) {
+                            if (aorrtc_bound_active) {
+                                const float actual_distance =
+                                    cprrtc_config_distance<Robot>(
+                                        &t_nodes[node_idx * dim],
+                                        (float *)config
+                                    );
+                                candidate_allowed =
+                                    t_node_costs[node_idx] + actual_distance
+                                    < aorrtc_sample_cost;
+                                candidate_score =
+                                    d_settings.aorrtc_config_weight
+                                        * sqrtf(candidate_dist)
+                                    + d_settings.aorrtc_cost_weight
+                                        * fabsf(
+                                            aorrtc_sample_cost
+                                            - t_node_costs[node_idx]
+                                        );
+                            }
+                        }
                         // 지금까지 본 노드 중 가장 가까우면 기록
-                        if (candidate_dist < local_min_dist) {
-                            local_min_dist =candidate_dist;
+                        if (candidate_allowed && candidate_score < local_min_dist) {
+                            local_min_dist =candidate_score;
                             local_near_idx =node_idx;
                         }
                     }
@@ -1414,9 +2096,27 @@ namespace pRRTC {
                             (float *)&t_nodes[i * dim],
                             (float *)config
                         );
+                    float candidate_score = candidate_dist;
+                    bool candidate_allowed = true;
+                    if constexpr (AORRTC) {
+                        if (aorrtc_bound_active) {
+                            const float configuration_distance =
+                                sqrtf(candidate_dist);
+                            candidate_allowed =
+                                t_node_costs[i] + configuration_distance
+                                < aorrtc_sample_cost;
+                            candidate_score =
+                                d_settings.aorrtc_config_weight
+                                    * configuration_distance
+                                + d_settings.aorrtc_cost_weight
+                                    * fabsf(
+                                        aorrtc_sample_cost - t_node_costs[i]
+                                    );
+                        }
+                    }
 
-                    if (candidate_dist < local_min_dist) {
-                        local_min_dist =candidate_dist;
+                    if (candidate_allowed && candidate_score < local_min_dist) {
+                        local_min_dist =candidate_score;
                         local_near_idx =i;
                     }
                 }
@@ -1447,8 +2147,30 @@ namespace pRRTC {
                     should_skip = true;
                 }
                 else {
-                    // q_rand와 nominal q_near_TS 사이 거리
-                    q_rand_dist =sqrtf(sdata[0]);
+                    // In bounded AORRTC search, sdata contains augmented-state
+                    // score rather than squared configuration distance.
+                    if constexpr (AORRTC) {
+                        if (aorrtc_bound_active) {
+                            if constexpr (TangentSpaceTraits<Robot>::enabled) {
+                                q_rand_dist = cprrtc_config_distance<Robot>(
+                                    &t_node_ts_q[sindex[0] * dim],
+                                    (float *)config
+                                );
+                            }
+                            else {
+                                q_rand_dist = cprrtc_config_distance<Robot>(
+                                    &t_nodes[sindex[0] * dim],
+                                    (float *)config
+                                );
+                            }
+                        }
+                        else {
+                            q_rand_dist = sqrtf(sdata[0]);
+                        }
+                    }
+                    else {
+                        q_rand_dist =sqrtf(sdata[0]);
+                    }
 
                     // 실제 tree node 가져오기 (q_near)
                     nearest_node =&t_nodes[sindex[0] * dim];
@@ -1478,7 +2200,12 @@ namespace pRRTC {
             __syncthreads();
 
             if (should_skip) {
-                continue;
+                if constexpr (AORRTC) {
+                    return;
+                }
+                else {
+                    continue;
+                }
             }
             __syncthreads();
 
@@ -1757,15 +2484,80 @@ namespace pRRTC {
                 }
 
                 if (edge_good) {
+                    if constexpr (AORRTC) {
+                        // The paper/VAMP implementation obtains the initial
+                        // solution with the underlying RRT-Connect planner.
+                        // Cost-bound parent resampling therefore starts only
+                        // after the first solution established c_max.
+                        if (aorrtc_bound_active && tid < dim) {
+                            aorrtc_new_config[tid] = stored_edge_endpoint;
+                        }
+                        __syncthreads();
+
+                        if (aorrtc_bound_active) {
+                            const int resample_tree_size = atomicAdd(
+                                (int *)&atomic_free_index[t_tree_id],
+                                0
+                            );
+                            const int resampled_parent =
+                                aorrtc_resample_parent<Robot>(
+                                t_tree_id,
+                                nodes,
+                                t_nodes,
+                                t_node_costs,
+                                t_node_ready,
+                                t_ts_lane_head,
+                                t_node_next_in_ts,
+                                selected_ts_id,
+                                resample_tree_size,
+                                concon_parent_idx,
+                                aorrtc_new_config,
+                                num_goals,
+                                rng_states,
+                                bid,
+                                sdata,
+                                sindex,
+                                &aorrtc_resample_parent_idx,
+                                &aorrtc_resample_parent_cost,
+                                &aorrtc_resample_crand,
+                                &aorrtc_resample_done,
+                                motion_projection_valid,
+                                sphere_pos,
+                                sphere_pos_approx,
+                                link_CC,
+                                T,
+                                env,
+                                local_cc_result,
+                                tid
+                            );
+                            if (tid == 0) {
+                                concon_parent_idx = resampled_parent;
+                            }
+                            __syncthreads();
+                        }
+                    }
+
                     // grow tree
                     if (tid == 0) {
-                        index = cprrtc_reserve_slot(
-                            &atomic_free_index[t_tree_id],
-                            d_settings.max_samples
-                        );
+                        if constexpr (AORRTC) {
+                            index = cprrtc_reserve_slot(
+                                &atomic_free_index[t_tree_id],
+                                d_settings.max_samples
+                            );
+                        }
+                        else {
+                            index =atomicAdd((int *)&atomic_free_index[t_tree_id],1);
+                        }
 
-                        if (index < 0) {
-                            atomicCAS((int *)&solved, 0, -1);
+                        if (index < 0 || index >= d_settings.max_samples) {
+                            if constexpr (AORRTC) {
+                                atomicExch((int *)&aorrtc_stop_requested, 1);
+                            }
+                            else {
+                                atomicCAS((int *)&solved,0,-1);
+                            }
+
+                            index = -1;
                         }
                     }
                     __syncthreads();
@@ -1809,6 +2601,18 @@ namespace pRRTC {
                     }
                     __syncthreads();
 
+                    if constexpr (AORRTC) {
+                        if (tid == 0) {
+                            t_node_costs[index] =
+                                t_node_costs[concon_parent_idx]
+                                + cprrtc_config_distance<Robot>(
+                                    &t_nodes[concon_parent_idx * dim],
+                                    &t_nodes[index * dim]
+                                );
+                        }
+                        __syncthreads();
+                    }
+
                     if constexpr (TangentSpaceTraits<Robot>::enabled) {
                         // 이 node가 EM threshold를 넘어서 만들어진 마지막 ConCon node인지 확인
                         const bool is_em_boundary_node =concon_em_stop&&(edge_step == concon_count);
@@ -1833,7 +2637,12 @@ namespace pRRTC {
                                 // TSBank 공간 부족
                                 if (new_ts_id < 0) {
                                     new_ts_basis_ok = false;
-                                    atomicCAS((int *)&solved,0,-1);
+                                    if constexpr (AORRTC) {
+                                        atomicExch((int *)&aorrtc_stop_requested, 1);
+                                    }
+                                    else {
+                                        atomicCAS((int *)&solved,0,-1);
+                                    }
                                 }
                                 else {
                                     // 아직 다른 block이 이 TS를 사용하면 안 됨
@@ -1853,7 +2662,12 @@ namespace pRRTC {
                                     }
                                     else {
                                         t_node_ts_id[index] =-1;
-                                        atomicCAS((int *)&solved,0,-1);
+                                        if constexpr (AORRTC) {
+                                            atomicExch((int *)&aorrtc_stop_requested, 1);
+                                        }
+                                        else {
+                                            atomicCAS((int *)&solved,0,-1);
+                                        }
                                     }
                                 }
                             }
@@ -1896,7 +2710,15 @@ namespace pRRTC {
                                 }
                             }
                             if (should_skip) {
-                                atomicCAS((int *)&solved, 0, -1);
+                                if constexpr (AORRTC) {
+                                    atomicExch(
+                                        (int *)&aorrtc_stop_requested,
+                                        1
+                                    );
+                                }
+                                else {
+                                    atomicCAS((int *)&solved, 0, -1);
+                                }
                             }
                         }
                         __syncthreads();
@@ -1952,7 +2774,7 @@ namespace pRRTC {
                 // connect
                 local_min_dist = FLT_MAX;
                 local_near_idx = 0;
-                int size = min((int)atomic_free_index[o_tree_id], d_settings.max_samples); // 빈데편 tree 크기 가져오기
+                int size = atomic_free_index[o_tree_id]; // 빈데편 tree 크기 가져오기
 
                 // 반대편 tree node를 thread들이 나눠서 NN 검사
                 for (unsigned int i = tid; i < size; i += blockDim.x) { 
@@ -1963,8 +2785,31 @@ namespace pRRTC {
                         &o_nodes[i * dim],
                         config
                     );
-                    if (dist < local_min_dist) { // 현재 thread가 찾은 최근접 노드 갱신
-                        local_min_dist = dist;
+                    float candidate_score = dist;
+                    bool candidate_allowed = true;
+                    if constexpr (AORRTC) {
+                        if (aorrtc_solution_found != 0) {
+                            const float configuration_distance = sqrtf(dist);
+                            const float current_best = aorrtc_read_best_cost();
+                            const float total_lower_bound =
+                                t_node_costs[index]
+                                + o_node_costs[i]
+                                + configuration_distance;
+                            candidate_allowed =
+                                total_lower_bound
+                                + d_settings.cost_improvement_epsilon
+                                < current_best;
+                            const float remaining_cost =
+                                current_best - t_node_costs[index];
+                            candidate_score =
+                                d_settings.aorrtc_config_weight
+                                    * configuration_distance
+                                + d_settings.aorrtc_cost_weight
+                                    * fabsf(remaining_cost - o_node_costs[i]);
+                        }
+                    }
+                    if (candidate_allowed && candidate_score < local_min_dist) { // 현재 thread가 찾은 최근접 노드 갱신
+                        local_min_dist = candidate_score;
                         local_near_idx = i;
                     }
                 }
@@ -1983,6 +2828,12 @@ namespace pRRTC {
                     }
                     __syncthreads();
                 }
+
+                if constexpr (AORRTC) {
+                    if (sdata[0] == FLT_MAX) {
+                        return;
+                    }
+                }
                  
                 // 반대편 tree에서 찾은 최근접 노드를 CONNECT 목표로 고정하고, 그 노드까지 몇 번 확장해야 하는지 계산하는 초기화 과정
                 if (tid == 0) {
@@ -1992,7 +2843,16 @@ namespace pRRTC {
 
                     // 새 TB-RRT CONNECT 상태 초기화
                     connect_failed = false;
-                    const float connect_total_distance =sqrtf(sdata[0]);
+                    float connect_total_distance = sqrtf(sdata[0]);
+                    if constexpr (AORRTC) {
+                        if (aorrtc_solution_found != 0) {
+                            connect_total_distance =
+                                cprrtc_config_distance<Robot>(
+                                    config,
+                                    connect_target_node
+                                );
+                        }
+                    }
                     connect_reached =connect_total_distance<= d_settings.connect_reached_tolerance; // 현재 위치가 목표 노드에 충분히 가까운지 확인
 
                     n_extensions =static_cast<unsigned int>(ceilf(connect_total_distance/ d_settings.range)); // 목표 노드까지 range 간격으로 이동하려면 몇 번 확장해야 하는지 계산
@@ -2011,7 +2871,12 @@ namespace pRRTC {
                 while (connect_chunk_count< d_settings.max_connect_concon_chunks) { // 상대 tree의 target 향해 계속 확장
                     if constexpr (TraceTrees) {
                         if (tid == 0) {
-                            should_skip = (solved != 0);
+                            if constexpr (AORRTC) {
+                                should_skip = (aorrtc_stop_requested != 0);
+                            }
+                            else {
+                                should_skip = (solved != 0);
+                            }
                         }
                         __syncthreads();
                         if (should_skip) {
@@ -2019,11 +2884,10 @@ namespace pRRTC {
                         }
                     }
                     else {
-                        if (tid == 0) {
-                            should_skip = (solved != 0);
+                        if constexpr (AORRTC) {
+                            if (aorrtc_stop_requested != 0) return;
                         }
-                        __syncthreads();
-                        if (should_skip) {
+                        else if (solved != 0) {
                             return;
                         }
                     }
@@ -2037,116 +2901,123 @@ namespace pRRTC {
 
                     if (tid == 0) {
                         connect_reached =chunk_start_target_distance<= d_settings.connect_reached_tolerance;
+                        if constexpr (AORRTC) {
+                            if (aorrtc_solution_found != 0) {
+                                const float total_lower_bound =
+                                    t_node_costs[index]
+                                    + o_node_costs[connect_target_idx]
+                                    + chunk_start_target_distance;
+                                if (total_lower_bound
+                                    + d_settings.cost_improvement_epsilon
+                                    >= aorrtc_read_best_cost()) {
+                                    connect_failed = true;
+                                }
+                            }
+                        }
                     }
                     __syncthreads();
+
+                    if (connect_failed) {
+                        break;
+                    }
 
                     if (connect_reached) {
                         break;
                     }
 
+                    // [NEW CONNECT] 현재 node가 속한 Tangent Space 확인
+                    if (tid == 0) {
+                        // 현재 CONNECT 시작 node가 속한 Tangent Space
+                        selected_ts_id =t_node_ts_id[index];
+
+                        // 유효한 Tangent Space인지 확인
+                        if (selected_ts_id < 0||t_ts_ready[selected_ts_id] == 0) {
+                            connect_failed = true;
+                        }
+                        else {
+                            // 현재 실제 manifold상의 tree node
+                            nearest_node =&t_nodes[index * dim];
+
+                            // 같은 node의 Tangent Space 위 nominal configuration
+                            nearest_ts_node =&t_node_ts_q[index * dim];
+                        }
+                    }
+                    __syncthreads();
+
+                    // [NEW CONNECT] 현재 TS의 tangent basis
+                    const float *connect_basis = nullptr;
+
+                    if (!connect_failed) {
+                        connect_basis = &t_ts_bases[
+                            selected_ts_id * TangentSpaceTraits<Robot>::basis_size
+                        ];
+                    }
+
+                    __syncthreads();
+
                     float connect_tangent_dist = 0.0f;
 
-                    if constexpr (TangentSpaceTraits<Robot>::enabled) {
-                        // [NEW CONNECT] 현재 node가 속한 Tangent Space 확인
-                        if (tid == 0) {
-                            // 현재 CONNECT 시작 node가 속한 Tangent Space
-                            selected_ts_id =t_node_ts_id[index];
-
-                            // 유효한 Tangent Space인지 확인
-                            if (selected_ts_id < 0||t_ts_ready[selected_ts_id] == 0) {
-                                connect_failed = true;
-                            }
-                            else {
-                                // 현재 실제 manifold상의 tree node
-                                nearest_node =&t_nodes[index * dim];
-
-                                // 같은 node의 Tangent Space 위 nominal configuration
-                                nearest_ts_node =&t_node_ts_q[index * dim];
-                            }
-                        }
-                        __syncthreads();
-
-                        // [NEW CONNECT] 현재 TS의 tangent basis
-                        const float *connect_basis = nullptr;
-
-                        if (!connect_failed) {
-                            connect_basis = &t_ts_bases[
-                                selected_ts_id * TangentSpaceTraits<Robot>::basis_size
-                            ];
-                        }
-
-                        __syncthreads();
-
-                        if (!connect_failed) {
-                            connect_tangent_dist = cprrtc_project_target_direction_to_tangent<Robot>(
-                                    config,
-                                    connect_target_node,
-                                    connect_basis,
-                                    ts_coeff,
-                                    extend_dir,
-                                    sdata,
-                                    tid
-                                );
-                        }
-                        __syncthreads();
-
-                        if (tid == 0) {
-                            if (!connect_failed&&connect_tangent_dist <= 1.0e-8f) {
-                                connect_failed = true;
-                            }
-                        }
-                        __syncthreads();
-
-                        if (tid == 0) {
-                            concon_count = 0;
-                            concon_em_stop = false;
-                        }
-                        __syncthreads();
-
-                        if (!connect_failed) {
-                            for (int step = 1; step <= d_settings.max_concon_nodes; step++) {
-                                // 원래라면 step * range 만큼 이동 하지만 target까지 tangent distance를 넘지 않도록 제한
-                                const float raw_step_distance =static_cast<float>(step)* d_settings.range;
-                                const float connect_step_distance =fminf(raw_step_distance,connect_tangent_dist);
-
-                                // 이번 candidate가 target까지의 마지막 candidate인지
-                                const bool connect_target_step =raw_step_distance>= connect_tangent_dist;
-
-                                // 현재 TS 위 nominal candidate
-                                if (tid < dim) {
-                                    concon_probe[tid] =nearest_ts_node[tid]+connect_step_distance* extend_dir[tid];
-                                }
-                                __syncthreads();
-
-                                // 기존과 동일하게 EM 검사
-                                if (tid == 0) {
-                                    const float em_error =cprrtc_constraint_error_norm<Robot>(concon_probe);
-                                    concon_count = step;
-                                    if (em_error >d_settings.em_threshold) {
-                                        concon_em_stop = true;
-                                    }
-                                }
-                                __syncthreads();
-
-                                // 1. EM threshold를 넘었거나
-                                // 2. target까지 필요한 tangent distance에 도달했으면
-                                // 더 이상 candidate를 만들지 않음
-                                if (concon_em_stop||connect_target_step
-                                ) {
-                                    break;
-                                }
-                            }
-                        }
-                        __syncthreads();
+                    if (!connect_failed) {
+                        connect_tangent_dist = cprrtc_project_target_direction_to_tangent<Robot>(
+                                config,
+                                connect_target_node,
+                                connect_basis,
+                                ts_coeff,
+                                extend_dir,
+                                sdata,
+                                tid
+                            );
                     }
-                    else {
-                        if (tid == 0) {
-                            nearest_node =&t_nodes[index * dim];
-                            concon_count = 1;
-                            concon_em_stop = false;
+                    __syncthreads();
+
+                    if (tid == 0) {
+                        if (!connect_failed&&connect_tangent_dist <= 1.0e-8f) {
+                            connect_failed = true;
                         }
-                        __syncthreads();
                     }
+                    __syncthreads();
+
+                    if (tid == 0) {
+                        concon_count = 0;
+                        concon_em_stop = false;
+                    }
+                    __syncthreads();
+
+                    if (!connect_failed) {
+                        for (int step = 1; step <= d_settings.max_concon_nodes; step++) {
+                            // 원래라면 step * range 만큼 이동 하지만 target까지 tangent distance를 넘지 않도록 제한
+                            const float raw_step_distance =static_cast<float>(step)* d_settings.range;
+                            const float connect_step_distance =fminf(raw_step_distance,connect_tangent_dist);
+
+                            // 이번 candidate가 target까지의 마지막 candidate인지
+                            const bool connect_target_step =raw_step_distance>= connect_tangent_dist;
+
+                            // 현재 TS 위 nominal candidate
+                            if (tid < dim) {
+                                concon_probe[tid] =nearest_ts_node[tid]+connect_step_distance* extend_dir[tid];
+                            }
+                            __syncthreads();
+
+                            // 기존과 동일하게 EM 검사
+                            if (tid == 0) {
+                                const float em_error =cprrtc_constraint_error_norm<Robot>(concon_probe);
+                                concon_count = step;
+                                if (em_error >d_settings.em_threshold) {
+                                    concon_em_stop = true;
+                                }
+                            }
+                            __syncthreads();
+
+                            // 1. EM threshold를 넘었거나
+                            // 2. target까지 필요한 tangent distance에 도달했으면
+                            // 더 이상 candidate를 만들지 않음
+                            if (concon_em_stop||connect_target_step
+                            ) {
+                                break;
+                            }
+                        }
+                    }
+                    __syncthreads();   
 
                     // 이번 ConCon chunk의 실제 edge validation 준비
                     if (tid == 0) {
@@ -2168,7 +3039,12 @@ namespace pRRTC {
 
                         if constexpr (TraceTrees) {
                             if (tid == 0) {
-                                should_skip = (solved != 0);
+                                if constexpr (AORRTC) {
+                                    should_skip = (aorrtc_stop_requested != 0);
+                                }
+                                else {
+                                    should_skip = (solved != 0);
+                                }
                             }
                             __syncthreads();
                             if (should_skip) {
@@ -2176,40 +3052,22 @@ namespace pRRTC {
                             }
                         }
                         else {
-                            if (tid == 0) {
-                                should_skip = (solved != 0);
+                            if constexpr (AORRTC) {
+                                if (aorrtc_stop_requested != 0) return;
                             }
-                            __syncthreads();
-                            if (should_skip) {
+                            else if (solved != 0) {
                                 return;
                             }
                         }
 
-                        if (tid < dim) {
-                            if constexpr (TangentSpaceTraits<Robot>::enabled) {
-                                // 이번 edge의 Tangent Space 위 nominal target 생성
-                                // target까지 필요한 tangent distance보다
-                                // 멀리 가지 않도록 마지막 edge 길이를 줄인다.
-                                const float raw_edge_distance =
-                                    static_cast<float>(edge_step) * d_settings.range;
-                                const float connect_edge_distance =
-                                    fminf(raw_edge_distance, connect_tangent_dist);
+                        // 이번 edge의 Tangent Space 위 nominal target 생성
+                        // target까지 필요한 tangent distance보다
+                        // 멀리 가지 않도록 마지막 edge 길이를 줄인다.
+                        const float raw_edge_distance =static_cast<float>(edge_step)* d_settings.range;
+                        const float connect_edge_distance =fminf(raw_edge_distance,connect_tangent_dist);
 
-                                concon_probe[tid] =
-                                    nearest_ts_node[tid]
-                                    + connect_edge_distance * extend_dir[tid];
-                            }
-                            else {
-                                const float step_scale = fminf(
-                                    1.0f,
-                                    d_settings.range
-                                        / fmaxf(chunk_start_target_distance, 1.0e-8f)
-                                );
-                                concon_probe[tid] =
-                                    config[tid]
-                                    + (connect_target_node[tid] - config[tid])
-                                        * step_scale;
-                            }
+                        if (tid < dim) {
+                            concon_probe[tid] =nearest_ts_node[tid]+connect_edge_distance* extend_dir[tid];
                             // 실제 projected 현재 node
                             //          ↓
                             // 이번 TS nominal target
@@ -2239,121 +3097,118 @@ namespace pRRTC {
                         }
                         __syncthreads();
 
-                        bool extension_collision_free = false;
-                        if (extension_projection_good) {
-                            // 7. projected waypoint 가져오기
-                            for (int i = 0; i < dim; i++) {
-                                interp_cfg[i] =
-                                    motion_segment[waypoint * dim + i];
-                            }
-                            __syncthreads();
+                        // 7. projected waypoint 가져오기
+                        for (int i = 0; i < dim; i++) {
+                            interp_cfg[i] =
+                                motion_segment[waypoint * dim + i];
+                        }
+                        __syncthreads();
 
-                            // 8. projected motion에 대해 기존 4-thread/waypoint collision check
-                            // 새로운 CONNECT segment 검사 시작
+                        // 8. projected motion에 대해 기존 4-thread/waypoint collision check
+                        // 새로운 CONNECT segment 검사 시작
+                        if (tid == 0) {
+                            local_cc_result[0] = 0;
+                        }
+                        __syncthreads();
+
+
+                        // link collision flag 초기화
+                        for (int r = tid; r < Collision::joint_flag_stride * Collision::batch_size; r += blockDim.x
+                        ) {
+                            link_CC[r] = 0;
+                        }
+                        __syncthreads();
+
+
+                        int detailed_FK = 0;
+
+                        // approximate FK + environment CC
+                        ppln::collision::fk_approx<Robot>(interp_cfg,sphere_pos_approx,T,tid);
+
+                        __syncthreads();
+
+                        bool config_in_collision2_approx =not ppln::collision::env_collision_check_approx<Robot>(sphere_pos_approx,link_CC,env,tid);
+
+                        atomicOr((unsigned int *)&local_cc_result[0],config_in_collision2_approx ? 1u : 0u);
+
+                        __syncthreads();
+
+
+                        if (tid == 0) {
+                            run_detailed_env_check = local_cc_result[0] == 1;
+                        }
+                        __syncthreads();
+
+                        // approximate env에서 걸렸으면 detailed env 검사
+                        if (run_detailed_env_check) {
                             if (tid == 0) {
                                 local_cc_result[0] = 0;
                             }
                             __syncthreads();
 
+                            ppln::collision::fk<Robot>(interp_cfg,sphere_pos,T,tid);
 
-                            // link collision flag 초기화
-                            for (int r = tid; r < Collision::joint_flag_stride * Collision::batch_size; r += blockDim.x
-                            ) {
-                                link_CC[r] = 0;
-                            }
-                            __syncthreads();
-
-
-                            int detailed_FK = 0;
-
-                            // approximate FK + environment CC
-                            ppln::collision::fk_approx<Robot>(interp_cfg,sphere_pos_approx,T,tid);
+                            detailed_FK = 1;
 
                             __syncthreads();
 
-                            bool config_in_collision2_approx =not ppln::collision::env_collision_check_approx<Robot>(sphere_pos_approx,link_CC,env,tid);
+                            bool config_in_collision2 = not cprrtc_detailed_env_collision_check<Robot>(sphere_pos,link_CC,env,tid,local_cc_result);
 
-                            atomicOr((unsigned int *)&local_cc_result[0],config_in_collision2_approx ? 1u : 0u);
+                            atomicOr((unsigned int *)&local_cc_result[0],config_in_collision2 ? 1u : 0u);
 
                             __syncthreads();
+                        }
 
+                        // self collision용 flag 초기화
+                        for (int r = tid; r < Collision::joint_flag_stride * Collision::batch_size; r += blockDim.x) {
+                            link_CC[r] = 0;
+                        }
+                        __syncthreads();
+
+                        if (tid == 0) {
+                            run_self_collision_check = local_cc_result[0] == 0;
+                        }
+                        __syncthreads();
+
+                        // environment collision-free이면 self collision
+                        if (run_self_collision_check) {
+                            bool config_in_collision_approx =not ppln::collision::self_collision_check_approx<Robot>(sphere_pos_approx,link_CC,tid);
+
+                            atomicOr((unsigned int *)&local_cc_result[0],config_in_collision_approx ? 1u : 0u);
+
+                            __syncthreads();
 
                             if (tid == 0) {
-                                run_detailed_env_check = local_cc_result[0] == 1;
+                                run_detailed_self_check =
+                                    local_cc_result[0] == 1;
                             }
                             __syncthreads();
 
-                            // approximate env에서 걸렸으면 detailed env 검사
-                            if (run_detailed_env_check) {
+                            if (run_detailed_self_check) {
                                 if (tid == 0) {
                                     local_cc_result[0] = 0;
                                 }
                                 __syncthreads();
 
-                                ppln::collision::fk<Robot>(interp_cfg,sphere_pos,T,tid);
 
-                                detailed_FK = 1;
+                                if (detailed_FK == 0) {
+                                    ppln::collision::fk<Robot>(interp_cfg,sphere_pos,T,tid);
 
-                                __syncthreads();
-
-                                bool config_in_collision2 = not cprrtc_detailed_env_collision_check<Robot>(sphere_pos,link_CC,env,tid,local_cc_result);
-
-                                atomicOr((unsigned int *)&local_cc_result[0],config_in_collision2 ? 1u : 0u);
-
-                                __syncthreads();
-                            }
-
-                            // self collision용 flag 초기화
-                            for (int r = tid; r < Collision::joint_flag_stride * Collision::batch_size; r += blockDim.x) {
-                                link_CC[r] = 0;
-                            }
-                            __syncthreads();
-
-                            if (tid == 0) {
-                                run_self_collision_check = local_cc_result[0] == 0;
-                            }
-                            __syncthreads();
-
-                            // environment collision-free이면 self collision
-                            if (run_self_collision_check) {
-                                bool config_in_collision_approx =not ppln::collision::self_collision_check_approx<Robot>(sphere_pos_approx,link_CC,tid);
-
-                                atomicOr((unsigned int *)&local_cc_result[0],config_in_collision_approx ? 1u : 0u);
-
-                                __syncthreads();
-
-                                if (tid == 0) {
-                                    run_detailed_self_check =
-                                        local_cc_result[0] == 1;
-                                }
-                                __syncthreads();
-
-                                if (run_detailed_self_check) {
-                                    if (tid == 0) {
-                                        local_cc_result[0] = 0;
-                                    }
-                                    __syncthreads();
-
-
-                                    if (detailed_FK == 0) {
-                                        ppln::collision::fk<Robot>(interp_cfg,sphere_pos,T,tid);
-
-                                        detailed_FK = 1;
-
-                                        __syncthreads();
-                                    }
-
-
-                                    bool config_in_collision =not cprrtc_detailed_self_collision_check<Robot>(sphere_pos,link_CC,tid,local_cc_result);
-
-                                    atomicOr((unsigned int *)&local_cc_result[0],config_in_collision ? 1u : 0u);
+                                    detailed_FK = 1;
 
                                     __syncthreads();
                                 }
-                            }
 
-                            extension_collision_free = (local_cc_result[0] == 0);
+
+                                bool config_in_collision =not cprrtc_detailed_self_collision_check<Robot>(sphere_pos,link_CC,tid,local_cc_result);
+
+                                atomicOr((unsigned int *)&local_cc_result[0],config_in_collision ? 1u : 0u);
+
+                                __syncthreads();
+                            }
                         }
+
+                        bool extension_collision_free = (local_cc_result[0] == 0);
                         bool ext_edge_good =extension_projection_good && extension_collision_free;
 
                         __syncthreads();
@@ -2362,21 +3217,78 @@ namespace pRRTC {
                             break;
                         }
 
-                        // CONNECT node slot 확보
-                        if (tid == 0) {
-                            index = cprrtc_reserve_slot(
-                                &atomic_free_index[t_tree_id],
-                                d_settings.max_samples
-                            );
+                        if constexpr (AORRTC) {
+                            if (aorrtc_bound_active && tid < dim) {
+                                aorrtc_new_config[tid] =
+                                    connect_projected_endpoint;
+                            }
+                            __syncthreads();
 
-                            if (index < 0) {
-                                atomicCAS((int *)&solved, 0, -1);
+                            if (aorrtc_bound_active) {
+                                const int resample_tree_size = atomicAdd(
+                                    (int *)&atomic_free_index[t_tree_id],
+                                    0
+                                );
+                                const int resampled_parent =
+                                    aorrtc_resample_parent<Robot>(
+                                    t_tree_id,
+                                    nodes,
+                                    t_nodes,
+                                    t_node_costs,
+                                    t_node_ready,
+                                    t_ts_lane_head,
+                                    t_node_next_in_ts,
+                                    selected_ts_id,
+                                    resample_tree_size,
+                                    concon_parent_idx,
+                                    aorrtc_new_config,
+                                    num_goals,
+                                    rng_states,
+                                    bid,
+                                    sdata,
+                                    sindex,
+                                    &aorrtc_resample_parent_idx,
+                                    &aorrtc_resample_parent_cost,
+                                    &aorrtc_resample_crand,
+                                    &aorrtc_resample_done,
+                                    motion_projection_valid,
+                                    sphere_pos,
+                                    sphere_pos_approx,
+                                    link_CC,
+                                    T,
+                                    env,
+                                    local_cc_result,
+                                    tid
+                                );
+                                if (tid == 0) {
+                                    concon_parent_idx = resampled_parent;
+                                }
+                                __syncthreads();
                             }
                         }
-                        __syncthreads();
 
-                        if (index < 0) {
-                            return;
+                        // CONNECT node slot 확보
+                        if (tid == 0) {
+                            if constexpr (AORRTC) {
+                                index = cprrtc_reserve_slot(
+                                    &atomic_free_index[t_tree_id],
+                                    d_settings.max_samples
+                                );
+                            }
+                            else {
+                                index =atomicAdd((int *)&atomic_free_index[t_tree_id],1);
+                            }
+
+                            if (index < 0 || index >= d_settings.max_samples) {
+                                if constexpr (AORRTC) {
+                                    atomicExch((int *)&aorrtc_stop_requested, 1);
+                                }
+                                else {
+                                    atomicCAS((int *)&solved,0,-1);
+                                }
+
+                                index = -1;
+                            }
                         }
                         __syncthreads();
 
@@ -2397,6 +3309,18 @@ namespace pRRTC {
                             t_nodes[index * dim + tid] =config[tid];
                         }
                         __syncthreads();
+
+                        if constexpr (AORRTC) {
+                            if (tid == 0) {
+                                t_node_costs[index] =
+                                    t_node_costs[concon_parent_idx]
+                                    + cprrtc_config_distance<Robot>(
+                                        &t_nodes[concon_parent_idx * dim],
+                                        &t_nodes[index * dim]
+                                    );
+                            }
+                            __syncthreads();
+                        }
 
                         // CONNECT node의 Tangent Space 정보 저장
                         if constexpr (TangentSpaceTraits<Robot>::enabled) {
@@ -2422,8 +3346,12 @@ namespace pRRTC {
 
                                     if (new_ts_id < 0) {
                                         new_ts_basis_ok = false;
-
-                                        atomicCAS((int *)&solved,0,-1);
+                                        if constexpr (AORRTC) {
+                                            atomicExch((int *)&aorrtc_stop_requested, 1);
+                                        }
+                                        else {
+                                            atomicCAS((int *)&solved,0,-1);
+                                        }
                                     }
                                     else {
                                         // 아직 다른 block이 사용하면 안 됨
@@ -2445,8 +3373,12 @@ namespace pRRTC {
                                         }
                                         else {
                                             t_node_ts_id[index] =-1;
-
-                                            atomicCAS((int *)&solved,0,-1);
+                                            if constexpr (AORRTC) {
+                                                atomicExch((int *)&aorrtc_stop_requested, 1);
+                                            }
+                                            else {
+                                                atomicCAS((int *)&solved,0,-1);
+                                            }
                                         }
                                     }
                                 }
@@ -2485,7 +3417,15 @@ namespace pRRTC {
                                     }
                                 }
                                 if (should_skip) {
-                                    atomicCAS((int *)&solved, 0, -1);
+                                    if constexpr (AORRTC) {
+                                        atomicExch(
+                                            (int *)&aorrtc_stop_requested,
+                                            1
+                                        );
+                                    }
+                                    else {
+                                        atomicCAS((int *)&solved, 0, -1);
+                                    }
                                 }
                             }
                             __syncthreads();
@@ -2585,86 +3525,61 @@ namespace pRRTC {
                     
                 // CONNECT 성공 시 양쪽 트리의 parent를 역추적하여 최종 경로 복원
                 if (!connect_failed&&connect_reached) { // connected
-                    if (tid == 0 && atomicCAS((int *)&solved, 0, 1) == 0) { // block 0번 thread만 최종 경로 복원 수행
-                        cost = final_connection_distance;
-
-                        if constexpr (TraceTrees) {
-                            connection_tree_id = t_tree_id;
-                            connection_node_idx = index;
-                            connection_other_tree_id = o_tree_id;
-                            connection_other_node_idx = connect_target_idx;
-                        }
-                        // trace back to the start and goal.
-                        int current = index;
-                        int parent;
-                        int t_path_size = 0;
-                        int o_path_size = 0;
-                        while (true) {
-                            if (current < 0 ||
-                                current >= d_settings.max_samples ||
-                                t_path_size >= MAX_PATH_NODES) {
-                                break;
-                            }
-
-                            parent = t_parents[current];
-
-                            if (parent == current) {
-                                break;
-                            }
-
-                            if (parent < 0 || parent >= d_settings.max_samples) {
-                                break;
-                            }
-
-                            cost += cprrtc_config_distance<Robot>(
-                                (float *)&t_nodes[current * dim],
-                                (float *)&t_nodes[parent * dim]
+                    if constexpr (AORRTC) {
+                        if (tid == 0) {
+                            aorrtc_try_store_solution<Robot, false>(
+                                t_tree_id,
+                                o_tree_id,
+                                index,
+                                connect_target_idx,
+                                t_node_costs,
+                                o_node_costs,
+                                final_connection_distance,
+                                iter
                             );
-
-                            for (int i = 0; i < dim; i++) {
-                                path[t_tree_id][t_path_size * dim + i] =
-                                    t_nodes[current * dim + i];
-                            }
-
-                            t_path_size++;
-                            current = parent;
                         }
-                        if (t_tree_id == 1) reached_goal_idx = current; // 현재 tree가 goal tree라면, 역추적이 끝난 현재 current가 goal tree의 root (여러 goal을 지원하는 경우 어떤 goal root에 도달했는지 기록)
-                        current = connect_target_idx; // 반대편 tree의 CONNECT 목표 노드에서 역추적 시작
-                        while(true) { // 반대편 tree의 root에 도달할 때까지 부모 node 따라감
-                            if (current < 0 ||
-                                current >= d_settings.max_samples ||
-                                o_path_size >= MAX_PATH_NODES) {
-                                break;
+                    }
+                    else {
+                        if (tid == 0 && atomicCAS((int *)&solved, 0, 1) == 0) { // block 0번 thread만 최종 경로 복원 수행
+                            if constexpr (TraceTrees) {
+                                connection_tree_id = t_tree_id;
+                                connection_node_idx = index;
+                                connection_other_tree_id = o_tree_id;
+                                connection_other_node_idx = connect_target_idx;
                             }
-
-                            parent = o_parents[current];
-
-                            if (parent == current) {
-                                break;
+                            // trace back to the start and goal.
+                            int current = index;
+                            int parent;
+                            int t_path_size = 0;
+                            int o_path_size = 0;
+                            while (t_parents[current] != current) { // 현재 노드가 현재 tree의 root가 아닐 때까지 부모를 따라감
+                                parent = t_parents[current];
+                                cost += cprrtc_config_distance<Robot>(
+                                    (float *)&t_nodes[current * dim],
+                                    (float *)&t_nodes[parent * dim]
+                                );
+                                for (int i = 0; i < dim; i++) path[t_tree_id][t_path_size * dim + i] = t_nodes[current * dim + i];
+                                t_path_size++;
+                                current = parent;
+                                
                             }
-
-                            if (parent < 0 || parent >= d_settings.max_samples) {
-                                break;
+                            if (t_tree_id == 1) reached_goal_idx = current; // 현재 tree가 goal tree라면, 역추적이 끝난 현재 current가 goal tree의 root (여러 goal을 지원하는 경우 어떤 goal root에 도달했는지 기록)
+                            current = connect_target_idx; // 반대편 tree의 CONNECT 목표 노드에서 역추적 시작
+                            while(o_parents[current] != current) { // 반대편 tree의 root에 도달할 때까지 부모 node 따라감
+                                parent = o_parents[current];
+                                cost += cprrtc_config_distance<Robot>(
+                                    (float *)&t_nodes[current * dim],
+                                    (float *)&t_nodes[parent * dim]
+                                );
+                                for (int i = 0; i < dim; i++) path[o_tree_id][o_path_size * dim + i] = o_nodes[current * dim + i];
+                                o_path_size++;
+                                current = parent;
                             }
-
-                            cost += cprrtc_config_distance<Robot>(
-                                &o_nodes[current * dim],
-                                &o_nodes[parent * dim]
-                            );
-
-                            for (int i = 0; i < dim; i++) {
-                                path[o_tree_id][o_path_size * dim + i] =
-                                    o_nodes[current * dim + i];
-                            }
-
-                            o_path_size++;
-                            current = parent;
+                            if (t_tree_id == 0) reached_goal_idx = current;
+                            path_size[t_tree_id] = t_path_size;
+                            path_size[o_tree_id] = o_path_size;
+                            solved_iters = iter;
                         }
-                        if (t_tree_id == 0) reached_goal_idx = current;
-                        path_size[t_tree_id] = t_path_size;
-                        path_size[o_tree_id] = o_path_size;
-                        solved_iters = iter;
                     }
                     __syncthreads();
                 }
@@ -2687,21 +3602,18 @@ namespace pRRTC {
             }
         __syncthreads();
 
-        if constexpr (TraceTrees) {
+        if constexpr (AORRTC) {
+            return;
+        }
+        else if constexpr (TraceTrees) {
             if (tid == 0) {
                 should_skip = (solved != 0);
             }
             __syncthreads();
             if (should_skip) return;
         }
-        else {
-            if (tid == 0) {
-                should_skip = (solved != 0);
-            }
-            __syncthreads();
-            if (should_skip) {
-                return;
-            }
+        else if (solved != 0) {
+            return;
         }
         }
     }
@@ -2711,7 +3623,7 @@ namespace pRRTC {
 
     template <typename Robot>
     void copy_tree_trace_to_result(
-        PlannerResult<Robot> &res,
+        AORRTCResult<Robot> &res,
         float *nodes[2],
         int *parents[2],
         int *node_ready[2],
@@ -2746,7 +3658,7 @@ namespace pRRTC {
 
     template <typename Robot>
     std::vector<int> trace_parent_chain(
-        const PlannerResult<Robot> &res,
+        const AORRTCResult<Robot> &res,
         int tree,
         int node_index
     ) {
@@ -2775,7 +3687,7 @@ namespace pRRTC {
     }
 
     template <typename Robot>
-    void fill_solution_trace(PlannerResult<Robot> &res) {
+    void fill_solution_trace(AORRTCResult<Robot> &res) {
         if (!res.solved || res.connection_tree_id < 0
             || res.connection_other_tree_id < 0) {
             return;
@@ -2798,21 +3710,233 @@ namespace pRRTC {
         }
     }
 
+
     template <typename Robot>
-    PlannerResult<Robot> solve(
+    void copy_solution_history_to_result(
+        AORRTCResult<Robot> &res,
+        AORRTCDeviceSolutionUpdate *device_records,
+        int record_capacity
+    ) {
+        if (device_records == nullptr || record_capacity <= 0) {
+            return;
+        }
+
+        int overflow = 0;
+        cudaMemcpyFromSymbol(
+            &overflow,
+            aorrtc_update_overflow,
+            sizeof(int),
+            0,
+            cudaMemcpyDeviceToHost
+        );
+        res.solution_history_overflow = overflow != 0;
+
+        const int record_count = std::min(
+            res.solution_updates,
+            record_capacity
+        );
+        if (record_count <= 0) {
+            return;
+        }
+
+        std::vector<AORRTCDeviceSolutionUpdate> host_records(record_count);
+        cudaMemcpy(
+            host_records.data(),
+            device_records,
+            sizeof(AORRTCDeviceSolutionUpdate)
+                * static_cast<std::size_t>(record_count),
+            cudaMemcpyDeviceToHost
+        );
+
+        res.solution_history.reserve(record_count);
+        for (const auto &record : host_records) {
+            AORRTCSolutionUpdate<Robot> update;
+            update.update_index = record.update_index;
+            update.source_tree_id = record.source_tree_id;
+            update.source_node_idx = record.source_node_idx;
+            update.target_tree_id = record.target_tree_id;
+            update.target_node_idx = record.target_node_idx;
+            update.iteration = record.iteration;
+            update.cost = record.cost;
+
+            const int start_connection_index = record.source_tree_id == 0
+                ? record.source_node_idx
+                : record.target_node_idx;
+            const int goal_connection_index = record.source_tree_id == 1
+                ? record.source_node_idx
+                : record.target_node_idx;
+            auto start_chain = trace_parent_chain(
+                res,
+                0,
+                start_connection_index
+            );
+            auto goal_chain = trace_parent_chain(
+                res,
+                1,
+                goal_connection_index
+            );
+            std::reverse(start_chain.begin(), start_chain.end());
+
+            update.solution_trace.reserve(
+                start_chain.size() + goal_chain.size()
+            );
+            update.path_start_to_goal.reserve(
+                start_chain.size() + goal_chain.size()
+            );
+            for (int node_index : start_chain) {
+                update.solution_trace.push_back({0, node_index});
+                update.path_start_to_goal.push_back(
+                    res.tree_nodes[0][node_index]
+                );
+            }
+            for (int node_index : goal_chain) {
+                update.solution_trace.push_back({1, node_index});
+                update.path_start_to_goal.push_back(
+                    res.tree_nodes[1][node_index]
+                );
+            }
+            res.solution_history.push_back(std::move(update));
+        }
+    }
+
+
+    inline std::vector<int> aorrtc_parent_chain(
+        const std::vector<int> &parents,
+        int connection_index
+    ) {
+        if (connection_index < 0
+            || connection_index >= static_cast<int>(parents.size())) {
+            throw std::runtime_error(
+                "AORRTC connection index is outside its tree"
+            );
+        }
+
+        std::vector<int> chain;
+        int current = connection_index;
+        for (int guard = 0; guard < static_cast<int>(parents.size()); guard++) {
+            chain.push_back(current);
+            const int parent = parents[current];
+            if (parent == current) {
+                return chain;
+            }
+            if (parent < 0 || parent >= static_cast<int>(parents.size())) {
+                throw std::runtime_error(
+                    "AORRTC parent index is outside its tree"
+                );
+            }
+            current = parent;
+        }
+
+        throw std::runtime_error("AORRTC parent chain contains a cycle");
+    }
+
+
+    template <typename Robot>
+    void reconstruct_aorrtc_path(
+        AORRTCResult<Robot> &res,
+        float *nodes[2],
+        int *parents[2],
+        const int current_samples[2]
+    ) {
+        static constexpr int dim = Robot::dimension;
+        std::array<std::vector<int>, 2> host_parents;
+        for (int tree = 0; tree < 2; tree++) {
+            host_parents[tree].resize(current_samples[tree]);
+            cudaMemcpy(
+                host_parents[tree].data(),
+                parents[tree],
+                sizeof(int) * current_samples[tree],
+                cudaMemcpyDeviceToHost
+            );
+        }
+
+        const int start_connection_index = res.connection_tree_id == 0
+            ? res.connection_node_idx
+            : res.connection_other_node_idx;
+        const int goal_connection_index = res.connection_tree_id == 1
+            ? res.connection_node_idx
+            : res.connection_other_node_idx;
+
+        auto start_chain = aorrtc_parent_chain(
+            host_parents[0],
+            start_connection_index
+        );
+        auto goal_chain = aorrtc_parent_chain(
+            host_parents[1],
+            goal_connection_index
+        );
+        std::reverse(goal_chain.begin(), goal_chain.end());
+
+        auto append_configuration = [&](int tree, int node_index) {
+            typename Robot::Configuration configuration;
+            cudaMemcpy(
+                configuration.data(),
+                &nodes[tree][node_index * dim],
+                sizeof(float) * dim,
+                cudaMemcpyDeviceToHost
+            );
+            res.path.push_back(configuration);
+        };
+
+        res.path.clear();
+        res.path.reserve(goal_chain.size() + start_chain.size());
+        for (int node_index : goal_chain) {
+            append_configuration(1, node_index);
+        }
+        for (int node_index : start_chain) {
+            append_configuration(0, node_index);
+        }
+        res.path_length = static_cast<int>(
+            goal_chain.size() + start_chain.size() - 2
+        );
+        cudaCheckError(cudaGetLastError());
+    }
+
+    template <typename Robot>
+    AORRTCResult<Robot> solve(
         typename Robot::Configuration &start,
         std::vector<typename Robot::Configuration> &goals,
         ppln::collision::Environment<float> &h_environment,
-        pRRTC_settings &settings
-    ) 
-    {
-        auto start_time = std::chrono::steady_clock::now();
-        static constexpr auto dim = Robot::dimension;
+        AORRTC_settings &settings
+    ) {
+        const auto solve_start = std::chrono::steady_clock::now();
+        static constexpr int dim = Robot::dimension;
         using Collision = robots::CollisionTraits<Robot>;
+
+        if (!settings.aorrtc) {
+            throw std::invalid_argument(
+                "AORRTC::solve requires --aorrtc"
+            );
+        }
+        if (!std::isfinite(settings.time_limit_sec)
+            || settings.time_limit_sec <= 0.0) {
+            throw std::invalid_argument(
+                "AORRTC time_limit_sec must be finite and greater than zero"
+            );
+        }
+        if (settings.aorrtc_config_weight <= 0.0f
+            || settings.aorrtc_cost_weight <= 0.0f) {
+            throw std::invalid_argument(
+                "AORRTC distance weights must be positive"
+            );
+        }
+        if (settings.cost_improvement_epsilon < 0.0f) {
+            throw std::invalid_argument(
+                "AORRTC cost_improvement_epsilon must not be negative"
+            );
+        }
+        if (settings.aorrtc_max_parent_resamples <= 0) {
+            throw std::invalid_argument(
+                "AORRTC max parent resamples must be positive"
+            );
+        }
         if (settings.granularity != Collision::batch_size) {
             throw std::invalid_argument(
                 "pRRTC granularity must match the selected robot's collision batch size"
             );
+        }
+        if (goals.empty()) {
+            throw std::invalid_argument("AORRTC requires at least one goal");
         }
         if constexpr (TangentSpaceTraits<Robot>::enabled) {
             if (settings.max_tangent_spaces <= 0) {
@@ -2820,450 +3944,771 @@ namespace pRRTC {
                     "max_tangent_spaces must be positive"
                 );
             }
-
-            if (goals.size() >static_cast<std::size_t>(settings.max_tangent_spaces)) {
+            if (goals.size()
+                > static_cast<std::size_t>(settings.max_tangent_spaces)) {
                 throw std::invalid_argument(
                     "number of goals exceeds max_tangent_spaces"
                 );
             }
         }
-        std::size_t start_index = 0;
-        PlannerResult<Robot> res;
 
-        // copy data to GPU
+        AORRTCResult<Robot> res;
+        const int num_goals = static_cast<int>(goals.size());
+        const std::size_t config_size = dim * sizeof(float);
+        const std::size_t node_count =
+            static_cast<std::size_t>(settings.max_samples);
+
+        // AORRTC owns independent device symbols in this translation unit.
+        reset_device_variables();
         cudaMemcpyToSymbol(d_settings, &settings, sizeof(settings));
-        int num_goals = goals.size();
-        float *nodes[2];
-        int *parents[2];
+
+        float *nodes[2] = {nullptr, nullptr};
+        int *parents[2] = {nullptr, nullptr};
+        float *node_costs[2] = {nullptr, nullptr};
         int *node_ready[2] = {nullptr, nullptr};
-        float *radii[2];
-        float **d_nodes;
-        int **d_parents;
-        int **d_node_ready = nullptr;
-        float **d_radii;
-        // Tangent Space membership for tree nodes
+        float *radii[2] = {nullptr, nullptr};
+
         int *node_ts_id[2] = {nullptr, nullptr};
         float *node_ts_q[2] = {nullptr, nullptr};
-
-        int **d_node_ts_id = nullptr;
-        float **d_node_ts_q = nullptr;
-
-        // Tangent Space Bank
-        int *ts_count = nullptr;
-
         int *ts_root_node_idx[2] = {nullptr, nullptr};
         float *ts_bases[2] = {nullptr, nullptr};
         int *ts_ready[2] = {nullptr, nullptr};
-
-        int **d_ts_root_node_idx = nullptr;
-        float **d_ts_bases = nullptr;
-        int **d_ts_ready = nullptr;
-        // TS별로 node를 64개 thread 목록에 나눠 저장하는 역방향 index
         int *ts_node_count[2] = {nullptr, nullptr};
         int *ts_lane_head[2] = {nullptr, nullptr};
         int *node_next_in_ts[2] = {nullptr, nullptr};
 
+        float **d_nodes = nullptr;
+        int **d_parents = nullptr;
+        float **d_node_costs = nullptr;
+        int **d_node_ready = nullptr;
+        float **d_radii = nullptr;
+        int **d_node_ts_id = nullptr;
+        float **d_node_ts_q = nullptr;
+        int **d_ts_root_node_idx = nullptr;
+        float **d_ts_bases = nullptr;
+        int **d_ts_ready = nullptr;
         int **d_ts_node_count = nullptr;
         int **d_ts_lane_head = nullptr;
         int **d_node_next_in_ts = nullptr;
-        cudaMalloc(&d_nodes, 2 * sizeof(float*));
-        cudaMalloc(&d_parents, 2 * sizeof(int*));
-        cudaMalloc(&d_radii, 2 * sizeof(float*));
-        cudaMalloc(&d_node_ready, 2 * sizeof(int*));
-        cudaMalloc(&d_node_ts_id, 2 * sizeof(int*));
-        cudaMalloc(&d_node_ts_q, 2 * sizeof(float*));
-        cudaMalloc(&ts_count, 2 * sizeof(int));
-        cudaMalloc(&d_ts_root_node_idx,2 * sizeof(int*));
-        cudaMalloc(&d_ts_bases,2 * sizeof(float*));
-        cudaMalloc(&d_ts_ready,2 * sizeof(int*));
-        cudaMalloc(&d_ts_node_count,2 * sizeof(int*));
-        cudaMalloc(&d_ts_lane_head,2 * sizeof(int*));
-        cudaMalloc(&d_node_next_in_ts,2 * sizeof(int*));
-        const std::size_t config_size = dim * sizeof(float);
+        int *ts_count = nullptr;
 
-        for (int i = 0; i < 2; i++) {
+        cudaMalloc(&d_nodes, 2 * sizeof(float *));
+        cudaMalloc(&d_parents, 2 * sizeof(int *));
+        cudaMalloc(&d_node_costs, 2 * sizeof(float *));
+        cudaMalloc(&d_node_ready, 2 * sizeof(int *));
+        cudaMalloc(&d_radii, 2 * sizeof(float *));
+        cudaMalloc(&d_node_ts_id, 2 * sizeof(int *));
+        cudaMalloc(&d_node_ts_q, 2 * sizeof(float *));
+        cudaMalloc(&d_ts_root_node_idx, 2 * sizeof(int *));
+        cudaMalloc(&d_ts_bases, 2 * sizeof(float *));
+        cudaMalloc(&d_ts_ready, 2 * sizeof(int *));
+        cudaMalloc(&d_ts_node_count, 2 * sizeof(int *));
+        cudaMalloc(&d_ts_lane_head, 2 * sizeof(int *));
+        cudaMalloc(&d_node_next_in_ts, 2 * sizeof(int *));
+        cudaMalloc(&ts_count, 2 * sizeof(int));
+
+        for (int tree = 0; tree < 2; tree++) {
+            cudaMalloc(&nodes[tree], node_count * config_size);
+            cudaMalloc(&parents[tree], node_count * sizeof(int));
+            cudaMalloc(&node_costs[tree], node_count * sizeof(float));
+            cudaMalloc(&node_ready[tree], node_count * sizeof(int));
+            cudaMalloc(&radii[tree], node_count * sizeof(float));
+            cudaMalloc(&node_ts_id[tree], node_count * sizeof(int));
+            cudaMalloc(&node_ts_q[tree], node_count * config_size);
+            cudaMalloc(
+                &ts_root_node_idx[tree],
+                static_cast<std::size_t>(settings.max_tangent_spaces)
+                    * sizeof(int)
+            );
+            cudaMalloc(
+                &ts_ready[tree],
+                static_cast<std::size_t>(settings.max_tangent_spaces)
+                    * sizeof(int)
+            );
+
             if constexpr (TangentSpaceTraits<Robot>::enabled) {
                 const std::size_t basis_bytes =
-                    static_cast<std::size_t>(settings.max_tangent_spaces) *
-                    TangentSpaceTraits<Robot>::basis_size * sizeof(float);
-                const std::size_t ts_count_bytes =static_cast<std::size_t>(settings.max_tangent_spaces)*sizeof(int);
-                const std::size_t ts_lane_head_bytes =static_cast<std::size_t>(settings.max_tangent_spaces)*MAX_THREADS_PER_BLOCK*sizeof(int);
-                const std::size_t node_next_bytes =static_cast<std::size_t>(settings.max_samples)*sizeof(int);
+                    static_cast<std::size_t>(settings.max_tangent_spaces)
+                    * TangentSpaceTraits<Robot>::basis_size
+                    * sizeof(float);
+                const std::size_t ts_count_bytes =
+                    static_cast<std::size_t>(settings.max_tangent_spaces)
+                    * sizeof(int);
+                const std::size_t lane_bytes =
+                    static_cast<std::size_t>(settings.max_tangent_spaces)
+                    * MAX_THREADS_PER_BLOCK
+                    * sizeof(int);
 
-                // TSBank의 tangent basis 저장 공간
-                cudaMalloc(&ts_bases[i],basis_bytes);
-                cudaMemset(ts_bases[i],0,basis_bytes);
-
-                cudaMalloc(&ts_node_count[i],ts_count_bytes);
-                cudaMemset(ts_node_count[i],0,ts_count_bytes);
-
-                cudaMalloc(&ts_lane_head[i],ts_lane_head_bytes);
-                cudaMemset(ts_lane_head[i],0xff,ts_lane_head_bytes);
-
-                cudaMalloc(&node_next_in_ts[i],node_next_bytes);
-                cudaMemset(node_next_in_ts[i],0xff,node_next_bytes);
+                cudaMalloc(&ts_bases[tree], basis_bytes);
+                cudaMalloc(&ts_node_count[tree], ts_count_bytes);
+                cudaMalloc(&ts_lane_head[tree], lane_bytes);
+                cudaMalloc(
+                    &node_next_in_ts[tree],
+                    node_count * sizeof(int)
+                );
             }
-            cudaMalloc(&nodes[i], settings.max_samples * config_size);
-            cudaMalloc(&parents[i], settings.max_samples * sizeof(int));
-            cudaMalloc(&radii[i], settings.max_samples * sizeof(float));
-            cudaMalloc(&node_ready[i], settings.max_samples * sizeof(int));
-            cudaMemset(node_ready[i], 0, settings.max_samples * sizeof(int));
-            // 이 tree의 각 node가 어느 TS에 속하는지
-            cudaMalloc(&node_ts_id[i],settings.max_samples * sizeof(int));
-            // 처음에는 어떤 TS에도 속하지 않음: -1
-            cudaMemset(node_ts_id[i],0xff,settings.max_samples * sizeof(int));
-            // 각 tree node의 Tangent Space 상 nominal q
-            cudaMalloc(&node_ts_q[i],settings.max_samples * config_size);
-            // TS마다 root node index 저장
-            cudaMalloc(&ts_root_node_idx[i],settings.max_tangent_spaces * sizeof(int));
-            // TS가 완전히 생성되었는지
-            cudaMalloc(&ts_ready[i],settings.max_tangent_spaces * sizeof(int));
-            // 처음에는 모든 TS가 아직 생성되지 않음
-            cudaMemset(ts_ready[i],0,settings.max_tangent_spaces * sizeof(int));
         }
-        cudaMemcpy(d_nodes, nodes, 2 * sizeof(float*), cudaMemcpyHostToDevice);
-        cudaMemcpy(d_parents, parents, 2 * sizeof(int*), cudaMemcpyHostToDevice);
-        cudaMemcpy(d_node_ts_id,node_ts_id,2 * sizeof(int*),cudaMemcpyHostToDevice);
-        cudaMemcpy(d_node_ts_q,node_ts_q,2 * sizeof(float*),cudaMemcpyHostToDevice);
-        cudaMemcpy(d_ts_root_node_idx,ts_root_node_idx,2 * sizeof(int*),cudaMemcpyHostToDevice);
-        cudaMemcpy(d_ts_bases,ts_bases,2 * sizeof(float*),cudaMemcpyHostToDevice);
-        cudaMemcpy(d_ts_ready,ts_ready,2 * sizeof(int*),cudaMemcpyHostToDevice);
-        cudaMemcpy(d_ts_node_count,ts_node_count,2 * sizeof(int*),cudaMemcpyHostToDevice);
-        cudaMemcpy(d_ts_lane_head,ts_lane_head,2 * sizeof(int*),cudaMemcpyHostToDevice);
-        cudaMemcpy(d_node_next_in_ts,node_next_in_ts,2 * sizeof(int*),cudaMemcpyHostToDevice);
-        int h_ts_count[2] = {0, 0};
-        cudaMemcpy(d_radii,radii,2 * sizeof(float*),cudaMemcpyHostToDevice);
-        cudaMemcpy(ts_count,h_ts_count,2 * sizeof(int),cudaMemcpyHostToDevice);
-        cudaMemcpy(d_node_ready, node_ready, 2 * sizeof(int*), cudaMemcpyHostToDevice);
 
-        // set nodes to unitialized
-        std::vector<float> nodes_init(settings.max_samples * dim, UNWRITTEN_VAL);
-        cudaMemcpy((void *)nodes[0], nodes_init.data(), config_size * settings.max_samples, cudaMemcpyHostToDevice);
-        cudaMemcpy((void *)nodes[1], nodes_init.data(), config_size * settings.max_samples, cudaMemcpyHostToDevice);
-        cudaMemcpy(node_ts_q[0],nodes_init.data(),config_size * settings.max_samples,cudaMemcpyHostToDevice);
-        cudaMemcpy(node_ts_q[1],nodes_init.data(),config_size * settings.max_samples,cudaMemcpyHostToDevice);
-            
-        // initialize radii
-        std::vector<float> radii_init(num_goals, FLT_MAX);
-        cudaMemcpy((void *)radii[0], radii_init.data(), sizeof(float), cudaMemcpyHostToDevice);
-        cudaMemcpy((void *)radii[1], radii_init.data(), sizeof(float) * num_goals, cudaMemcpyHostToDevice);
-        
-        // create a curandState for each thread
-        curandState *rng_states;
-        int num_rng_states = settings.num_new_configs * dim;
-        cudaMalloc(&rng_states, num_rng_states * sizeof(curandState));
-        int numBlocks = (num_rng_states + BLOCK_SIZE - 1) / BLOCK_SIZE;
-        init_rng<<<numBlocks, BLOCK_SIZE>>>(rng_states, 1, num_rng_states);
+        cudaMemcpy(d_nodes, nodes, 2 * sizeof(float *), cudaMemcpyHostToDevice);
+        cudaMemcpy(d_parents, parents, 2 * sizeof(int *), cudaMemcpyHostToDevice);
+        cudaMemcpy(
+            d_node_costs,
+            node_costs,
+            2 * sizeof(float *),
+            cudaMemcpyHostToDevice
+        );
+        cudaMemcpy(
+            d_node_ready,
+            node_ready,
+            2 * sizeof(int *),
+            cudaMemcpyHostToDevice
+        );
+        cudaMemcpy(d_radii, radii, 2 * sizeof(float *), cudaMemcpyHostToDevice);
+        cudaMemcpy(
+            d_node_ts_id,
+            node_ts_id,
+            2 * sizeof(int *),
+            cudaMemcpyHostToDevice
+        );
+        cudaMemcpy(
+            d_node_ts_q,
+            node_ts_q,
+            2 * sizeof(float *),
+            cudaMemcpyHostToDevice
+        );
+        cudaMemcpy(
+            d_ts_root_node_idx,
+            ts_root_node_idx,
+            2 * sizeof(int *),
+            cudaMemcpyHostToDevice
+        );
+        cudaMemcpy(
+            d_ts_bases,
+            ts_bases,
+            2 * sizeof(float *),
+            cudaMemcpyHostToDevice
+        );
+        cudaMemcpy(
+            d_ts_ready,
+            ts_ready,
+            2 * sizeof(int *),
+            cudaMemcpyHostToDevice
+        );
+        cudaMemcpy(
+            d_ts_node_count,
+            ts_node_count,
+            2 * sizeof(int *),
+            cudaMemcpyHostToDevice
+        );
+        cudaMemcpy(
+            d_ts_lane_head,
+            ts_lane_head,
+            2 * sizeof(int *),
+            cudaMemcpyHostToDevice
+        );
+        cudaMemcpy(
+            d_node_next_in_ts,
+            node_next_in_ts,
+            2 * sizeof(int *),
+            cudaMemcpyHostToDevice
+        );
 
-        HaltonState<Robot> *halton_states;
-        cudaMalloc(&halton_states, settings.num_new_configs * sizeof(HaltonState<Robot>));
-        int numBlocks1 = (settings.num_new_configs + BLOCK_SIZE - 1) / BLOCK_SIZE;
-        init_halton<Robot><<<numBlocks1, BLOCK_SIZE>>>(halton_states, rng_states);
+        // One-time sentinel initialization. Fresh-tree restarts use ready flags
+        // as the visibility barrier, so the large configuration arrays do not
+        // need to be cleared on every restart.
+        std::vector<float> nodes_init(node_count * dim, UNWRITTEN_VAL);
+        std::vector<float> cost_init(node_count, FLT_MAX);
+        for (int tree = 0; tree < 2; tree++) {
+            cudaMemcpy(
+                nodes[tree],
+                nodes_init.data(),
+                node_count * config_size,
+                cudaMemcpyHostToDevice
+            );
+            cudaMemcpy(
+                node_ts_q[tree],
+                nodes_init.data(),
+                node_count * config_size,
+                cudaMemcpyHostToDevice
+            );
+            cudaMemcpy(
+                node_costs[tree],
+                cost_init.data(),
+                node_count * sizeof(float),
+                cudaMemcpyHostToDevice
+            );
+        }
 
-        // free index for next available position in tree_a and tree_b
-        int h_free_index[2] = {1, num_goals};
-        cudaMemcpyToSymbol(atomic_free_index, &h_free_index, sizeof(int) * 2);
-        cudaMemcpyToSymbol(nodes_size, &h_free_index, sizeof(int) * 2);
-        
-        // initialize completed_nodes counter
-        int h_completed_nodes[2] = {1, num_goals}; // start and goals are already written
-        cudaMemcpyToSymbol(completed_nodes, &h_completed_nodes, sizeof(int) * 2);
-        
-        // allocate for obstacles
-        ppln::collision::Environment<float> *env;
+        curandState *rng_states = nullptr;
+        const int num_rng_states = settings.num_new_configs * dim;
+        cudaMalloc(
+            &rng_states,
+            static_cast<std::size_t>(num_rng_states)
+                * sizeof(curandState)
+        );
+        const int rng_blocks =
+            (num_rng_states + BLOCK_SIZE - 1) / BLOCK_SIZE;
+        init_rng<<<rng_blocks, BLOCK_SIZE>>>(
+            rng_states,
+            1,
+            num_rng_states
+        );
+
+        HaltonState<Robot> *halton_states = nullptr;
+        cudaMalloc(
+            &halton_states,
+            static_cast<std::size_t>(settings.num_new_configs)
+                * sizeof(HaltonState<Robot>)
+        );
+        const int halton_blocks =
+            (settings.num_new_configs + BLOCK_SIZE - 1) / BLOCK_SIZE;
+        init_halton<Robot><<<halton_blocks, BLOCK_SIZE>>>(
+            halton_states,
+            rng_states
+        );
+
+        // AORRTC launches one planner iteration per kernel launch so the host
+        // can enforce --time. Preserve each block's previous tree choice here
+        // to keep the legacy balance=0/1/2 semantics across launches.
+        int *block_tree_ids = nullptr;
+        cudaMalloc(
+            &block_tree_ids,
+            static_cast<std::size_t>(settings.num_new_configs) * sizeof(int)
+        );
+        cudaMemset(
+            block_tree_ids,
+            0xff,
+            static_cast<std::size_t>(settings.num_new_configs) * sizeof(int)
+        );
+
+        cudaDeviceSynchronize();
+        cudaCheckError(cudaGetLastError());
+
+        ppln::collision::Environment<float> *env = nullptr;
         setup_environment_on_device(env, h_environment);
         cudaCheckError(cudaGetLastError());
-        
-        // Setup pinned memory for signaling
-        int *h_solved;
-        int current_samples[2];
-        int h_solved_iters = -1;
-        cudaMallocHost(&h_solved, sizeof(int));
-        *h_solved = -1;
 
-        
-        auto copy_start_time = std::chrono::steady_clock::now();
-        // add start to tree_a and goals to tree_b
-        cudaMemcpy((void *)nodes[0], start.data(), config_size, cudaMemcpyHostToDevice);
-        cudaMemcpy((void *)parents[0], &start_index, sizeof(int), cudaMemcpyHostToDevice);
-        cudaMemcpy((void *)nodes[1], goals.data(), config_size * num_goals, cudaMemcpyHostToDevice);
-        std::vector<int> parents_b_init(num_goals);
-        iota(parents_b_init.begin(), parents_b_init.end(), 0); // consecutive integers from 0 ... num_goals - 1
-        cudaMemcpy((void *)parents[1], parents_b_init.data(), sizeof(int) * num_goals, cudaMemcpyHostToDevice);
+        const int start_parent = 0;
+        std::vector<int> goal_parents(num_goals);
+        std::iota(goal_parents.begin(), goal_parents.end(), 0);
+        std::vector<int> goal_ready(num_goals, 1);
+        std::vector<float> goal_costs(num_goals, 0.0f);
+        std::vector<float> goal_radii(num_goals, FLT_MAX);
+        const float start_cost = 0.0f;
+        const float root_radius = FLT_MAX;
         const int start_ready = 1;
-        std::vector<int> goals_ready(num_goals, 1);
-        cudaMemcpy(node_ready[0],&start_ready,sizeof(int),cudaMemcpyHostToDevice);
-        cudaMemcpy(node_ready[1],goals_ready.data(),sizeof(int) * num_goals,cudaMemcpyHostToDevice);
-        // root tangent basis 초기화
-        if constexpr (TangentSpaceTraits<Robot>::enabled) {
-            // Initial Tangent Space Bank
-            // start tree: q_start 하나 → TS 하나
-            // goal tree: 각 initial goal → TS 하나
-            init_root_ts_banks<Robot><<<1 + num_goals, 1>>>(
-                d_nodes,
-                d_ts_root_node_idx,
-                d_ts_bases,
-                d_ts_ready,
-                d_node_ts_id,
-                d_node_ts_q,
-                d_ts_node_count,
-                d_ts_lane_head,
-                d_node_next_in_ts,
-                1,
-                num_goals
+
+        auto initialize_fresh_search = [&]() {
+            const auto copy_start = std::chrono::steady_clock::now();
+
+            cudaMemset(
+                block_tree_ids,
+                0xff,
+                static_cast<std::size_t>(settings.num_new_configs)
+                    * sizeof(int)
             );
 
-            cudaDeviceSynchronize();
-            cudaCheckError(cudaGetLastError());
-
-            int h_initial_ts_count[2] = {1,num_goals};
-
-            cudaMemcpy(ts_count,h_initial_ts_count,2 * sizeof(int),cudaMemcpyHostToDevice);
-
-            cudaCheckError(cudaGetLastError());
-        }
-        res.copy_ns = get_elapsed_nanoseconds(copy_start_time);
-
-        auto kernel_start_time = std::chrono::steady_clock::now();
-        if (settings.trace_trees) {
-            rrtc<Robot, true><<<settings.num_new_configs, 4*settings.granularity>>> (
-                d_nodes,
-                d_parents,
-                d_node_ready,
-                // 새 Tree → TS 정보
-                d_node_ts_id,
-                d_node_ts_q,
-
-                // 새 TSBank
-                ts_count,
-                d_ts_root_node_idx,
-                d_ts_bases,
-                d_ts_ready,
-                d_ts_node_count,
-                d_ts_lane_head,
-                d_node_next_in_ts,
-                d_radii,
-                halton_states,
-                rng_states,
-                env
-            );
-        } else {
-            rrtc<Robot, false><<<settings.num_new_configs, 4*settings.granularity>>> (
-                d_nodes,
-                d_parents,
-                d_node_ready,
-                // 새 Tree → TS 정보
-                d_node_ts_id,
-                d_node_ts_q,
-
-                // 새 TSBank
-                ts_count,
-                d_ts_root_node_idx,
-                d_ts_bases,
-                d_ts_ready,
-                d_ts_node_count,
-                d_ts_lane_head,
-                d_node_next_in_ts,
-                d_radii,
-                halton_states,
-                rng_states,
-                env
-            );
-        }
-
-        // kernel launch 자체가 정상인지
-        cudaCheckError(cudaGetLastError());
-
-        // kernel 실행 중 illegal memory access가 있었는지
-        cudaCheckError(cudaDeviceSynchronize());
-
-        res.kernel_ns = get_elapsed_nanoseconds(kernel_start_time);
-
-        // get data from device
-        copy_start_time = std::chrono::steady_clock::now();
-        cudaMemcpyFromSymbol(current_samples, atomic_free_index, sizeof(int) * 2, 0, cudaMemcpyDeviceToHost);
-        cudaMemcpyFromSymbol(h_solved, solved, sizeof(int), 0, cudaMemcpyDeviceToHost);
-        cudaMemcpyFromSymbol(&h_solved_iters, solved_iters, sizeof(int), 0, cudaMemcpyDeviceToHost);
-        for (int tree = 0; tree < 2; tree++) {
-            current_samples[tree] = std::clamp(
-                current_samples[tree],
-                0,
-                settings.max_samples
-            );
-        }
-        res.copy_ns += get_elapsed_nanoseconds(copy_start_time);
-
-        cudaCheckError(cudaGetLastError());
-
-        // add data to result struct
-        if (*h_solved!=1) *h_solved=0;
-        res.start_tree_size = current_samples[0];
-        res.goal_tree_size = current_samples[1];
-        if (*h_solved) {
-            int h_path_size[2];
-            std::vector<float> h_paths[2];
-            float h_cost;
-            int h_reached_goal_idx;
-            cudaMemcpyFromSymbol(h_path_size, path_size, sizeof(int) * 2, 0, cudaMemcpyDeviceToHost);
-            for (int tree = 0; tree < 2; ++tree) {
-                if (h_path_size[tree] < 0
-                    || h_path_size[tree] > MAX_PATH_NODES) {
-                    throw std::runtime_error(
-                        "pRRTC device path size is outside its valid range"
-                    );
-                }
-                h_paths[tree].resize(
-                    static_cast<std::size_t>(h_path_size[tree]) * dim
+            for (int tree = 0; tree < 2; tree++) {
+                cudaMemset(
+                    node_ready[tree],
+                    0,
+                    node_count * sizeof(int)
                 );
-                if (!h_paths[tree].empty()) {
-                    cudaMemcpyFromSymbol(
-                        h_paths[tree].data(),
-                        path,
-                        sizeof(float) * h_paths[tree].size(),
-                        sizeof(float) * static_cast<std::size_t>(tree)
-                            * MAX_PATH_STORAGE,
-                        cudaMemcpyDeviceToHost
+                cudaMemset(
+                    node_ts_id[tree],
+                    0xff,
+                    node_count * sizeof(int)
+                );
+                cudaMemset(
+                    ts_ready[tree],
+                    0,
+                    static_cast<std::size_t>(settings.max_tangent_spaces)
+                        * sizeof(int)
+                );
+
+                if constexpr (TangentSpaceTraits<Robot>::enabled) {
+                    cudaMemset(
+                        ts_node_count[tree],
+                        0,
+                        static_cast<std::size_t>(settings.max_tangent_spaces)
+                            * sizeof(int)
+                    );
+                    cudaMemset(
+                        ts_lane_head[tree],
+                        0xff,
+                        static_cast<std::size_t>(settings.max_tangent_spaces)
+                            * MAX_THREADS_PER_BLOCK
+                            * sizeof(int)
+                    );
+                    cudaMemset(
+                        node_next_in_ts[tree],
+                        0xff,
+                        node_count * sizeof(int)
                     );
                 }
             }
-            cudaMemcpyFromSymbol(&h_cost, cost, sizeof(float), 0, cudaMemcpyDeviceToHost);
-            cudaMemcpyFromSymbol(&h_reached_goal_idx, reached_goal_idx, sizeof(int), 0, cudaMemcpyDeviceToHost);
-            cudaCheckError(cudaGetLastError());
-            res.path.emplace_back(goals[h_reached_goal_idx]);
-            typename Robot::Configuration config;
-            for (int i = h_path_size[1] - 1; i >= 0; i--) {
-                std::copy_n(h_paths[1].data() + i * dim, dim, config.begin());
-                res.path.emplace_back(config);
-            }
-            for (int i = 0; i < h_path_size[0]; i++) {
-                std::copy_n(h_paths[0].data() + i * dim, dim, config.begin());
-                res.path.emplace_back(config);
-            }
-            res.path.emplace_back(start);
-            res.cost = configuration_space_path_arclength<Robot>(res.path);
-            res.path_length = (h_path_size[0] + h_path_size[1]);
-        }
-        res.solved = (*h_solved) != 0;
-        res.iters = h_solved_iters;
-        if (settings.trace_trees) {
-            copy_start_time = std::chrono::steady_clock::now();
-            copy_tree_trace_to_result(
-                res,
-                nodes,
-                parents,
-                node_ready,
-                current_samples
+
+            const int free_index[2] = {1, num_goals};
+            cudaMemcpyToSymbol(
+                atomic_free_index,
+                free_index,
+                sizeof(free_index)
             );
-            if (res.solved) {
+            cudaMemcpyToSymbol(nodes_size, free_index, sizeof(free_index));
+            cudaMemcpyToSymbol(
+                completed_nodes,
+                free_index,
+                sizeof(free_index)
+            );
+
+            int search_solution = 0;
+            int stop_requested = 0;
+            cudaMemcpyToSymbol(
+                aorrtc_search_solution_found,
+                &search_solution,
+                sizeof(int)
+            );
+            cudaMemcpyToSymbol(
+                aorrtc_stop_requested,
+                &stop_requested,
+                sizeof(int)
+            );
+
+            cudaMemcpy(
+                nodes[0],
+                start.data(),
+                config_size,
+                cudaMemcpyHostToDevice
+            );
+            cudaMemcpy(
+                parents[0],
+                &start_parent,
+                sizeof(int),
+                cudaMemcpyHostToDevice
+            );
+            cudaMemcpy(
+                node_costs[0],
+                &start_cost,
+                sizeof(float),
+                cudaMemcpyHostToDevice
+            );
+            cudaMemcpy(
+                node_ready[0],
+                &start_ready,
+                sizeof(int),
+                cudaMemcpyHostToDevice
+            );
+            cudaMemcpy(
+                radii[0],
+                &root_radius,
+                sizeof(float),
+                cudaMemcpyHostToDevice
+            );
+
+            cudaMemcpy(
+                nodes[1],
+                goals.data(),
+                static_cast<std::size_t>(num_goals) * config_size,
+                cudaMemcpyHostToDevice
+            );
+            cudaMemcpy(
+                parents[1],
+                goal_parents.data(),
+                static_cast<std::size_t>(num_goals) * sizeof(int),
+                cudaMemcpyHostToDevice
+            );
+            cudaMemcpy(
+                node_costs[1],
+                goal_costs.data(),
+                static_cast<std::size_t>(num_goals) * sizeof(float),
+                cudaMemcpyHostToDevice
+            );
+            cudaMemcpy(
+                node_ready[1],
+                goal_ready.data(),
+                static_cast<std::size_t>(num_goals) * sizeof(int),
+                cudaMemcpyHostToDevice
+            );
+            cudaMemcpy(
+                radii[1],
+                goal_radii.data(),
+                static_cast<std::size_t>(num_goals) * sizeof(float),
+                cudaMemcpyHostToDevice
+            );
+
+            int zero_ts_count[2] = {0, 0};
+            cudaMemcpy(
+                ts_count,
+                zero_ts_count,
+                sizeof(zero_ts_count),
+                cudaMemcpyHostToDevice
+            );
+
+            if constexpr (TangentSpaceTraits<Robot>::enabled) {
+                init_root_ts_banks<Robot><<<1 + num_goals, 1>>>(
+                    d_nodes,
+                    d_ts_root_node_idx,
+                    d_ts_bases,
+                    d_ts_ready,
+                    d_node_ts_id,
+                    d_node_ts_q,
+                    d_ts_node_count,
+                    d_ts_lane_head,
+                    d_node_next_in_ts,
+                    1,
+                    num_goals
+                );
+                cudaDeviceSynchronize();
+                cudaCheckError(cudaGetLastError());
+
+                const int initial_ts_count[2] = {1, num_goals};
+                cudaMemcpy(
+                    ts_count,
+                    initial_ts_count,
+                    sizeof(initial_ts_count),
+                    cudaMemcpyHostToDevice
+                );
+            }
+
+            res.copy_ns += get_elapsed_nanoseconds(copy_start);
+            cudaCheckError(cudaGetLastError());
+        };
+
+        const auto planning_start = std::chrono::steady_clock::now();
+
+        const auto planning_deadline = planning_start
+            + std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+                std::chrono::duration<double>(settings.time_limit_sec)
+            );
+
+        initialize_fresh_search();
+
+        int total_rounds = 0;
+        int search_round = 0;
+
+        while (total_rounds < settings.max_iters
+               && std::chrono::steady_clock::now() < planning_deadline) {
+            total_rounds++;
+            search_round++;
+
+            const auto kernel_start = std::chrono::steady_clock::now();
+            if (settings.trace_trees) {
+                rrtc<Robot, true, true>
+                    <<<settings.num_new_configs,
+                       4 * settings.granularity>>>(
+                        d_nodes,
+                        d_parents,
+                        d_node_costs,
+                        d_node_ready,
+                        d_node_ts_id,
+                        d_node_ts_q,
+                        ts_count,
+                        d_ts_root_node_idx,
+                        d_ts_bases,
+                        d_ts_ready,
+                        d_ts_node_count,
+                        d_ts_lane_head,
+                        d_node_next_in_ts,
+                        d_radii,
+                        halton_states,
+                        rng_states,
+                        block_tree_ids,
+                        env,
+                        num_goals,
+                        search_round
+                    );
+            }
+            else {
+                rrtc<Robot, false, true>
+                    <<<settings.num_new_configs,
+                       4 * settings.granularity>>>(
+                        d_nodes,
+                        d_parents,
+                        d_node_costs,
+                        d_node_ready,
+                        d_node_ts_id,
+                        d_node_ts_q,
+                        ts_count,
+                        d_ts_root_node_idx,
+                        d_ts_bases,
+                        d_ts_ready,
+                        d_ts_node_count,
+                        d_ts_lane_head,
+                        d_node_next_in_ts,
+                        d_radii,
+                        halton_states,
+                        rng_states,
+                        block_tree_ids,
+                        env,
+                        num_goals,
+                        search_round
+                    );
+            }
+            cudaDeviceSynchronize();
+            res.kernel_ns += get_elapsed_nanoseconds(kernel_start);
+            cudaCheckError(cudaGetLastError());
+
+            const auto state_copy_start = std::chrono::steady_clock::now();
+            int search_solution = 0;
+            int stop_requested = 0;
+            cudaMemcpyFromSymbol(
+                &search_solution,
+                aorrtc_search_solution_found,
+                sizeof(int),
+                0,
+                cudaMemcpyDeviceToHost
+            );
+            cudaMemcpyFromSymbol(
+                &stop_requested,
+                aorrtc_stop_requested,
+                sizeof(int),
+                0,
+                cudaMemcpyDeviceToHost
+            );
+            res.copy_ns += get_elapsed_nanoseconds(state_copy_start);
+
+            if (search_solution != 0) {
+                int current_samples[2] = {0, 0};
+                float best_cost = FLT_MAX;
+                int source_tree = -1;
+                int source_node = -1;
+                int target_tree = -1;
+                int target_node = -1;
+
+                const auto snapshot_start = std::chrono::steady_clock::now();
                 cudaMemcpyFromSymbol(
-                    &res.connection_tree_id,
+                    current_samples,
+                    atomic_free_index,
+                    sizeof(current_samples),
+                    0,
+                    cudaMemcpyDeviceToHost
+                );
+                for (int tree = 0; tree < 2; tree++) {
+                    current_samples[tree] = std::clamp(
+                        current_samples[tree],
+                        0,
+                        settings.max_samples
+                    );
+                }
+                cudaMemcpyFromSymbol(
+                    &best_cost,
+                    aorrtc_best_cost,
+                    sizeof(float),
+                    0,
+                    cudaMemcpyDeviceToHost
+                );
+                cudaMemcpyFromSymbol(
+                    &source_tree,
                     connection_tree_id,
                     sizeof(int),
                     0,
                     cudaMemcpyDeviceToHost
                 );
                 cudaMemcpyFromSymbol(
-                    &res.connection_node_idx,
+                    &source_node,
                     connection_node_idx,
                     sizeof(int),
                     0,
                     cudaMemcpyDeviceToHost
                 );
                 cudaMemcpyFromSymbol(
-                    &res.connection_other_tree_id,
+                    &target_tree,
                     connection_other_tree_id,
                     sizeof(int),
                     0,
                     cudaMemcpyDeviceToHost
                 );
                 cudaMemcpyFromSymbol(
-                    &res.connection_other_node_idx,
+                    &target_node,
                     connection_other_node_idx,
                     sizeof(int),
                     0,
                     cudaMemcpyDeviceToHost
                 );
-                fill_solution_trace(res);
+
+                AORRTCResult<Robot> snapshot;
+                snapshot.solved = true;
+                snapshot.start_tree_size = current_samples[0];
+                snapshot.goal_tree_size = current_samples[1];
+                snapshot.connection_tree_id = source_tree;
+                snapshot.connection_node_idx = source_node;
+                snapshot.connection_other_tree_id = target_tree;
+                snapshot.connection_other_node_idx = target_node;
+                reconstruct_aorrtc_path(
+                    snapshot,
+                    nodes,
+                    parents,
+                    current_samples
+                );
+
+                const float evaluated_cost =
+                    configuration_space_path_arclength<Robot>(
+                        snapshot.path
+                    );
+
+                snapshot.cost = evaluated_cost;
+
+                if (settings.trace_trees) {
+                    copy_tree_trace_to_result(
+                        snapshot,
+                        nodes,
+                        parents,
+                        node_ready,
+                        current_samples
+                    );
+                    fill_solution_trace(snapshot);
+                }
+
+                const std::size_t found_ns =
+                    get_elapsed_nanoseconds(planning_start);
+
+                res.solved = true;
+                res.cost = evaluated_cost;
+                res.path = snapshot.path;
+                res.path_length = snapshot.path_length;
+                res.start_tree_size = snapshot.start_tree_size;
+                res.goal_tree_size = snapshot.goal_tree_size;
+                res.connection_tree_id = snapshot.connection_tree_id;
+                res.connection_node_idx = snapshot.connection_node_idx;
+                res.connection_other_tree_id =
+                    snapshot.connection_other_tree_id;
+                res.connection_other_node_idx =
+                    snapshot.connection_other_node_idx;
+                if (settings.trace_trees) {
+                    res.tree_nodes = std::move(snapshot.tree_nodes);
+                    res.tree_parents = std::move(snapshot.tree_parents);
+                    res.tree_node_ready =
+                        std::move(snapshot.tree_node_ready);
+                    res.solution_trace =
+                        std::move(snapshot.solution_trace);
+                }
+
+                if (res.solution_updates == 0) {
+                    res.initial_cost = evaluated_cost;
+                    res.initial_solution_ns = found_ns;
+                    res.initial_kernel_ns = res.kernel_ns;
+                }
+                res.best_solution_ns = found_ns;
+
+                AORRTCSolutionUpdate<Robot> update;
+                update.update_index = res.solution_updates;
+                update.source_tree_id = source_tree;
+                update.source_node_idx = source_node;
+                update.target_tree_id = target_tree;
+                update.target_node_idx = target_node;
+                update.iteration = total_rounds;
+                update.cost = evaluated_cost;
+                update.found_ns = found_ns;
+                update.path_start_to_goal.assign(
+                    res.path.rbegin(),
+                    res.path.rend()
+                );
+                if (settings.trace_trees) {
+                    update.solution_trace = res.solution_trace;
+                }
+                constexpr std::size_t kMaxSolutionHistory = 1024;
+                if (res.solution_history.size() < kMaxSolutionHistory) {
+                    res.solution_history.push_back(std::move(update));
+                }
+                else {
+                    res.solution_history_overflow = true;
+                }
+                res.solution_updates++;
+                res.copy_ns += get_elapsed_nanoseconds(snapshot_start);
+
+                // Algorithm 1 Lines 5-8: the newly found cost is already stored
+                // in aorrtc_best_cost.  Discard both trees and start a fresh
+                // bounded search.  Device allocations are reused, but no tree
+                // node or TS membership is reused.
+                if (std::chrono::steady_clock::now() < planning_deadline) {
+                    initialize_fresh_search();
+                    search_round = 0;
+                    res.search_restarts++;
+                }
+                continue;
             }
-            res.copy_ns += get_elapsed_nanoseconds(copy_start_time);
-            cudaCheckError(cudaGetLastError());
+
+            // Capacity exhaustion is not an AORRTC termination condition.  A
+            // fresh tree with the same c_max is started while time remains.
+            if (stop_requested != 0
+                && std::chrono::steady_clock::now() < planning_deadline) {
+                initialize_fresh_search();
+                search_round = 0;
+                res.search_restarts++;
+            }
         }
-        
+
+        res.iters = total_rounds;
+
+        // planning과 wall 모두 cleanup 직전에 종료
+        const auto planning_end = std::chrono::steady_clock::now();
+
+        res.planning_ns =
+            std::chrono::duration_cast<std::chrono::nanoseconds>(
+                planning_end - planning_start
+            ).count();
+
+        res.wall_ns =
+            std::chrono::duration_cast<std::chrono::nanoseconds>(
+                planning_end - solve_start
+            ).count();
+
         cleanup_environment_on_device(env, h_environment);
         reset_device_variables();
-        cudaFree((void *)nodes[0]);
-        cudaFree((void *)nodes[1]);
-        cudaFree((void *)parents[0]);
-        cudaFree((void *)parents[1]);
 
-        for (int i = 0; i < 2; i++) {
-
-        if (ts_root_node_idx[i] != nullptr) {
-            cudaFree(ts_root_node_idx[i]);
+        for (int tree = 0; tree < 2; tree++) {
+            cudaFree(nodes[tree]);
+            cudaFree(parents[tree]);
+            cudaFree(node_costs[tree]);
+            cudaFree(node_ready[tree]);
+            cudaFree(radii[tree]);
+            cudaFree(node_ts_id[tree]);
+            cudaFree(node_ts_q[tree]);
+            cudaFree(ts_root_node_idx[tree]);
+            cudaFree(ts_ready[tree]);
+            if (ts_bases[tree] != nullptr) {
+                cudaFree(ts_bases[tree]);
+            }
+            if (ts_node_count[tree] != nullptr) {
+                cudaFree(ts_node_count[tree]);
+            }
+            if (ts_lane_head[tree] != nullptr) {
+                cudaFree(ts_lane_head[tree]);
+            }
+            if (node_next_in_ts[tree] != nullptr) {
+                cudaFree(node_next_in_ts[tree]);
+            }
         }
 
-        if (ts_ready[i] != nullptr) {
-            cudaFree(ts_ready[i]);
-        }
-
-        if (ts_bases[i] != nullptr) {
-            cudaFree(ts_bases[i]);
-        }
-
-        if (node_ts_id[i] != nullptr) {
-            cudaFree(node_ts_id[i]);
-        }
-
-        if (node_ts_q[i] != nullptr) {
-            cudaFree(node_ts_q[i]);
-        }
-
-        if (ts_node_count[i] != nullptr) {
-            cudaFree(ts_node_count[i]);
-        }
-
-        if (ts_lane_head[i] != nullptr) {
-            cudaFree(ts_lane_head[i]);
-        }
-
-        if (node_next_in_ts[i] != nullptr) {
-            cudaFree(node_next_in_ts[i]);
-        }
-    }
-        cudaFree((void *)node_ready[0]);
-        cudaFree((void *)node_ready[1]);
-        cudaFree((void *)radii[0]);
-        cudaFree((void *)radii[1]);
         cudaFree(rng_states);
         cudaFree(halton_states);
+        cudaFree(block_tree_ids);
         cudaFree(d_nodes);
         cudaFree(d_parents);
+        cudaFree(d_node_costs);
         cudaFree(d_node_ready);
         cudaFree(d_radii);
         cudaFree(d_node_ts_id);
         cudaFree(d_node_ts_q);
-
         cudaFree(ts_count);
-
         cudaFree(d_ts_root_node_idx);
         cudaFree(d_ts_bases);
         cudaFree(d_ts_ready);
         cudaFree(d_ts_node_count);
         cudaFree(d_ts_lane_head);
         cudaFree(d_node_next_in_ts);
-        cudaFreeHost(h_solved);
         cudaCheckError(cudaGetLastError());
-        res.wall_ns = get_elapsed_nanoseconds(start_time);
+
+        res.wall_ns = get_elapsed_nanoseconds(solve_start);
         cudaDeviceReset();
         return res;
     }
 
-    //template PlannerResult<typename ppln::robots::Sphere> solve<ppln::robots::Sphere>(std::array<float, 3>&, std::vector<std::array<float, 3>>&, ppln::collision::Environment<float>&, pRRTC_settings&);
-    template PlannerResult<typename ppln::robots::Panda> solve<ppln::robots::Panda>(std::array<float, 7>&, std::vector<std::array<float, 7>>&, ppln::collision::Environment<float>&, pRRTC_settings&);
-    template PlannerResult<typename ppln::robots::Fetch> solve<ppln::robots::Fetch>(std::array<float, 8>&, std::vector<std::array<float, 8>>&, ppln::collision::Environment<float>&, pRRTC_settings&);
-    template PlannerResult<typename ppln::robots::Baxter> solve<ppln::robots::Baxter>(std::array<float, 14>&, std::vector<std::array<float, 14>>&, ppln::collision::Environment<float>&, pRRTC_settings&);
-    template PlannerResult<typename ppln::robots::FfwSg2> solve<ppln::robots::FfwSg2>(std::array<float, 15>&, std::vector<std::array<float, 15>>&, ppln::collision::Environment<float>&, pRRTC_settings&);
-    template PlannerResult<typename ppln::robots::FfwSg2Single> solve<ppln::robots::FfwSg2Single>(std::array<float, 8>&, std::vector<std::array<float, 8>>&, ppln::collision::Environment<float>&, pRRTC_settings&);
-    template PlannerResult<typename ppln::robots::G1> solve<ppln::robots::G1>(std::array<float, 35>&, std::vector<std::array<float, 35>>&, ppln::collision::Environment<float>&, pRRTC_settings&);
+    template AORRTCResult<ppln::robots::Panda> solve<ppln::robots::Panda>(std::array<float, 7>&, std::vector<std::array<float, 7>>&, ppln::collision::Environment<float>&, AORRTC_settings&);
+    template AORRTCResult<ppln::robots::Fetch> solve<ppln::robots::Fetch>(std::array<float, 8>&, std::vector<std::array<float, 8>>&, ppln::collision::Environment<float>&, AORRTC_settings&);
+    template AORRTCResult<ppln::robots::Baxter> solve<ppln::robots::Baxter>(std::array<float, 14>&, std::vector<std::array<float, 14>>&, ppln::collision::Environment<float>&, AORRTC_settings&);
+    template AORRTCResult<ppln::robots::FfwSg2> solve<ppln::robots::FfwSg2>(std::array<float, 15>&, std::vector<std::array<float, 15>>&, ppln::collision::Environment<float>&, AORRTC_settings&);
+    template AORRTCResult<ppln::robots::FfwSg2Single> solve<ppln::robots::FfwSg2Single>(std::array<float, 8>&, std::vector<std::array<float, 8>>&, ppln::collision::Environment<float>&, AORRTC_settings&);
+    template AORRTCResult<ppln::robots::G1> solve<ppln::robots::G1>(std::array<float, 35>&, std::vector<std::array<float, 35>>&, ppln::collision::Environment<float>&, AORRTC_settings&);
 
 }

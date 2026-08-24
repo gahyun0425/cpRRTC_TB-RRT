@@ -321,29 +321,41 @@ def tree_trace_graphml_text(
         frozenset((solution_ids[i], solution_ids[i + 1]))
         for i in range(max(0, len(solution_ids) - 1))
     }
+    # AORRTC restarts its trees after every improved solution.  Therefore
+    # solution_history[*].solution_order contains node indices that belong to
+    # *old* trees and must not be matched against the final/best tree by index.
+    # Keep previous solutions using their actual configuration trajectories.
     history_paths: list[dict[str, Any]] = []
-    history_node_ids: set[str] = set()
-    for history_index, row in enumerate(solution_history_rows(result)):
-        ordered_nodes: list[tuple[str, str, int]] = []
-        for node in solution_node_rows(row):
-            tree_name = str(
-                node.get("tree")
-                or ("start" if int(node.get("tree_id", 0)) == 0 else "goal")
-            )
-            node_idx = int(node.get("idx"))
-            node_id = tree_node_id(tree_name, node_idx)
-            ordered_nodes.append((node_id, tree_name, node_idx))
-            history_node_ids.add(node_id)
-        if len(ordered_nodes) >= 2:
-            history_paths.append({
-                "update_index": int(row.get("update_index", history_index)),
-                "iteration": int(row.get("iteration", row.get("iter", 0))),
-                "cost": float(row.get("cost", 0.0)),
-                "final": bool(row.get("final", False)),
-                "nodes": ordered_nodes,
-            })
-    if history_paths and not any(path["final"] for path in history_paths):
-        history_paths[-1]["final"] = True
+    history_rows = solution_history_rows(result)
+    for history_index, row in enumerate(history_rows):
+        raw_path = row.get("path_start_to_goal")
+        if not isinstance(raw_path, list) or len(raw_path) < 2:
+            continue
+
+        path: list[list[float]] = []
+        valid_path = True
+        for waypoint in raw_path:
+            if not isinstance(waypoint, list):
+                valid_path = False
+                break
+            q = [float(value) for value in waypoint]
+            if dimension > 0 and len(q) != dimension:
+                valid_path = False
+                break
+            path.append(q)
+
+        if not valid_path or len(path) < 2:
+            continue
+
+        history_paths.append({
+            "update_index": int(row.get("update_index", history_index)),
+            "iteration": int(row.get("iteration", row.get("iter", 0))),
+            "cost": float(row.get("cost", 0.0)),
+            # The last retained update is the best/final solution and is
+            # already rendered using the actual final tree solution chain.
+            "final": history_index == len(history_rows) - 1,
+            "path": path,
+        })
 
     root = ET.Element(tag("graphml"))
     add_graphml_keys(root, dimension)
@@ -362,9 +374,11 @@ def tree_trace_graphml_text(
         ready_nodes_by_tree[tree_name] = nodes
         max_step = max(max_step, max(nodes.keys(), default=0))
         total_nodes += len(nodes)
+    # Tree compaction protects only the final/best solution nodes.
+    # Previous AORRTC solutions are rendered as independent path overlays.
     ready_nodes_by_tree = compact_tree_nodes(
         ready_nodes_by_tree,
-        set(solution_ids) | history_node_ids,
+        set(solution_ids),
         max_tree_nodes,
     )
 
@@ -405,9 +419,9 @@ def tree_trace_graphml_text(
             )
             node_id = tree_node_id(tree_name, idx)
             order_index = solution_order_by_id.get(node_id, -1)
-            is_solution_node = (
-                node_id in history_node_ids or order_index >= 0
-            )
+            # Only the final/best search tree solution is marked as the
+            # tree solution.  Old AORRTC paths are separate overlays.
+            is_solution_node = order_index >= 0
             elem = ET.SubElement(graph, tag("node"), {"id": node_id})
             node_values = {
                 "seq": seq,
@@ -515,39 +529,96 @@ def tree_trace_graphml_text(
                 data(elem, EDGE_KEYS[key], value)
             edge_idx += 1
 
-    retained_node_ids = {
-        tree_node_id(tree_name, node_idx)
-        for tree_name, nodes in ready_nodes_by_tree.items()
-        for node_idx in nodes
-    }
+    # Add previous AORRTC solutions as synthetic configuration-only path
+    # overlays.  Their waypoint nodes are intentionally not tree nodes and
+    # will be hidden by the HTML viewer; only the colored path edges remain.
+    # The final/best solution is not duplicated because it already exists in
+    # the final tree as the regular green solution chain.
     for history_path in history_paths:
+        if bool(history_path["final"]):
+            continue
+
         update_index = int(history_path["update_index"])
         iteration = int(history_path["iteration"])
-        is_final = bool(history_path["final"])
-        ordered_nodes = history_path["nodes"]
-        for path_edge_index in range(len(ordered_nodes) - 1):
-            source, source_tree, source_idx = ordered_nodes[path_edge_index]
-            target, target_tree, target_idx = ordered_nodes[path_edge_index + 1]
-            if source not in retained_node_ids or target not in retained_node_ids:
-                continue
+        cost = float(history_path["cost"])
+        path = history_path["path"]
+        path_node_ids: list[str] = []
+
+        for state_index, q in enumerate(path):
+            node_id = f"n_aorrtc_history_u{update_index}_s{state_index}"
+            path_node_ids.append(node_id)
+            parent_id = "" if state_index == 0 else path_node_ids[state_index - 1]
+
+            elem = ET.SubElement(graph, tag("node"), {"id": node_id})
+            progress = state_index / max(1, len(path) - 1)
+            node_values = {
+                "seq": seq,
+                "tree": "history",
+                "batch_idx": update_index,
+                "node_idx": state_index,
+                "parent_idx": -1 if state_index == 0 else state_index - 1,
+                "parent_id": parent_id,
+                "iter": iteration,
+                "phase": "aorrtc_history_path",
+                "step_type": "connect",
+                "slot_idx": update_index,
+                "escape_step": -1,
+                "ts_id": -1,
+                "is_proj_root": state_index == 0,
+                "grow_step": max_step,
+                "duration_sec": 0.0,
+                # Show history overlays only at the final display step so the
+                # best-tree growth animation remains unchanged.
+                "display_step": max_step,
+                "parallel_step": update_index,
+                "parallel_step_start_sec": 0.0,
+                "parallel_step_finished_at_sec": 0.0,
+                "parallel_step_duration_sec": 0.0,
+                "depth": state_index,
+                "solution": False,
+                "event_kind": "aorrtc_history_path",
+                "active": 1,
+                "advanced": 1 if state_index > 0 else 0,
+                "trapped": 0,
+                "reached": 1 if state_index == len(path) - 1 else 0,
+                "mean_progress": progress,
+                "max_progress": progress,
+                "simultaneous": False,
+                "simultaneous_group": (
+                    f"aorrtc_history_u{update_index}_cost_{cost:.6f}"
+                ),
+                "order_index": -1,
+            }
+            for key, value in node_values.items():
+                data(elem, NODE_KEYS[key], value)
+            data(elem, NODE_KEYS["q_json"], json.dumps(q))
+            for q_idx, value in enumerate(q):
+                data(elem, f"n_q{q_idx}", value)
+            seq += 1
+
+        for state_index in range(1, len(path)):
+            source = path_node_ids[state_index - 1]
+            target = path_node_ids[state_index]
             elem = ET.SubElement(
                 graph,
                 tag("edge"),
                 {
-                    "id": f"e_aorrtc_update_{update_index}_{path_edge_index}_{edge_idx}",
+                    "id": (
+                        f"e_aorrtc_history_u{update_index}_"
+                        f"s{state_index - 1}_{edge_idx}"
+                    ),
                     "source": source,
                     "target": target,
                 },
             )
-            step = max(source_idx, target_idx)
             edge_values = {
-                "kind": "solution_final" if is_final else "solution_update",
-                "tree": source_tree if source_tree == target_tree else "connection",
+                "kind": "solution_update",
+                "tree": "history",
                 "batch_idx": update_index,
                 "iter": iteration,
                 "phase": "aorrtc_solution_update",
-                "grow_step": step,
-                "display_step": step,
+                "grow_step": max_step,
+                "display_step": max_step,
                 "parallel_step": update_index,
                 "solution": True,
             }
@@ -839,50 +910,69 @@ def generated_paths_graphml_text(
 
 
 def add_aorrtc_update_colors(html_path: Path) -> None:
+    """Color previous AORRTC solution overlays without breaking export.
+
+    add_pca_3d_layout() contains a *reference* to aorrtcUpdateColor before the
+    function is actually defined, so idempotence must check for the function
+    declaration itself rather than the bare string ``aorrtcUpdateColor``.
+    """
     html = html_path.read_text(encoding="utf-8")
-    if "aorrtcUpdateColor" in html:
+    if "function aorrtcUpdateColor(index)" in html:
         return
 
     draw_marker = "function draw() {"
-    stroke_marker = (
+    stroke_markers = [
         'ctx.strokeStyle = edge.kind === "connection" ? "#c084fc" '
-        ': edge.solution ? "#4ade80" :'
-    )
+        ': edge.solution ? "#4ade80" :',
+        'ctx.strokeStyle = edge.kind === "connection" ? "#c084fc" '
+        ': edge.solution ? "#15803d" :',
+    ]
+    stroke_marker = next((marker for marker in stroke_markers if marker in html), None)
     width_marker = (
         'ctx.lineWidth = edge.solution ? 4.2 '
         ': edge.kind === "connection" ? 3.6 : 1.15;'
     )
-    if draw_marker not in html or stroke_marker not in html or width_marker not in html:
-        raise RuntimeError(
-            "PATACON HTML viewer is incompatible with AORRTC update coloring"
-        )
+
+    # Coloring is cosmetic. Never fail the whole trace export merely because
+    # the upstream PATACON viewer changed an exact drawing string.
+    if draw_marker not in html or stroke_marker is None or width_marker not in html:
+        return
 
     color_script = """
 function aorrtcUpdateColor(index) {
   const safeIndex = Math.max(0, Number(index) || 0);
   const hue = (safeIndex * 137.508) % 360;
-  return `hsla(${hue}, 85%, 62%, 0.82)`;
+  return `hsla(${hue}, 85%, 48%, 0.88)`;
 }
 """
     html = html.replace(draw_marker, color_script + "\n" + draw_marker, 1)
     html = html.replace(
         stroke_marker,
-        'ctx.strokeStyle = edge.kind === "solution_final" ? "#22c55e" '
-        ': edge.kind === "solution_update" ? aorrtcUpdateColor(edge.batch_idx) '
+        'ctx.strokeStyle = edge.kind === "solution_update" ? aorrtcUpdateColor(edge.batch_idx) '
         ': edge.kind === "connection" ? "#c084fc" '
-        ': edge.solution ? "#4ade80" :',
+        ': edge.solution ? "#15803d" :',
         1,
     )
     html = html.replace(
         width_marker,
-        'ctx.lineWidth = edge.kind === "solution_final" ? 6.2 '
-        ': edge.kind === "solution_update" ? 3.0 '
+        'ctx.lineWidth = edge.kind === "solution_update" ? 2.8 '
         ': edge.solution ? 4.2 '
         ': edge.kind === "connection" ? 3.6 : 1.15;',
         1,
     )
+    dash_marker = (
+        'if (edge.kind === "connection") ctx.setLineDash([5,4]); '
+        'else ctx.setLineDash([]);'
+    )
+    if dash_marker in html:
+        html = html.replace(
+            dash_marker,
+            'if (edge.kind === "solution_update") ctx.setLineDash([7,4]); '
+            'else if (edge.kind === "connection") ctx.setLineDash([5,4]); '
+            'else ctx.setLineDash([]);',
+            1,
+        )
     html_path.write_text(html, encoding="utf-8")
-
 
 def add_invalid_configuration_guard(html_path: Path) -> None:
     html = html_path.read_text(encoding="utf-8")
@@ -923,7 +1013,10 @@ function validPcaConfiguration(n) {
     )
     html = html.replace(
         samples_marker,
-        "const samples = nodes.filter(validPcaConfiguration);",
+        (
+            "const samples = nodes.filter(n => "
+            "validPcaConfiguration(n) && n.tree !== \"history\");"
+        ),
         1,
     )
     html = html.replace(
@@ -936,48 +1029,590 @@ function validPcaConfiguration(n) {
     html = html.replace(
         visible_marker,
         visible_marker
+        + "\n\t  if (n.tree === \"history\") return false;"
         + "\n\t  if (layoutSelect.value === \"pca\" && !n.pca) return false;",
         1,
     )
     html_path.write_text(html, encoding="utf-8")
 
 
+def add_aorrtc_history_visibility(html_path: Path) -> None:
+    """Keep AORRTC history edges visible while hiding synthetic history nodes.
+
+    The synthetic nodes are only coordinate carriers for previous solution
+    trajectories. They must not appear as tree nodes, but their edges still
+    need to be rendered. This patch also includes history coordinates in the
+    2D viewport bounds so an old path is not clipped when it lies outside the
+    final/best tree extent.
+    """
+    html = html_path.read_text(encoding="utf-8")
+    patch_marker = "/* cpRRTC AORRTC history visibility */"
+
+    # The base PATACON viewer only creates startTree/goalTree checkboxes.
+    # Synthetic history nodes use tree="history". Without this guard,
+    # updateSlotPanel() calls activeTree("history") and crashes on
+    # document.getElementById("historyTree") == null before any edges draw.
+    active_tree_old = (
+        'function activeTree(tree) { return document.getElementById(tree + "Tree").checked; }'
+    )
+    active_tree_new = (
+        'function activeTree(tree) {\n'
+        '  if (tree === "history") return false;\n'
+        '  const control = document.getElementById(tree + "Tree");\n'
+        '  return control ? control.checked : false;\n'
+        '}'
+    )
+    if active_tree_old in html:
+        html = html.replace(active_tree_old, active_tree_new, 1)
+
+    if patch_marker in html:
+        html_path.write_text(html, encoding="utf-8")
+        return
+
+    visible_start = html.find("function visibleEdge(e) {")
+    next_function = html.find("function countSlotModes", visible_start)
+    if visible_start < 0 or next_function < 0:
+        raise RuntimeError(
+            "PATACON HTML viewer is incompatible with AORRTC history visibility"
+        )
+
+    replacement = r'''/* cpRRTC AORRTC history visibility */
+function visibleEdge(e) {
+  const a = nodeById.get(e.source);
+  const b = nodeById.get(e.target);
+  if (!a || !b) return false;
+
+  // Previous AORRTC solutions use hidden synthetic nodes. Their path edges
+  // remain visible even though visibleNode(historyNode) intentionally returns
+  // false. The slider still controls when the overlay appears.
+  if (e.kind === "solution_update") {
+    return itemStep(e) <= Number(slider.value);
+  }
+
+  return visibleNode(a)
+      && visibleNode(b)
+      && itemStep(e) <= Number(slider.value);
+}
+'''
+    html = html[:visible_start] + replacement + html[next_function:]
+
+    old_bounds = (
+        "  const shown = trace.nodes.filter(visibleNode);\n"
+        "  const points = (shown.length ? shown : trace.nodes).map(coordinates);"
+    )
+    new_bounds = (
+        "  const shown = trace.nodes.filter(visibleNode);\n"
+        "  const historyShown = trace.nodes.filter(n =>\n"
+        "    n.tree === \"history\" &&\n"
+        "    itemStep(n) <= Number(slider.value) &&\n"
+        "    (layoutSelect.value !== \"pca\" || !!n.pca)\n"
+        "  );\n"
+        "  const boundNodes = [...shown, ...historyShown];\n"
+        "  const points = (boundNodes.length ? boundNodes : trace.nodes).map(coordinates);"
+    )
+    if old_bounds in html:
+        html = html.replace(old_bounds, new_bounds, 1)
+
+    html_path.write_text(html, encoding="utf-8")
+
+
+def add_pca_3d_layout(html_path: Path) -> None:
+    """Add a perspective PC1/PC2/PC3 tree viewer to PATACON HTML.
+
+    This is a visualization-only post-process. The planner trace and CUDA
+    execution are unchanged. PCA 2D and Timeline modes remain intact; the
+    added PCA 3D mode uses a dedicated perspective renderer with orbit,
+    zoom, grid, axes, depth sorting, and explained-variance readout.
+    """
+    html = html_path.read_text(encoding="utf-8")
+    patch_marker = "/* cpRRTC PCA 3D perspective viewer */"
+    if patch_marker in html:
+        return
+
+    option_marker = '<option value="pca">PCA layout</option>'
+    load_marker = "computePca(trace.nodes);"
+    visible_marker = "function visibleNode(n) {"
+    body_end_marker = "</body>"
+    if any(
+        marker not in html
+        for marker in (option_marker, load_marker, visible_marker, body_end_marker)
+    ):
+        raise RuntimeError(
+            "PATACON HTML viewer is incompatible with the PCA 3D perspective patch"
+        )
+
+    html = html.replace(
+        option_marker,
+        option_marker + '<option value="pca3d">PCA 3D layout</option>',
+        1,
+    )
+
+    pca3d_compute_script = r'''
+/* cpRRTC PCA 3D perspective viewer */
+const cpRrtcPca3dStats = {
+  eigenvalues: [0, 0, 0],
+  explained: [0, 0, 0],
+  radius: 1,
+};
+
+function computePca3d(nodes) {
+  const samples = nodes.filter(
+    n => validPcaConfiguration(n) && n.tree !== "history"
+  );
+  if (!samples.length) return;
+
+  const d = samples[0].q.length;
+  if (d <= 0) return;
+
+  const mean = Array(d).fill(0);
+  for (const n of samples) {
+    for (let i = 0; i < d; ++i) mean[i] += n.q[i];
+  }
+  for (let i = 0; i < d; ++i) mean[i] /= samples.length;
+
+  function dot(a, b) {
+    let value = 0;
+    for (let i = 0; i < d; ++i) value += (a[i] || 0) * (b[i] || 0);
+    return value;
+  }
+
+  function normalize(v) {
+    let norm2 = 0;
+    for (const value of v) norm2 += value * value;
+    const norm = Math.sqrt(norm2);
+    if (!(norm > 1.0e-12)) return Array(d).fill(0);
+    return v.map(value => value / norm);
+  }
+
+  function covMul(v) {
+    const out = Array(d).fill(0);
+    for (const n of samples) {
+      let projected = 0;
+      for (let i = 0; i < d; ++i) {
+        projected += (n.q[i] - mean[i]) * v[i];
+      }
+      for (let i = 0; i < d; ++i) {
+        out[i] += (n.q[i] - mean[i]) * projected;
+      }
+    }
+    const denom = Math.max(1, samples.length - 1);
+    return out.map(value => value / denom);
+  }
+
+  function seedVector(axis) {
+    const seed = Array(d).fill(0);
+    const primary = Math.min(axis, d - 1);
+    seed[primary] = 1.0;
+    for (let i = 0; i < d; ++i) {
+      if (i !== primary) seed[i] = 0.013 / (i + axis + 2);
+    }
+    return normalize(seed);
+  }
+
+  function dominantComponent(axis, previous) {
+    let v = seedVector(axis);
+    for (let iteration = 0; iteration < 60; ++iteration) {
+      let next = covMul(v);
+      for (const basis of previous) {
+        const amount = dot(next, basis);
+        next = next.map((value, i) => value - amount * basis[i]);
+      }
+      const normalized = normalize(next);
+      if (!normalized.some(value => Math.abs(value) > 1.0e-12)) break;
+      v = normalized;
+    }
+    return v;
+  }
+
+  const v1 = dominantComponent(0, []);
+  const v2 = dominantComponent(1, [v1]);
+  const v3 = dominantComponent(2, [v1, v2]);
+
+  const cv1 = covMul(v1), cv2 = covMul(v2), cv3 = covMul(v3);
+  const l1 = Math.max(0, dot(v1, cv1));
+  const l2 = Math.max(0, dot(v2, cv2));
+  const l3 = Math.max(0, dot(v3, cv3));
+
+  let totalVariance = 0;
+  const denom = Math.max(1, samples.length - 1);
+  for (const n of samples) {
+    for (let i = 0; i < d; ++i) {
+      const delta = n.q[i] - mean[i];
+      totalVariance += delta * delta / denom;
+    }
+  }
+  const safeTotal = Math.max(totalVariance, 1.0e-12);
+  cpRrtcPca3dStats.eigenvalues = [l1, l2, l3];
+  cpRrtcPca3dStats.explained = [l1 / safeTotal, l2 / safeTotal, l3 / safeTotal];
+
+  let radius = 0;
+  for (const n of nodes) {
+    if (!validPcaConfiguration(n)) {
+      n.pca3d = null;
+      continue;
+    }
+    const centered = n.q.map((value, i) => value - mean[i]);
+    n.pca3d = [dot(centered, v1), dot(centered, v2), dot(centered, v3)];
+    radius = Math.max(radius, Math.hypot(...n.pca3d));
+  }
+  cpRrtcPca3dStats.radius = Math.max(radius, 1.0e-9);
+}
+'''
+
+    html = html.replace(
+        visible_marker,
+        pca3d_compute_script + "\n" + visible_marker,
+        1,
+    )
+    html = html.replace(
+        load_marker,
+        load_marker + "\n  computePca3d(trace.nodes);",
+        1,
+    )
+
+    interaction_script = r'''
+<script>
+(() => {
+  "use strict";
+
+  const pca3d = {
+    yaw: -0.72,
+    pitch: 0.48,
+    zoom: 1.0,
+    drag: null,
+    screenNodes: [],
+  };
+
+  const originalDraw = draw;
+  const originalResetView = resetView;
+
+  function pca3dActive() {
+    return layoutSelect.value === "pca3d";
+  }
+
+  function normalizedWorld(raw) {
+    const radius = Math.max(cpRrtcPca3dStats.radius, 1.0e-9);
+    return [raw[0] / radius, raw[1] / radius, raw[2] / radius];
+  }
+
+  function cameraTransformWorld(world) {
+    const [x, y, z] = world;
+    const cy = Math.cos(pca3d.yaw), sy = Math.sin(pca3d.yaw);
+    const cp = Math.cos(pca3d.pitch), sp = Math.sin(pca3d.pitch);
+    const x1 = cy * x + sy * z;
+    const z1 = -sy * x + cy * z;
+    const y2 = cp * y - sp * z1;
+    const z2 = sp * y + cp * z1;
+    return [x1, y2, z2];
+  }
+
+  function cameraTransformRaw(raw) {
+    return cameraTransformWorld(normalizedWorld(raw));
+  }
+
+  function projectWorld(world) {
+    const [x, y, z] = cameraTransformWorld(world);
+    const cameraDistance = 4.2;
+    const denom = Math.max(0.35, cameraDistance - z);
+    const focal = Math.min(width, height) * 1.55 * pca3d.zoom;
+    return {
+      x: width * 0.5 + x * focal / denom,
+      y: height * 0.51 - y * focal / denom,
+      z,
+      depth: denom,
+      scale: focal / denom,
+    };
+  }
+
+  function projectRaw(raw) {
+    return projectWorld(normalizedWorld(raw));
+  }
+
+  function line3d(a, b, stroke, lineWidth=1, dash=[]) {
+    const pa = projectWorld(a), pb = projectWorld(b);
+    ctx.beginPath();
+    ctx.moveTo(pa.x, pa.y);
+    ctx.lineTo(pb.x, pb.y);
+    ctx.strokeStyle = stroke;
+    ctx.lineWidth = lineWidth;
+    ctx.setLineDash(dash);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  function label3d(text, p, fill, dx=5, dy=-5) {
+    const s = projectWorld(p);
+    ctx.fillStyle = fill;
+    ctx.font = "600 12px ui-monospace, SFMono-Regular, Menlo, monospace";
+    ctx.fillText(text, s.x + dx, s.y + dy);
+  }
+
+  function drawGridAndAxes() {
+    const gridExtent = 1.18;
+    const gridStep = 0.2;
+    for (let v = -1.0; v <= 1.0001; v += gridStep) {
+      const major = Math.abs(v) < 1.0e-6;
+      const stroke = major ? "rgba(100,116,139,.48)" : "rgba(148,163,184,.22)";
+      line3d([-gridExtent, 0, v], [gridExtent, 0, v], stroke, major ? 1.15 : 0.8);
+      line3d([v, 0, -gridExtent], [v, 0, gridExtent], stroke, major ? 1.15 : 0.8);
+    }
+
+    const axis = 1.34;
+    line3d([-axis,0,0], [axis,0,0], "#dc2626", 2.2);
+    line3d([0,-axis,0], [0,axis,0], "#16a34a", 2.2);
+    line3d([0,0,-axis], [0,0,axis], "#2563eb", 2.2);
+    label3d("PC1", [axis,0,0], "#991b1b", 7, -3);
+    label3d("PC2", [0,axis,0], "#166534", 7, -3);
+    label3d("PC3", [0,0,axis], "#1d4ed8", 7, -3);
+  }
+
+  function edgeDepth(edge) {
+    const a = nodeById.get(edge.source), b = nodeById.get(edge.target);
+    if (!a?.pca3d || !b?.pca3d) return -Infinity;
+    return (cameraTransformRaw(a.pca3d)[2] + cameraTransformRaw(b.pca3d)[2]) * 0.5;
+  }
+
+  function nodeColor(n, solution) {
+    if (solution) return "#15803d";
+    return n.tree === "start" ? "#0284c7" : "#ea580c";
+  }
+
+  function drawPca3d() {
+    drawPending = false;
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+    ctx.clearRect(0,0,width,height);
+    if (!trace) return;
+
+    const currentStep = Number(slider.value);
+    stepValue.textContent = String(slider.value);
+    const visibleNodesNow = trace.nodes.filter(n => visibleNode(n) && !!n.pca3d);
+    updateStats(visibleNodesNow);
+    updateSlotPanel();
+    updateAsyncPanel();
+    pca3d.screenNodes = [];
+    screenNodes = [];
+
+    drawGridAndAxes();
+
+    const edges = trace.edges
+      .filter(edge => visibleEdge(edge))
+      .filter(edge => nodeById.get(edge.source)?.pca3d && nodeById.get(edge.target)?.pca3d)
+      .sort((a,b) => edgeDepth(a) - edgeDepth(b));
+
+    ctx.lineCap = "round";
+    for (const edge of edges) {
+      const a = nodeById.get(edge.source), b = nodeById.get(edge.target);
+      const pa = projectRaw(a.pca3d), pb = projectRaw(b.pca3d);
+      const historyEdge = edge.kind === "solution_update";
+      const highlighted = edge.solution || edge.kind === "connection" || historyEdge;
+      const meanDepth = (pa.depth + pb.depth) * 0.5;
+      const perspective = Math.max(0.62, Math.min(1.35, 4.2 / meanDepth));
+
+      ctx.beginPath();
+      ctx.moveTo(pa.x, pa.y);
+      ctx.lineTo(pb.x, pb.y);
+      ctx.strokeStyle = historyEdge && typeof aorrtcUpdateColor === "function"
+        ? aorrtcUpdateColor(edge.batch_idx)
+        : edge.kind === "connection"
+          ? "#7e22ce"
+          : edge.solution
+            ? "#15803d"
+            : a.tree === "start"
+              ? "rgba(2,132,199,.42)"
+              : "rgba(234,88,12,.42)";
+      const baseWidth = historyEdge ? 2.6 : highlighted ? 3.2 : 1.05;
+      ctx.lineWidth = baseWidth * perspective;
+      if (historyEdge) ctx.setLineDash([7,4]);
+      else if (edge.kind === "connection") ctx.setLineDash([6,4]);
+      else ctx.setLineDash([]);
+      ctx.stroke();
+    }
+    ctx.setLineDash([]);
+
+    const nodes = visibleNodesNow
+      .map(n => ({n, p: projectRaw(n.pca3d)}))
+      .sort((a,b) => b.p.depth - a.p.depth);
+
+    for (const item of nodes) {
+      const n = item.n, p = item.p;
+      const solution = n.solution || solutionIds.has(n.id);
+      const root = n.parent_idx < 0;
+      const current = itemStep(n) === currentStep;
+      const perspective = Math.max(0.68, Math.min(1.5, 4.2 / p.depth));
+      const baseRadius = solution ? 5.6 : root ? 5.0 : current ? 4.2 : 3.2;
+      const r = baseRadius * perspective;
+      const alpha = Math.max(0.42, Math.min(1.0, 1.20 - (p.depth - 3.2) * 0.20));
+
+      ctx.globalAlpha = solution ? 1.0 : alpha;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+      ctx.fillStyle = nodeColor(n, solution);
+      ctx.fill();
+      if (root || solution || current) {
+        ctx.strokeStyle = "#0f172a";
+        ctx.lineWidth = Math.max(0.8, 1.0 * perspective);
+        ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+
+      const hitRadius = Math.max(7, r + 2);
+      pca3d.screenNodes.push({n, x:p.x, y:p.y, r:hitRadius, depth:p.depth});
+      screenNodes.push({n, x:p.x, y:p.y, r:hitRadius});
+    }
+
+    const e = cpRrtcPca3dStats.explained.map(value => (100 * value).toFixed(1));
+    const p123 = 100 * cpRrtcPca3dStats.explained.reduce((a,b) => a+b, 0);
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = "rgba(255,255,255,.90)";
+    ctx.fillRect(14, 14, 300, 72);
+    ctx.strokeStyle = "rgba(100,116,139,.55)";
+    ctx.lineWidth = 1;
+    ctx.strokeRect(14.5, 14.5, 299, 71);
+    ctx.fillStyle = "#0f172a";
+    ctx.font = "700 12px ui-sans-serif, system-ui, sans-serif";
+    ctx.fillText("PCA 3D perspective", 25, 35);
+    ctx.font = "11px ui-monospace, SFMono-Regular, Menlo, monospace";
+    ctx.fillText(`PC1 ${e[0]}%   PC2 ${e[1]}%   PC3 ${e[2]}%`, 25, 54);
+    ctx.fillText(`PC1-3 ${p123.toFixed(1)}%   drag: orbit   wheel: zoom`, 25, 70);
+  }
+
+  draw = function() {
+    if (pca3dActive()) drawPca3d();
+    else originalDraw();
+  };
+
+  resetView = function() {
+    if (pca3dActive()) {
+      pca3d.yaw = -0.72;
+      pca3d.pitch = 0.48;
+      pca3d.zoom = 1.0;
+      view = {x:0,y:0,k:1};
+      calculateBounds();
+      schedule();
+      return;
+    }
+    originalResetView();
+  };
+
+  canvas.addEventListener("pointerdown", event => {
+    if (!pca3dActive()) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    pca3d.drag = {
+      pointerId: event.pointerId,
+      x: event.clientX,
+      y: event.clientY,
+      yaw: pca3d.yaw,
+      pitch: pca3d.pitch,
+    };
+    canvas.setPointerCapture(event.pointerId);
+  }, true);
+
+  canvas.addEventListener("pointermove", event => {
+    if (!pca3dActive()) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+
+    if (pca3d.drag && event.pointerId === pca3d.drag.pointerId) {
+      pca3d.yaw = pca3d.drag.yaw + (event.clientX - pca3d.drag.x) * 0.008;
+      pca3d.pitch = Math.max(
+        -1.48,
+        Math.min(1.48, pca3d.drag.pitch + (event.clientY - pca3d.drag.y) * 0.008),
+      );
+      tooltip.style.display = "none";
+      schedule();
+      return;
+    }
+
+    const rect = canvas.getBoundingClientRect();
+    const x = event.clientX - rect.left, y = event.clientY - rect.top;
+    let hit = null, best = Infinity;
+    for (const item of pca3d.screenNodes) {
+      const dist2 = (item.x - x) ** 2 + (item.y - y) ** 2;
+      const score = dist2 + Math.max(0, item.depth) * 1.0e-4;
+      if (dist2 <= item.r ** 2 && score < best) {
+        best = score;
+        hit = item.n;
+      }
+    }
+    if (!hit) {
+      tooltip.style.display = "none";
+      return;
+    }
+
+    const pc = hit.pca3d || [0,0,0];
+    const labels = trace.jointNames.length === hit.q.length
+      ? trace.jointNames.map((name,i) => `${name}=${hit.q[i].toFixed(4)}`).join("\n")
+      : hit.q.map((v,i) => `q${i}=${v.toFixed(4)}`).join("\n");
+    tooltip.textContent =
+      `${hit.tree}[${hit.node_idx}] ${hit.phase}\n` +
+      `PC1=${pc[0].toFixed(5)}  PC2=${pc[1].toFixed(5)}  PC3=${pc[2].toFixed(5)}\n` +
+      `display_step=${hit.display_step} parallel_step=${hit.parallel_step} depth=${hit.depth}\n` +
+      labels;
+    tooltip.style.display = "block";
+    tooltip.style.left = Math.min(innerWidth - 640, event.clientX + 13) + "px";
+    tooltip.style.top = Math.min(innerHeight - 240, event.clientY + 13) + "px";
+  }, true);
+
+  function finishOrbit(event) {
+    if (!pca3dActive() || !pca3d.drag) return;
+    if (event.pointerId !== pca3d.drag.pointerId) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    pca3d.drag = null;
+  }
+  canvas.addEventListener("pointerup", finishOrbit, true);
+  canvas.addEventListener("pointercancel", finishOrbit, true);
+
+  canvas.addEventListener("wheel", event => {
+    if (!pca3dActive()) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    pca3d.zoom = Math.max(0.25, Math.min(6.0, pca3d.zoom * Math.exp(-event.deltaY * 0.001)));
+    schedule();
+  }, {capture:true, passive:false});
+
+  layoutSelect.addEventListener("change", () => {
+    tooltip.style.display = "none";
+    if (pca3dActive()) {
+      pca3d.yaw = -0.72;
+      pca3d.pitch = 0.48;
+      pca3d.zoom = 1.0;
+    }
+    calculateBounds();
+    schedule();
+  });
+
+  if (typeof trace !== "undefined" && trace && Array.isArray(trace.nodes)) {
+    computePca3d(trace.nodes);
+  }
+})();
+</script>
+'''
+
+    html = html.replace(
+        body_end_marker,
+        interaction_script + "\n" + body_end_marker,
+        1,
+    )
+    html_path.write_text(html, encoding="utf-8")
+
+
 def add_white_canvas_theme(html_path: Path) -> None:
+    """Apply the white canvas theme as a best-effort visualization patch.
+
+    This must never abort trace export. AORRTC color post-processing can alter
+    exact PATACON color strings, so every JavaScript recolor replacement is
+    optional. The CSS canvas override is sufficient for the base theme.
+    """
     html = html_path.read_text(encoding="utf-8")
     theme_marker = "/* cpRRTC white trace canvas */"
     if theme_marker in html:
         return
 
     style_end_marker = "</style>"
-    root_stroke_marker = (
-        'if (root || solution || current) { ctx.strokeStyle = "#f8fafc";'
-    )
-    simultaneous_stroke_marker = (
-        'ctx.strokeStyle = halo || (n.simultaneous ? "#f8fafc" : "#94a3b8");'
-    )
-    edge_color_marker = (
-        'a.tree === "start" ? "rgba(56,189,248,.38)" '
-        ': "rgba(251,146,60,.38)"'
-    )
-    node_color_marker = (
-        'ctx.fillStyle = solution ? "#4ade80" '
-        ': n.tree === "start" ? "#38bdf8" : "#fb923c";'
-    )
-    solution_edge_marker = ': edge.solution ? "#4ade80" :'
-    if any(
-        marker not in html
-        for marker in (
-            style_end_marker,
-            root_stroke_marker,
-            simultaneous_stroke_marker,
-            edge_color_marker,
-            node_color_marker,
-            solution_edge_marker,
-        )
-    ):
-        raise RuntimeError(
-            "PATACON HTML viewer is incompatible with the white canvas theme"
-        )
+    if style_end_marker not in html:
+        return
 
     html = html.replace(
         style_end_marker,
@@ -989,39 +1624,38 @@ def add_white_canvas_theme(html_path: Path) -> None:
         ),
         1,
     )
-    html = html.replace(
-        root_stroke_marker,
-        'if (root || solution || current) { ctx.strokeStyle = "#0f172a";',
-        1,
-    )
-    html = html.replace(
-        simultaneous_stroke_marker,
-        'ctx.strokeStyle = halo || (n.simultaneous ? "#0f172a" : "#64748b");',
-        1,
-    )
-    html = html.replace(
-        edge_color_marker,
-        'a.tree === "start" ? "rgba(3,105,161,.72)" '
-        ': "rgba(194,65,12,.72)"',
-    )
-    html = html.replace(
-        solution_edge_marker,
-        ': edge.solution ? "#15803d" :',
-        1,
-    )
-    html = html.replace(
-        'style="background:#4ade80"></span>solution chain',
-        'style="background:#15803d"></span>solution chain',
-        1,
-    )
-    if "aorrtcUpdateColor" in html:
-        html = html.replace(
-            "return `hsla(${hue}, 85%, 62%, 0.82)`;",
-            "return `hsla(${hue}, 85%, 42%, 0.88)`;",
-            1,
-        )
-    html_path.write_text(html, encoding="utf-8")
 
+    replacements = [
+        (
+            'if (root || solution || current) { ctx.strokeStyle = "#f8fafc";',
+            'if (root || solution || current) { ctx.strokeStyle = "#0f172a";',
+        ),
+        (
+            'ctx.strokeStyle = halo || (n.simultaneous ? "#f8fafc" : "#94a3b8");',
+            'ctx.strokeStyle = halo || (n.simultaneous ? "#0f172a" : "#64748b");',
+        ),
+        (
+            'a.tree === "start" ? "rgba(56,189,248,.38)" : "rgba(251,146,60,.38)"',
+            'a.tree === "start" ? "rgba(3,105,161,.72)" : "rgba(194,65,12,.72)"',
+        ),
+        (
+            'ctx.fillStyle = solution ? "#4ade80" : n.tree === "start" ? "#38bdf8" : "#fb923c";',
+            'ctx.fillStyle = solution ? "#15803d" : n.tree === "start" ? "#0284c7" : "#ea580c";',
+        ),
+        (
+            ': edge.solution ? "#4ade80" :',
+            ': edge.solution ? "#15803d" :',
+        ),
+        (
+            'style="background:#4ade80"></span>solution chain',
+            'style="background:#15803d"></span>solution chain',
+        ),
+    ]
+    for old, new in replacements:
+        if old in html:
+            html = html.replace(old, new, 1)
+
+    html_path.write_text(html, encoding="utf-8")
 
 def save_patacon_html(graphml: str, html_path: Path, patacon_root: Path, title: str) -> None:
     exporter = patacon_root / "patacon" / "planner" / "tbrrt" / "trace_graphml.py"
@@ -1035,9 +1669,14 @@ def save_patacon_html(graphml: str, html_path: Path, patacon_root: Path, title: 
 
     save_trace_html(graphml, html_path, title=title)
     add_invalid_configuration_guard(html_path)
+    add_pca_3d_layout(html_path)
+    if "solution_update" in graphml:
+        add_aorrtc_history_visibility(html_path)
+    # Apply the base theme before update-color rewriting so exact upstream
+    # PATACON color markers are still available.
+    add_white_canvas_theme(html_path)
     if "solution_update" in graphml or "solution_final" in graphml:
         add_aorrtc_update_colors(html_path)
-    add_white_canvas_theme(html_path)
 
 
 def default_output_path(result_json: Path, suffix: str) -> Path:

@@ -12,8 +12,8 @@
 #include <nlohmann/json.hpp>
 
 #include "src/collision/environment.hh"
-#include "src/planning/AORRTC.hh"
 #include "src/planning/Planners.hh"
+#include "src/planning/AORRTC.hh"
 #include "src/planning/pRRTC_settings.hh"
 
 namespace planner_result_json {
@@ -236,53 +236,6 @@ json tree_trace_to_json(const PlannerResult<Robot> &result) {
     };
 }
 
-template <typename Robot>
-json solution_history_to_json(const AORRTCResult<Robot> &result) {
-    json output = json::array();
-    for (std::size_t index = 0; index < result.solution_history.size(); index++) {
-        const auto &update = result.solution_history[index];
-        json solution_order = json::array();
-        for (int order = 0;
-             order < static_cast<int>(update.solution_trace.size());
-             order++) {
-            const int tree_id = update.solution_trace[order][0];
-            solution_order.push_back({
-                {"order", order},
-                {"tree_id", tree_id},
-                {"tree", tree_name(tree_id)},
-                {"idx", update.solution_trace[order][1]},
-            });
-        }
-
-        output.push_back({
-            {"update_index", update.update_index},
-            {"candidate_idx", update.update_index},
-            {"iteration", update.iteration},
-            {"iter", update.iteration},
-            {"cost", update.cost},
-            {"accepted", true},
-            {"final", index + 1 == result.solution_history.size()},
-            {"connection", {
-                {"source_tree_id", update.source_tree_id},
-                {"source_tree", tree_name(update.source_tree_id)},
-                {"source_idx", update.source_node_idx},
-                {"target_tree_id", update.target_tree_id},
-                {"target_tree", tree_name(update.target_tree_id)},
-                {"target_idx", update.target_node_idx},
-            }},
-            {"solution_order", solution_order},
-            {"path_waypoint_count", update.path_start_to_goal.size()},
-            {"path_edge_count", update.path_start_to_goal.empty()
-                ? 0
-                : update.path_start_to_goal.size() - 1},
-            {"path_start_to_goal", path_to_json<Robot>(
-                update.path_start_to_goal
-            )},
-        });
-    }
-    return output;
-}
-
 inline json settings_to_json(const pRRTC_settings &settings) {
     json output = {
         {"max_samples", settings.max_samples},
@@ -307,13 +260,58 @@ inline json settings_to_json(const AORRTC_settings &settings) {
     json output = settings_to_json(
         static_cast<const pRRTC_settings &>(settings)
     );
-    if (settings.aorrtc) {
-        output["aorrtc"] = true;
-        output["time_limit_sec"] = settings.time_limit_sec;
-        output["aorrtc_config_weight"] = settings.aorrtc_config_weight;
-        output["aorrtc_cost_weight"] = settings.aorrtc_cost_weight;
-        output["cost_improvement_epsilon"] =
-            settings.cost_improvement_epsilon;
+    output["aorrtc"] = settings.aorrtc;
+    output["time_limit_sec"] = settings.time_limit_sec;
+    output["aorrtc_config_weight"] = settings.aorrtc_config_weight;
+    output["aorrtc_cost_weight"] = settings.aorrtc_cost_weight;
+    output["cost_improvement_epsilon"] = settings.cost_improvement_epsilon;
+    output["aorrtc_max_parent_resamples"] =
+        settings.aorrtc_max_parent_resamples;
+    // Current constrained planner has no manifold-safe shortcut/B-spline
+    // simplifier. The AORRTC loop therefore uses identity simplification.
+    output["path_simplification"] = false;
+    return output;
+}
+
+template <typename Robot>
+json aorrtc_solution_history_to_json(
+    const AORRTCResult<Robot> &result
+) {
+    json output = json::array();
+    for (const auto &update : result.solution_history) {
+        json solution_order = json::array();
+        for (int order = 0;
+             order < static_cast<int>(update.solution_trace.size());
+             ++order) {
+            const int tree_id = update.solution_trace[order][0];
+            solution_order.push_back({
+                {"order", order},
+                {"tree_id", tree_id},
+                {"tree", tree_name(tree_id)},
+                {"idx", update.solution_trace[order][1]},
+            });
+        }
+
+        output.push_back({
+            {"update_index", update.update_index},
+            {"iteration", update.iteration},
+            {"cost", update.cost},
+            {"found_ns", update.found_ns},
+            {"found_sec", static_cast<double>(update.found_ns) / 1.0e9},
+            {"source_tree_id", update.source_tree_id},
+            {"source_tree", tree_name(update.source_tree_id)},
+            {"source_idx", update.source_node_idx},
+            {"target_tree_id", update.target_tree_id},
+            {"target_tree", tree_name(update.target_tree_id)},
+            {"target_idx", update.target_node_idx},
+            {"path_waypoint_count", update.path_start_to_goal.size()},
+            {"path_edge_count", update.path_start_to_goal.empty()
+                ? 0
+                : update.path_start_to_goal.size() - 1},
+            {"path_start_to_goal",
+                path_to_json<Robot>(update.path_start_to_goal)},
+            {"solution_order", solution_order},
+        });
     }
     return output;
 }
@@ -330,8 +328,8 @@ inline json environment_summary_json(
 
 template <typename Robot>
 json result_to_json(
-    const AORRTCResult<Robot> &result,
-    const AORRTC_settings &settings,
+    const PlannerResult<Robot> &result,
+    const pRRTC_settings &settings,
     const ppln::collision::Environment<float> &environment,
     const typename Robot::Configuration &start,
     const std::vector<typename Robot::Configuration> &goals,
@@ -351,7 +349,7 @@ json result_to_json(
 
     json payload = {
         {"format", "pRRTC_result_v1"},
-        {"planner", settings.aorrtc ? "pRRTC-AORRTC" : "pRRTC"},
+        {"planner", "pRRTC"},
         {"robot", robot_name},
         {"problem_name", problem_name},
         {"problem_idx", problem_index},
@@ -376,21 +374,54 @@ json result_to_json(
         {"settings", settings_to_json(settings)},
         {"environment", environment_summary_json(environment)},
     };
-    if (settings.aorrtc) {
-        payload["initial_cost"] = result.initial_cost;
-        payload["initial_solution_ns"] = result.initial_solution_ns;
-        payload["best_solution_ns"] = result.best_solution_ns;
-        payload["solution_updates"] = result.solution_updates;
-        if (settings.trace_trees) {
-            payload["solution_history"] =
-                solution_history_to_json<Robot>(result);
-            payload["solution_history_overflow"] =
-                result.solution_history_overflow;
-        }
-    }
     if (!result.tree_nodes[0].empty() || !result.tree_nodes[1].empty()) {
         payload["tree_trace"] = tree_trace_to_json<Robot>(result);
     }
+    return payload;
+}
+
+template <typename Robot>
+json result_to_json(
+    const AORRTCResult<Robot> &result,
+    const AORRTC_settings &settings,
+    const ppln::collision::Environment<float> &environment,
+    const typename Robot::Configuration &start,
+    const std::vector<typename Robot::Configuration> &goals,
+    const std::string &robot_name,
+    const std::string &problem_name,
+    int problem_index
+) {
+    json payload = result_to_json<Robot>(
+        static_cast<const PlannerResult<Robot> &>(result),
+        static_cast<const pRRTC_settings &>(settings),
+        environment,
+        start,
+        goals,
+        robot_name,
+        problem_name,
+        problem_index
+    );
+
+    if (!settings.aorrtc) {
+        return payload;
+    }
+
+    payload["format"] = "AORRTC_result_v1";
+    payload["planner"] = "AORRTC";
+    payload["settings"] = settings_to_json(settings);
+    payload["initial_cost"] = result.initial_cost;
+    payload["initial_solution_ns"] = result.initial_solution_ns;
+    payload["initial_solution_sec"] =
+        static_cast<double>(result.initial_solution_ns) / 1.0e9;
+    payload["best_solution_ns"] = result.best_solution_ns;
+    payload["best_solution_sec"] =
+        static_cast<double>(result.best_solution_ns) / 1.0e9;
+    payload["solution_updates"] = result.solution_updates;
+    payload["search_restarts"] = result.search_restarts;
+    payload["solution_history_overflow"] =
+        result.solution_history_overflow;
+    payload["solution_history"] =
+        aorrtc_solution_history_to_json<Robot>(result);
     return payload;
 }
 
