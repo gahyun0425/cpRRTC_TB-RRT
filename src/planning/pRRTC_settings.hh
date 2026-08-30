@@ -7,12 +7,16 @@ struct pRRTC_settings {
     // Tree 하나가 만들 수 있는 최대 Tangent Space 개수
     int max_tangent_spaces = 10000;
     int max_iters = 1000000;
-    int num_new_configs = 600;
+    int num_new_configs = 512;
     int granularity = 16;
     float range = 0.5;
     
     // lift_joint 이동 거리 가중치
     float lift_distance_weight = 1.0f;
+
+    bool ffw_sg2_enable_com_constraint = false;
+    float ffw_sg2_support_margin_m = 0.0f;
+    float ffw_sg2_object_mass_kg = 0.0f;
 
     int balance = 1;
     float tree_ratio = 1.0;
@@ -38,7 +42,7 @@ struct pRRTC_settings {
     
     // Tangent-Bundle / ConCon EXTEND
     float em_threshold = 0.1f;
-    int max_concon_nodes = 16;
+    int max_concon_nodes = 4;
 
     // CONNECT 동안 허용할 최대 Tangent-Space / ConCon 반복 수
     int max_connect_concon_chunks = 16;

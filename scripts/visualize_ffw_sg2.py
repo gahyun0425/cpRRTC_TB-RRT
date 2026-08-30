@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Replay a 15-DoF or right-arm-only pRRTC FFW-SG2 MuJoCo trajectory."""
+"""Replay a 15-DoF, mobile-base, or right-arm-only pRRTC FFW-SG2 trajectory."""
 
 from __future__ import annotations
 
@@ -29,6 +29,18 @@ DUAL_ARM_PLANNING_JOINTS = (
     "arm_r_joint6",
     "arm_r_joint7",
 )
+MOBILITY_BASE_JOINTS = ("base_x", "base_y", "base_yaw")
+MOBILITY_BASE_LIMITS = {
+    "base_x": (-0.5, 0.5),
+    "base_y": (-0.5, 0.5),
+    "base_yaw": (-3.14, 3.14),
+}
+MOBILITY_PLANNING_JOINTS = MOBILITY_BASE_JOINTS + DUAL_ARM_PLANNING_JOINTS
+OBJECT_FREEJOINT = "object_freejoint"
+GRIPPER_SITE_NAMES = (
+    "gripper_l_rh_p12_rn_base",
+    "gripper_r_rh_p12_rn_base",
+)
 SINGLE_ARM_PLANNING_JOINTS = (
     "lift_joint",
     "arm_r_joint1",
@@ -42,6 +54,7 @@ SINGLE_ARM_PLANNING_JOINTS = (
 LEFT_ARM_JOINTS = tuple(f"arm_l_joint{index}" for index in range(1, 8))
 SUPPORTED_JOINT_ORDERS = {
     DUAL_ARM_PLANNING_JOINTS,
+    MOBILITY_PLANNING_JOINTS,
     SINGLE_ARM_PLANNING_JOINTS,
 }
 
@@ -101,9 +114,12 @@ def load_trajectory(path: Path) -> tuple[tuple[str, ...], list[list[float]]]:
     return joint_names, normalized
 
 
-def resolve_qpos_addresses(mujoco, model, joint_names) -> list[int]:
-    addresses: list[int] = []
+def resolve_qpos_addresses(mujoco, model, joint_names) -> list[int | None]:
+    addresses: list[int | None] = []
     for name in joint_names:
+        if name in MOBILITY_BASE_JOINTS:
+            addresses.append(None)
+            continue
         joint_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, name)
         if joint_id < 0:
             raise ValueError(f"MuJoCo model is missing planning joint: {name}")
@@ -124,6 +140,14 @@ def validate_joint_limits(
     tolerance = 1.0e-6
     for waypoint_index, waypoint in enumerate(waypoints):
         for name, value in zip(joint_names, waypoint):
+            if name in MOBILITY_BASE_LIMITS:
+                lower, upper = MOBILITY_BASE_LIMITS[name]
+                if value < lower - tolerance or value > upper + tolerance:
+                    raise ValueError(
+                        f"waypoint {waypoint_index}, {name}={value} is outside "
+                        f"[{lower}, {upper}]"
+                    )
+                continue
             joint_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, name)
             if not model.jnt_limited[joint_id]:
                 continue
@@ -135,11 +159,203 @@ def validate_joint_limits(
                 )
 
 
-def apply_configuration(mujoco, model, data, addresses, configuration) -> None:
+def resolve_mobility_base_body(mujoco, model, joint_names):
+    if joint_names != MOBILITY_PLANNING_JOINTS:
+        return None
+    body_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, "base_link")
+    if body_id < 0:
+        raise ValueError("MuJoCo model is missing mobile base body: base_link")
+    origin = tuple(float(value) for value in model.body_pos[body_id])
+    return body_id, origin
+
+
+def resolve_object_freejoint(mujoco, model, joint_names) -> int | None:
+    if joint_names not in (DUAL_ARM_PLANNING_JOINTS, MOBILITY_PLANNING_JOINTS):
+        return None
+    joint_id = mujoco.mj_name2id(
+        model,
+        mujoco.mjtObj.mjOBJ_JOINT,
+        OBJECT_FREEJOINT,
+    )
+    if joint_id < 0:
+        return None
+    if int(model.jnt_type[joint_id]) != int(mujoco.mjtJoint.mjJNT_FREE):
+        raise ValueError(f"{OBJECT_FREEJOINT} is not a MuJoCo freejoint")
+    return int(model.jnt_qposadr[joint_id])
+
+
+def dot(left, right) -> float:
+    return sum(left[index] * right[index] for index in range(3))
+
+
+def cross(left, right) -> tuple[float, float, float]:
+    return (
+        left[1] * right[2] - left[2] * right[1],
+        left[2] * right[0] - left[0] * right[2],
+        left[0] * right[1] - left[1] * right[0],
+    )
+
+
+def norm(vector) -> float:
+    return math.sqrt(dot(vector, vector))
+
+
+def normalize(vector) -> tuple[float, float, float] | None:
+    length = norm(vector)
+    if length <= 1.0e-9:
+        return None
+    return tuple(value / length for value in vector)
+
+
+def subtract_projection(vector, axis) -> tuple[float, float, float]:
+    scale = dot(vector, axis)
+    return tuple(vector[index] - scale * axis[index] for index in range(3))
+
+
+def site_matrix_column(data, site_id: int, column: int) -> tuple[float, float, float]:
+    matrix = data.site_xmat[site_id]
+    return (
+        float(matrix[column]),
+        float(matrix[3 + column]),
+        float(matrix[6 + column]),
+    )
+
+
+def matrix_to_quat(matrix) -> tuple[float, float, float, float]:
+    trace = matrix[0][0] + matrix[1][1] + matrix[2][2]
+    if trace > 0.0:
+        scale = math.sqrt(trace + 1.0) * 2.0
+        return (
+            0.25 * scale,
+            (matrix[2][1] - matrix[1][2]) / scale,
+            (matrix[0][2] - matrix[2][0]) / scale,
+            (matrix[1][0] - matrix[0][1]) / scale,
+        )
+    if matrix[0][0] > matrix[1][1] and matrix[0][0] > matrix[2][2]:
+        scale = math.sqrt(1.0 + matrix[0][0] - matrix[1][1] - matrix[2][2]) * 2.0
+        return (
+            (matrix[2][1] - matrix[1][2]) / scale,
+            0.25 * scale,
+            (matrix[0][1] + matrix[1][0]) / scale,
+            (matrix[0][2] + matrix[2][0]) / scale,
+        )
+    if matrix[1][1] > matrix[2][2]:
+        scale = math.sqrt(1.0 + matrix[1][1] - matrix[0][0] - matrix[2][2]) * 2.0
+        return (
+            (matrix[0][2] - matrix[2][0]) / scale,
+            (matrix[0][1] + matrix[1][0]) / scale,
+            0.25 * scale,
+            (matrix[1][2] + matrix[2][1]) / scale,
+        )
+    scale = math.sqrt(1.0 + matrix[2][2] - matrix[0][0] - matrix[1][1]) * 2.0
+    return (
+        (matrix[1][0] - matrix[0][1]) / scale,
+        (matrix[0][2] + matrix[2][0]) / scale,
+        (matrix[1][2] + matrix[2][1]) / scale,
+        0.25 * scale,
+    )
+
+
+def object_quat_from_grippers(data, left_site: int, right_site: int):
+    left_pos = data.site_xpos[left_site]
+    right_pos = data.site_xpos[right_site]
+    y_axis = normalize(
+        tuple(float(left_pos[index] - right_pos[index]) for index in range(3))
+    )
+    if y_axis is None:
+        return (1.0, 0.0, 0.0, 0.0)
+
+    left_z = site_matrix_column(data, left_site, 2)
+    right_z = site_matrix_column(data, right_site, 2)
+    x_hint = normalize(
+        tuple(left_z[index] + right_z[index] for index in range(3))
+    )
+    if x_hint is None:
+        x_hint = (1.0, 0.0, 0.0)
+
+    x_axis = normalize(subtract_projection(x_hint, y_axis))
+    if x_axis is None:
+        z_fallback = (0.0, 0.0, 1.0)
+        x_axis = normalize(cross(y_axis, z_fallback))
+    if x_axis is None:
+        x_axis = (1.0, 0.0, 0.0)
+
+    z_axis = normalize(cross(x_axis, y_axis))
+    if z_axis is None:
+        return (1.0, 0.0, 0.0, 0.0)
+
+    left_y = site_matrix_column(data, left_site, 1)
+    right_y = site_matrix_column(data, right_site, 1)
+    z_hint = normalize(
+        tuple(right_y[index] - left_y[index] for index in range(3))
+    )
+    if z_hint is not None and dot(z_axis, z_hint) < 0.0:
+        x_axis = tuple(-value for value in x_axis)
+        z_axis = tuple(-value for value in z_axis)
+
+    rotation = (
+        (x_axis[0], y_axis[0], z_axis[0]),
+        (x_axis[1], y_axis[1], z_axis[1]),
+        (x_axis[2], y_axis[2], z_axis[2]),
+    )
+    return matrix_to_quat(rotation)
+
+
+def place_object_at_gripper_pose(mujoco, model, data, object_qposadr) -> None:
+    site_ids = [
+        mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_SITE, site_name)
+        for site_name in GRIPPER_SITE_NAMES
+    ]
+    if min(site_ids) < 0:
+        raise ValueError("MuJoCo model is missing gripper sites for object replay")
+
+    for axis in range(3):
+        data.qpos[object_qposadr + axis] = 0.5 * (
+            data.site_xpos[site_ids[0]][axis] + data.site_xpos[site_ids[1]][axis]
+        )
+    data.qpos[object_qposadr + 3 : object_qposadr + 7] = object_quat_from_grippers(
+        data,
+        site_ids[0],
+        site_ids[1],
+    )
+    mujoco.mj_forward(model, data)
+
+
+def apply_configuration(
+    mujoco,
+    model,
+    data,
+    joint_names,
+    addresses,
+    configuration,
+    base_body,
+    object_qposadr,
+) -> None:
     for address, value in zip(addresses, configuration):
+        if address is None:
+            continue
         data.qpos[address] = value
+    if base_body is not None:
+        body_id, origin = base_body
+        base_x = configuration[joint_names.index("base_x")]
+        base_y = configuration[joint_names.index("base_y")]
+        base_yaw = configuration[joint_names.index("base_yaw")]
+        model.body_pos[body_id][:] = (
+            origin[0] + base_x,
+            origin[1] + base_y,
+            origin[2],
+        )
+        half_yaw = 0.5 * base_yaw
+        model.body_quat[body_id][:] = (
+            math.cos(half_yaw),
+            0.0,
+            0.0,
+            math.sin(half_yaw),
+        )
     data.qvel[:] = 0.0
     mujoco.mj_forward(model, data)
+    if object_qposadr is not None:
+        place_object_at_gripper_pose(mujoco, model, data, object_qposadr)
 
 
 def interpolated_frames(waypoints, fps: float, speed: float):
@@ -167,12 +383,23 @@ def replay(model_path: Path, joint_names, waypoints, fps: float, speed: float) -
     model = mujoco.MjModel.from_xml_path(str(model_path))
     data = mujoco.MjData(model)
     addresses = resolve_qpos_addresses(mujoco, model, joint_names)
+    base_body = resolve_mobility_base_body(mujoco, model, joint_names)
+    object_qposadr = resolve_object_freejoint(mujoco, model, joint_names)
     validate_joint_limits(mujoco, model, joint_names, waypoints)
     if joint_names == SINGLE_ARM_PLANNING_JOINTS:
         left_arm_addresses = resolve_qpos_addresses(mujoco, model, LEFT_ARM_JOINTS)
         for address in left_arm_addresses:
             data.qpos[address] = 0.0
-    apply_configuration(mujoco, model, data, addresses, waypoints[0])
+    apply_configuration(
+        mujoco,
+        model,
+        data,
+        joint_names,
+        addresses,
+        waypoints[0],
+        base_body,
+        object_qposadr,
+    )
 
     print("MuJoCo viewer: start -> goal 경로를 반복 재생합니다.")
     print("창을 닫으면 single_mbm 실행이 종료됩니다.")
@@ -185,14 +412,32 @@ def replay(model_path: Path, joint_names, waypoints, fps: float, speed: float) -
 
         frame_period = 1.0 / fps
         while viewer.is_running():
-            apply_configuration(mujoco, model, data, addresses, waypoints[0])
+            apply_configuration(
+                mujoco,
+                model,
+                data,
+                joint_names,
+                addresses,
+                waypoints[0],
+                base_body,
+                object_qposadr,
+            )
             viewer.sync()
             time.sleep(0.75)
             deadline = time.perf_counter()
             for configuration in interpolated_frames(waypoints, fps, speed):
                 if not viewer.is_running():
                     return
-                apply_configuration(mujoco, model, data, addresses, configuration)
+                apply_configuration(
+                    mujoco,
+                    model,
+                    data,
+                    joint_names,
+                    addresses,
+                    configuration,
+                    base_body,
+                    object_qposadr,
+                )
                 viewer.sync()
                 deadline += frame_period
                 time.sleep(max(0.0, deadline - time.perf_counter()))
@@ -216,8 +461,21 @@ def main() -> int:
         import mujoco
 
         model = mujoco.MjModel.from_xml_path(str(model_path))
-        resolve_qpos_addresses(mujoco, model, joint_names)
+        data = mujoco.MjData(model)
+        addresses = resolve_qpos_addresses(mujoco, model, joint_names)
+        base_body = resolve_mobility_base_body(mujoco, model, joint_names)
+        object_qposadr = resolve_object_freejoint(mujoco, model, joint_names)
         validate_joint_limits(mujoco, model, joint_names, waypoints)
+        apply_configuration(
+            mujoco,
+            model,
+            data,
+            joint_names,
+            addresses,
+            waypoints[0],
+            base_body,
+            object_qposadr,
+        )
         print(
             f"validated {len(waypoints)} waypoints, {len(joint_names)} joints, "
             f"model nq={model.nq}"

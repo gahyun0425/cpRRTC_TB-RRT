@@ -44,6 +44,15 @@ namespace ppln::robots {
     };
 
     template<>
+    struct CollisionTraits<FfwSg2Mobility> {
+        static constexpr int batch_size = 16;
+        static constexpr int fine_sphere_count = 125;
+        static constexpr int approximate_sphere_count = 28;
+        static constexpr int joint_flag_stride = 16;
+        static constexpr int transform_slots = 2;
+    };
+
+    template<>
     struct CollisionTraits<FfwSg2Single> {
         static constexpr int batch_size = 16;
         static constexpr int fine_sphere_count = 124;

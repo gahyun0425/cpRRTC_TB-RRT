@@ -311,6 +311,8 @@ int main(int argc, char* argv[]) {
         run_planning<robots::Baxter>(problems, settings, run_name, robot_name, runs);
     } else if (robot_name == "ffw_sg2") {
         run_planning<robots::FfwSg2>(problems, settings, run_name, robot_name, runs);
+    } else if (robot_name == "ffw_sg2_mobility") {
+        run_planning<robots::FfwSg2Mobility>(problems, settings, run_name, robot_name, runs);
     } else if (robot_name == "ffw_sg2_single") {
         run_planning<robots::FfwSg2Single>(problems, settings, run_name, robot_name, runs);
     } else if (robot_name == "g1") {

@@ -359,8 +359,12 @@ void visualize_ffw_sg2_path(
     const auto visualizer_path = std::filesystem::absolute(
         "scripts/visualize_ffw_sg2.py"
     );
+    const bool mobility_model =
+        !joint_names.empty() && joint_names.front() == "base_x";
     const auto model_path = std::filesystem::absolute(
-        "ffw_lift/ffw_sg2_lift.xml"
+        mobility_model
+            ? "ffw_lift/ffw_sg2_rack_upper_to_lower.xml"
+            : "ffw_lift/ffw_sg2_lift.xml"
     );
     const std::string command =
         "python3 \"" + visualizer_path.string() + "\""
@@ -659,6 +663,15 @@ int run_planner(
                 "arm_r_joint1", "arm_r_joint2", "arm_r_joint3", "arm_r_joint4",
                 "arm_r_joint5", "arm_r_joint6", "arm_r_joint7"
             });
+        } else if constexpr (std::is_same_v<Robot, robots::FfwSg2Mobility>) {
+            visualize_ffw_sg2_path(visualization_result, start, {
+                "base_x", "base_y", "base_yaw",
+                "lift_joint",
+                "arm_l_joint1", "arm_l_joint2", "arm_l_joint3", "arm_l_joint4",
+                "arm_l_joint5", "arm_l_joint6", "arm_l_joint7",
+                "arm_r_joint1", "arm_r_joint2", "arm_r_joint3", "arm_r_joint4",
+                "arm_r_joint5", "arm_r_joint6", "arm_r_joint7"
+            });
         } else if constexpr (std::is_same_v<Robot, robots::FfwSg2Single>) {
             visualize_ffw_sg2_path(visualization_result, start, {
                 "lift_joint",
@@ -669,7 +682,7 @@ int run_planner(
             visualize_g1_path(visualization_result, start, data);
         } else {
             throw std::runtime_error(
-                "--visualize supports only ffw_sg2, ffw_sg2_single, and g1"
+                "--visualize supports only ffw_sg2, ffw_sg2_mobility, ffw_sg2_single, and g1"
             );
         }
     }
@@ -687,7 +700,10 @@ int main(int argc, char* argv[]) {
     bool projection_smoothness = true;
     bool print_path = true;
     bool aorrtc = false;
+    bool enable_com_constraint = false;
+    bool object_mass_option_provided = false;
     bool time_option_provided = false;
+    float object_mass_kg = 0.0f;
     double time_limit_sec = 5.0;
     int runs = 1;
     std::string save_json_path;
@@ -698,6 +714,7 @@ int main(int argc, char* argv[]) {
             << "Usage: ./single_mbm <robot_name> <problem_name> <problem_idx> "
             << "[--visualize] [--save-json PATH] [--run N|--runs N] "
             << "[--aorrtc] [--time SECONDS] [--plot] "
+            << "[--com] [--object-mass-kg KG] "
             << "[--rigid-orientation] "
             << "[--no-waypoint-smoothing] "
             << "[--trace-mode auto|path|tree] "
@@ -723,6 +740,29 @@ int main(int argc, char* argv[]) {
                 plot = true;
             } else if (argument == "--aorrtc") {
                 aorrtc = true;
+            } else if (argument == "--com") {
+                enable_com_constraint = true;
+            } else if (
+                (
+                    argument == "--object-mass-kg" ||
+                    argument == "--object-mass"
+                ) &&
+                index + 1 < argc
+            ) {
+                const std::string value = argv[++index];
+                std::size_t consumed = 0;
+                const double parsed_mass = std::stod(value, &consumed);
+                if (
+                    consumed != value.size() ||
+                    !std::isfinite(parsed_mass) ||
+                    parsed_mass < 0.0
+                ) {
+                    throw std::invalid_argument(
+                        "--object-mass-kg must be a finite number >= 0"
+                    );
+                }
+                object_mass_kg = static_cast<float>(parsed_mass);
+                object_mass_option_provided = true;
             } else if (argument == "--time" && index + 1 < argc) {
                 const std::string value = argv[++index];
                 std::size_t consumed = 0;
@@ -800,6 +840,28 @@ int main(int argc, char* argv[]) {
             );
         }
 
+        if (
+            enable_com_constraint &&
+            robot_name != "ffw_sg2_mobility"
+        ) {
+            throw std::invalid_argument(
+                "--com is supported only for ffw_sg2_mobility"
+            );
+        }
+        if (
+            object_mass_option_provided &&
+            robot_name != "ffw_sg2_mobility"
+        ) {
+            throw std::invalid_argument(
+                "--object-mass-kg is supported only for ffw_sg2_mobility"
+            );
+        }
+        if (object_mass_option_provided && !enable_com_constraint) {
+            throw std::invalid_argument(
+                "--object-mass-kg requires --com"
+            );
+        }
+
     } catch (const std::exception &error) {
         std::cerr << "single_mbm option error: " << error.what() << "\n";
         return 1;
@@ -820,9 +882,10 @@ int main(int argc, char* argv[]) {
     }
     if (visualize
         && robot_name != "ffw_sg2"
+        && robot_name != "ffw_sg2_mobility"
         && robot_name != "ffw_sg2_single"
         && robot_name != "g1") {
-        std::cerr << "--visualize supports only ffw_sg2, ffw_sg2_single, and g1\n";
+        std::cerr << "--visualize supports only ffw_sg2, ffw_sg2_mobility, ffw_sg2_single, and g1\n";
         return 1;
     }
     std::string path = "scripts/" + robot_name + "_problems.json";
@@ -859,11 +922,12 @@ int main(int argc, char* argv[]) {
     settings.granularity = 16;
     settings.range = 0.4;
     settings.lift_distance_weight = 1.0f;
+    settings.ffw_sg2_enable_com_constraint = enable_com_constraint;
     settings.rigid_orientation = rigid_orientation;
     settings.projection_smoothness = projection_smoothness;
     settings.balance = 2;
     settings.tree_ratio = 1.0;
-    settings.dynamic_domain = true;
+    settings.dynamic_domain = false;
     settings.trace_trees = trace_trees;
     settings.dd_radius = 4.0;
     settings.dd_min_radius = 1.0;
@@ -871,6 +935,25 @@ int main(int argc, char* argv[]) {
     settings.em_threshold = 0.1f;
     settings.max_concon_nodes = 4;
     settings.max_connect_concon_chunks = 16;
+
+    if (data.contains("constraints") && data["constraints"].contains("com")) {
+        const auto &com_constraints = data["constraints"]["com"];
+        if (com_constraints.contains("support_margin_m")) {
+            settings.ffw_sg2_support_margin_m =
+                static_cast<float>(
+                    com_constraints["support_margin_m"].get<double>()
+                );
+        }
+        if (com_constraints.contains("object_mass_kg")) {
+            settings.ffw_sg2_object_mass_kg =
+                static_cast<float>(
+                    com_constraints["object_mass_kg"].get<double>()
+                );
+        }
+    }
+    if (object_mass_option_provided) {
+        settings.ffw_sg2_object_mass_kg = object_mass_kg;
+    }
 
     try {
         if (robot_name == "g1") {
@@ -888,6 +971,9 @@ int main(int argc, char* argv[]) {
                 robot_name, name, problem_idx, save_json_path, trace_options, runs);
         } else if (robot_name == "ffw_sg2") {
             return run_planner<robots::FfwSg2>(data, env, settings, visualize, print_path, plot,
+                robot_name, name, problem_idx, save_json_path, trace_options, runs);
+        } else if (robot_name == "ffw_sg2_mobility") {
+            return run_planner<robots::FfwSg2Mobility>(data, env, settings, visualize, print_path, plot,
                 robot_name, name, problem_idx, save_json_path, trace_options, runs);
         } else if (robot_name == "ffw_sg2_single") {
             return run_planner<robots::FfwSg2Single>(data, env, settings, visualize, print_path, plot,

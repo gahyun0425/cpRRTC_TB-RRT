@@ -31,6 +31,21 @@ namespace AORRTC {
     static_assert(robots::CollisionTraits<robots::FfwSg2>::transform_slots== FFW_SG2_TRANSFORM_SLOTS,
         "FFW-SG2 transform slot count differs from the generated Cricket code"
     );
+    static_assert(robots::CollisionTraits<robots::FfwSg2Mobility>::batch_size== FFW_SG2_MOBILITY_BATCH_SIZE,
+        "FFW-SG2 mobility batch size differs from the wrapper collision code"
+    );
+    static_assert(robots::CollisionTraits<robots::FfwSg2Mobility>::fine_sphere_count== FFW_SG2_MOBILITY_SPHERE_COUNT,
+        "FFW-SG2 mobility fine sphere count differs from the wrapper collision code"
+    );
+    static_assert(robots::CollisionTraits<robots::FfwSg2Mobility>::approximate_sphere_count== FFW_SG2_MOBILITY_APPROX_SPHERE_COUNT,
+        "FFW-SG2 mobility approximate sphere count differs from the wrapper collision code"
+    );
+    static_assert(robots::CollisionTraits<robots::FfwSg2Mobility>::joint_flag_stride== FFW_SG2_MOBILITY_JOINT_FLAG_STRIDE,
+        "FFW-SG2 mobility joint flag stride differs from the wrapper collision code"
+    );
+    static_assert(robots::CollisionTraits<robots::FfwSg2Mobility>::transform_slots== FFW_SG2_MOBILITY_TRANSFORM_SLOTS,
+        "FFW-SG2 mobility transform slot count differs from the wrapper collision code"
+    );
     static_assert(robots::CollisionTraits<robots::FfwSg2Single>::batch_size== FFW_SG2_SINGLE_BATCH_SIZE,
         "FFW-SG2 single batch size differs from the generated Cricket code"
     );
@@ -120,6 +135,9 @@ namespace AORRTC {
     constexpr int MAX_TANGENT_DIM = ppln::collision::G1_TANGENT_DIM;
 
     constexpr int FFW_SG2_TANGENT_BASIS_SIZE = ppln::robots::FfwSg2::dimension * FFW_SG2_TANGENT_DIM;
+    constexpr int FFW_SG2_MOBILITY_TANGENT_BASIS_STORAGE_SIZE =
+        ppln::robots::FfwSg2Mobility::dimension *
+        FFW_SG2_MOBILITY_TANGENT_DIM;
     constexpr int BLOCK_SIZE = 64; // RNG와 Halton 상태 초기화 커널의 thread block 크기. halton 수열의 random성을 위해 RNG 사용
     constexpr float UNWRITTEN_VAL = -9999.0f; // 미작성 configuration 메모리 표기 sentinel 값. 유효성 판단을 위한 flag로 사용
 
@@ -138,6 +156,14 @@ namespace AORRTC {
     };
 
     template <>
+    struct TangentSpaceTraits<robots::FfwSg2Mobility> {
+        static constexpr bool enabled = true;
+        static constexpr int max_tangent_dim = FFW_SG2_MOBILITY_TANGENT_DIM;
+        static constexpr int basis_size =
+            FFW_SG2_MOBILITY_TANGENT_BASIS_STORAGE_SIZE;
+    };
+
+    template <>
     struct TangentSpaceTraits<robots::G1> {
         static constexpr bool enabled = true;
         static constexpr int max_tangent_dim = collision::G1_TANGENT_DIM;
@@ -148,6 +174,8 @@ namespace AORRTC {
     __device__ __forceinline__ int cprrtc_active_tangent_dim() {
         if constexpr (std::is_same_v<Robot, robots::FfwSg2>) {
             return d_settings.rigid_orientation ? 7 : FFW_SG2_TANGENT_DIM;
+        } else if constexpr (std::is_same_v<Robot, robots::FfwSg2Mobility>) {
+            return FFW_SG2_MOBILITY_TANGENT_DIM;
         } else if constexpr (std::is_same_v<Robot, robots::G1>) {
             return collision::G1_TANGENT_DIM;
         }
@@ -171,6 +199,17 @@ namespace AORRTC {
         int joint_index
     ) {
         return joint_index == 0
+            ? d_settings.lift_distance_weight
+            : 1.0f;
+    }
+
+
+    template <>
+    __device__ __forceinline__ float
+    cprrtc_joint_distance_weight<robots::FfwSg2Mobility>(
+        int joint_index
+    ) {
+        return joint_index == 3
             ? d_settings.lift_distance_weight
             : 1.0f;
     }
@@ -347,34 +386,38 @@ namespace AORRTC {
     // 각 CUDA block이 사용할 Halton 수열의 초기 상태 한 번 설정
     template<typename Robot>
     __device__ void halton_initialize(HaltonState<Robot>& state, size_t skip_iterations, curandState& rng_state, int idx) {
-        if constexpr (std::is_same_v<Robot, robots::G1>) {
-            float primes[robots::G1::dimension] = {
-                3.f, 5.f, 7.f, 11.f, 13.f, 17.f, 19.f,
-                23.f, 29.f, 31.f, 37.f, 41.f, 43.f, 47.f,
-                53.f, 59.f, 61.f, 67.f, 71.f, 73.f, 79.f,
-                83.f, 89.f, 97.f, 101.f, 103.f, 107.f,
-                109.f, 113.f, 127.f, 131.f, 137.f, 139.f,
-                149.f, 151.f
-            };
-            if (idx != 0) {
-                shuffle_array(primes, robots::G1::dimension, rng_state);
-            }
-            for (size_t i = 0; i < Robot::dimension; i++) {
-                state.b[i] = primes[i];
-                state.n[i] = 0.0f;
-                state.d[i] = 1.0f;
-            }
-        } else {
-            float primes[16] = {
-                3.f, 5.f, 7.f, 11.f, 13.f, 17.f, 19.f, 23.f,
-                29.f, 31.f, 37.f, 41.f, 43.f, 47.f, 53.f, 59.f
-            };
-            if (idx != 0) shuffle_array(primes, 16, rng_state);
-            for (size_t i = 0; i < Robot::dimension; i++) {
-                state.b[i] = primes[i];
-                state.n[i] = 0.0f;
-                state.d[i] = 1.0f;
-            }
+        constexpr float prime_table[] = {
+            3.f, 5.f, 7.f, 11.f, 13.f, 17.f, 19.f,
+            23.f, 29.f, 31.f, 37.f, 41.f, 43.f, 47.f,
+            53.f, 59.f, 61.f, 67.f, 71.f, 73.f, 79.f,
+            83.f, 89.f, 97.f, 101.f, 103.f, 107.f,
+            109.f, 113.f, 127.f, 131.f, 137.f, 139.f,
+            149.f, 151.f
+        };
+        constexpr int shuffle_count =
+            std::is_same_v<Robot, robots::G1>
+                ? Robot::dimension
+                : 16;
+        constexpr int prime_count =
+            Robot::dimension > shuffle_count
+                ? Robot::dimension
+                : shuffle_count;
+        static_assert(
+            prime_count <= sizeof(prime_table) / sizeof(prime_table[0]),
+            "Robot dimension exceeds available Halton prime table"
+        );
+
+        float primes[prime_count];
+        for (size_t i = 0; i < prime_count; i++) {
+            primes[i] = prime_table[i];
+        }
+        if (idx != 0) {
+            shuffle_array(primes, shuffle_count, rng_state);
+        }
+        for (size_t i = 0; i < Robot::dimension; i++) {
+            state.b[i] = primes[i];
+            state.n[i] = 0.0f;
+            state.d[i] = 1.0f;
         }
         
         // Skip iterations if requested
@@ -691,6 +734,76 @@ namespace AORRTC {
     }
 
     template <>
+    __device__ __forceinline__ bool cprrtc_project_motion<ppln::robots::FfwSg2Mobility>(
+        volatile const float *q_start,
+        volatile const float *q_step,
+        volatile float *motion_segment,
+        volatile float *motion_segment_next,
+        volatile unsigned char *projection_valid,
+        volatile int *projection_prog,
+        volatile unsigned int *projection_success,
+        int tid
+    ) {
+        static constexpr auto dim = ppln::robots::FfwSg2Mobility::dimension;
+
+        const int waypoint = tid / 4 + 1;
+        const int lane = tid % 4;
+
+        if (tid < dim) {
+            motion_segment[tid] = q_start[tid];
+        }
+
+        if (waypoint <= d_settings.granularity) {
+            for (int j = lane; j < dim; j += 4) {
+                motion_segment[waypoint * dim + j] =
+                    q_start[j] + static_cast<float>(waypoint) * q_step[j];
+            }
+        }
+
+        __syncthreads();
+
+        if (d_settings.ffw_sg2_enable_com_constraint) {
+            return ppln::collision::ffw_sg2_mobility_com_project_motion(
+                motion_segment,
+                motion_segment_next,
+                d_settings.granularity,
+                d_settings.ffw_sg2_support_margin_m,
+                d_settings.ffw_sg2_object_mass_kg,
+                projection_valid,
+                projection_prog,
+                projection_success,
+                d_settings.projection_max_iters,
+                d_settings.projection_alpha,
+                d_settings.projection_damping,
+                d_settings.projection_task_tolerance,
+                d_settings.projection_smoothness_threshold,
+                d_settings.projection_smoothness_weight,
+                d_settings.projection_smoothness,
+                d_settings.projection_max_step,
+                tid
+            );
+        }
+
+        return ppln::collision::ffw_sg2_mobility_project_motion(
+            motion_segment,
+            motion_segment_next,
+            d_settings.granularity,
+            projection_valid,
+            projection_prog,
+            projection_success,
+            d_settings.projection_max_iters,
+            d_settings.projection_alpha,
+            d_settings.projection_damping,
+            d_settings.projection_task_tolerance,
+            d_settings.projection_smoothness_threshold,
+            d_settings.projection_smoothness_weight,
+            d_settings.projection_smoothness,
+            d_settings.projection_max_step,
+            tid
+        );
+    }
+
+    template <>
     __device__ __forceinline__ bool cprrtc_project_motion<ppln::robots::G1>(
         volatile const float *q_start,
         volatile const float *q_step,
@@ -758,6 +871,11 @@ namespace AORRTC {
                 basis_ok = ppln::collision::ffw_sg2_tangent_basis(
                     q,
                     d_settings.rigid_orientation,
+                    basis
+                );
+            } else if constexpr (std::is_same_v<Robot, robots::FfwSg2Mobility>) {
+                basis_ok = ppln::collision::ffw_sg2_mobility_tangent_basis(
+                    q,
                     basis
                 );
             } else if constexpr (std::is_same_v<Robot, robots::G1>) {
@@ -885,6 +1003,10 @@ namespace AORRTC {
 
             // EM = ||h(q)||
             return ppln::collision::ffw_sg2_residual_norm(h,residual_dim);
+        } else if constexpr (std::is_same_v<Robot, robots::FfwSg2Mobility>) {
+            float h[FFW_SG2_MOBILITY_RESIDUAL_DIM];
+            ppln::collision::ffw_sg2_mobility_constraint_residual(q, h);
+            return ppln::collision::ffw_sg2_mobility_residual_norm(h);
         } else if constexpr (std::is_same_v<Robot, robots::G1>) {
             return ppln::collision::g1_equality_residual_norm(
                 q,
@@ -1033,6 +1155,24 @@ namespace AORRTC {
             );
     }
 
+    template <>
+    __device__ __forceinline__ bool cprrtc_detailed_env_collision_check<ppln::robots::FfwSg2Mobility>(
+        volatile float *sphere_pos,
+        volatile int *link_CC,
+        ppln::collision::Environment<float> *env,
+        int tid,
+        volatile unsigned int *motion_cc_flag
+    ) {
+        return
+            ppln::collision::ffw_sg2_mobility_env_collision_check_early(
+                sphere_pos,
+                link_CC,
+                env,
+                tid,
+                motion_cc_flag
+            );
+    }
+
     template <typename Robot>
     __device__ __forceinline__ bool cprrtc_detailed_self_collision_check(
         volatile float *sphere_pos,
@@ -1058,6 +1198,22 @@ namespace AORRTC {
     ) {
         return
             ppln::collision::ffw_sg2_self_collision_check_early(
+                sphere_pos,
+                link_CC,
+                tid,
+                motion_cc_flag
+            );
+    }
+
+    template <>
+    __device__ __forceinline__ bool cprrtc_detailed_self_collision_check<ppln::robots::FfwSg2Mobility>(
+        volatile float *sphere_pos,
+        volatile int *link_CC,
+        int tid,
+        volatile unsigned int *motion_cc_flag
+    ) {
+        return
+            ppln::collision::ffw_sg2_mobility_self_collision_check_early(
                 sphere_pos,
                 link_CC,
                 tid,
@@ -3178,6 +3334,31 @@ namespace AORRTC {
                         }
                         __syncthreads();
 
+                        const float distance_before_value = cprrtc_shared_config_distance<Robot>(
+                            config,
+                            connect_target_node,
+                            sdata,
+                            tid
+                        );
+
+                    const float distance_after_value = cprrtc_shared_config_distance<Robot>(
+                            &motion_segment[d_settings.granularity * dim],
+                            connect_target_node,
+                            sdata,
+                            tid
+                        );
+
+                    if (tid == 0) {
+                        connect_distance_before = distance_before_value;
+                        connect_distance_after = distance_after_value;
+                        connect_made_progress = extension_projection_good && connect_distance_after < connect_distance_before - d_settings.connect_progress_epsilon;
+                    }
+                    __syncthreads();
+
+                    if (!extension_projection_good || !connect_made_progress) {
+                        break;
+                    }
+
                         bool extension_collision_free = false;
                         if (extension_projection_good) {
                             // 7. projected waypoint 가져오기
@@ -3293,7 +3474,7 @@ namespace AORRTC {
 
                             extension_collision_free = (local_cc_result[0] == 0);
                         }
-                        bool ext_edge_good =extension_projection_good && extension_collision_free;
+                        bool ext_edge_good = extension_projection_good && connect_made_progress && extension_collision_free;
 
                         __syncthreads();
 
@@ -4819,6 +5000,7 @@ namespace AORRTC {
     template AORRTCResult<ppln::robots::Fetch> solve<ppln::robots::Fetch>(std::array<float, 8>&, std::vector<std::array<float, 8>>&, ppln::collision::Environment<float>&, AORRTC_settings&);
     template AORRTCResult<ppln::robots::Baxter> solve<ppln::robots::Baxter>(std::array<float, 14>&, std::vector<std::array<float, 14>>&, ppln::collision::Environment<float>&, AORRTC_settings&);
     template AORRTCResult<ppln::robots::FfwSg2> solve<ppln::robots::FfwSg2>(std::array<float, 15>&, std::vector<std::array<float, 15>>&, ppln::collision::Environment<float>&, AORRTC_settings&);
+    template AORRTCResult<ppln::robots::FfwSg2Mobility> solve<ppln::robots::FfwSg2Mobility>(std::array<float, 18>&, std::vector<std::array<float, 18>>&, ppln::collision::Environment<float>&, AORRTC_settings&);
     template AORRTCResult<ppln::robots::FfwSg2Single> solve<ppln::robots::FfwSg2Single>(std::array<float, 8>&, std::vector<std::array<float, 8>>&, ppln::collision::Environment<float>&, AORRTC_settings&);
     template AORRTCResult<ppln::robots::G1> solve<ppln::robots::G1>(std::array<float, 35>&, std::vector<std::array<float, 35>>&, ppln::collision::Environment<float>&, AORRTC_settings&);
 

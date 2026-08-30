@@ -24,6 +24,16 @@ inline std::vector<std::string> joint_names_for_robot(
     const std::string &robot_name,
     int dimension
 ) {
+    if (robot_name == "ffw_sg2_mobility") {
+        return {
+            "base_x", "base_y", "base_yaw",
+            "lift_joint",
+            "arm_l_joint1", "arm_l_joint2", "arm_l_joint3", "arm_l_joint4",
+            "arm_l_joint5", "arm_l_joint6", "arm_l_joint7",
+            "arm_r_joint1", "arm_r_joint2", "arm_r_joint3", "arm_r_joint4",
+            "arm_r_joint5", "arm_r_joint6", "arm_r_joint7",
+        };
+    }
     if (robot_name == "ffw_sg2") {
         return {
             "lift_joint",
@@ -245,6 +255,9 @@ inline json settings_to_json(const pRRTC_settings &settings) {
         {"granularity", settings.granularity},
         {"range", settings.range},
         {"lift_distance_weight", settings.lift_distance_weight},
+        {"ffw_sg2_enable_com_constraint", settings.ffw_sg2_enable_com_constraint},
+        {"ffw_sg2_support_margin_m", settings.ffw_sg2_support_margin_m},
+        {"ffw_sg2_object_mass_kg", settings.ffw_sg2_object_mass_kg},
         {"balance", settings.balance},
         {"tree_ratio", settings.tree_ratio},
         {"dynamic_domain", settings.dynamic_domain},
