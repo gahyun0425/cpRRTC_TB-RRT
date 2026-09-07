@@ -266,6 +266,56 @@ inline json settings_to_json(const pRRTC_settings &settings) {
         {"dd_radius", settings.dd_radius},
         {"dd_min_radius", settings.dd_min_radius},
     };
+    const auto &attached_object =
+        settings.ffw_sg2_attached_object_collision;
+    json attached_object_json = {
+        {"enabled", attached_object.enabled},
+        {"sphere_count", attached_object.sphere_count},
+        {
+            "world_offset",
+            {
+                attached_object.world_offset[0],
+                attached_object.world_offset[1],
+                attached_object.world_offset[2],
+            }
+        },
+        {
+            "ignored_robot_sphere_count",
+            attached_object.ignored_robot_sphere_count
+        },
+        {
+            "ignored_robot_approx_sphere_count",
+            attached_object.ignored_robot_approx_sphere_count
+        },
+    };
+    attached_object_json["spheres"] = json::array();
+    for (int i = 0; i < attached_object.sphere_count; i++) {
+        attached_object_json["spheres"].push_back(
+            {
+                attached_object.spheres[i][0],
+                attached_object.spheres[i][1],
+                attached_object.spheres[i][2],
+                attached_object.spheres[i][3],
+            }
+        );
+    }
+    attached_object_json["ignored_robot_spheres"] = json::array();
+    for (int i = 0; i < attached_object.ignored_robot_sphere_count; i++) {
+        attached_object_json["ignored_robot_spheres"].push_back(
+            attached_object.ignored_robot_spheres[i]
+        );
+    }
+    attached_object_json["ignored_robot_approx_spheres"] = json::array();
+    for (
+        int i = 0;
+        i < attached_object.ignored_robot_approx_sphere_count;
+        i++
+    ) {
+        attached_object_json["ignored_robot_approx_spheres"].push_back(
+            attached_object.ignored_robot_approx_spheres[i]
+        );
+    }
+    output["ffw_sg2_attached_object_collision"] = attached_object_json;
     return output;
 }
 

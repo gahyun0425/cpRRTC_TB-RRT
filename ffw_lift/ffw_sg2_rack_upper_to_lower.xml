@@ -117,7 +117,28 @@
           conaffinity="1"
           friction="1 0.005 0.0001"/>
 
-    <body name="shelf" pos="0 0 0">
+    <body name="robot_com_marker" mocap="true" pos="0 0 0">
+      <geom name="robot_com_marker_geom" type="sphere"
+            size="0.025" rgba="0.10 0.30 1.00 0.75"
+            contype="0" conaffinity="0" mass="0"/>
+    </body>
+    <body name="payload_com_marker" mocap="true" pos="0 0 0">
+      <geom name="payload_com_marker_geom" type="sphere"
+            size="0.025" rgba="1.00 0.48 0.08 0.75"
+            contype="0" conaffinity="0" mass="0"/>
+    </body>
+    <body name="combined_com_marker" mocap="true" pos="0 0 0">
+      <geom name="combined_com_marker_geom" type="sphere"
+            size="0.032" rgba="0.00 0.85 0.25 0.85"
+            contype="0" conaffinity="0" mass="0"/>
+    </body>
+    <body name="reference_com_marker" mocap="true" pos="0 0 0">
+      <geom name="reference_com_marker_geom" type="sphere"
+            size="0.036" rgba="1.00 0.00 0.95 0.85"
+            contype="0" conaffinity="0" mass="0"/>
+    </body>
+
+    <body name="shelf" pos="0.1 0 0">
       <geom name="gondola_base" type="box"
             size="0.235 0.465 0.100"
             pos="0.725 0 0.100"
@@ -153,21 +174,6 @@
             pos="0.965 -0.465 0.935"
             material="shelf_matte"
             contype="1" conaffinity="1"/>
-      <geom name="gondola_shelf_2_lip" type="box"
-            size="0.018 0.450 0.020"
-            pos="0.620 0 0.945"
-            rgba="0.82 0.82 0.78 1"
-            contype="0" conaffinity="0"/>
-      <geom name="gondola_shelf_3_lip" type="box"
-            size="0.018 0.450 0.020"
-            pos="0.620 0 1.395"
-            rgba="0.82 0.82 0.78 1"
-            contype="0" conaffinity="0"/>
-      <geom name="gondola_shelf_4_lip" type="box"
-            size="0.018 0.450 0.020"
-            pos="0.620 0 1.845"
-            rgba="0.82 0.82 0.78 1"
-            contype="0" conaffinity="0"/>
       <geom name="gondola_grid_v0" type="box"
             size="0.004 0.004 0.810"
             pos="0.945 -0.360 1.035"
@@ -255,7 +261,7 @@
             contype="0" conaffinity="0"/>
     </body>
 
-    <body name="shelf_ypos" pos="0 0.93 0">
+    <body name="shelf_ypos" pos="0.1 0.93 0">
       <geom name="gondola_ypos_base" type="box"
             size="0.235 0.465 0.100"
             pos="0.725 0 0.100"
@@ -291,21 +297,6 @@
             pos="0.965 -0.465 0.935"
             material="shelf_matte"
             contype="1" conaffinity="1"/>
-      <geom name="gondola_ypos_shelf_2_lip" type="box"
-            size="0.018 0.450 0.020"
-            pos="0.620 0 0.945"
-            rgba="0.82 0.82 0.78 1"
-            contype="0" conaffinity="0"/>
-      <geom name="gondola_ypos_shelf_3_lip" type="box"
-            size="0.018 0.450 0.020"
-            pos="0.620 0 1.395"
-            rgba="0.82 0.82 0.78 1"
-            contype="0" conaffinity="0"/>
-      <geom name="gondola_ypos_shelf_4_lip" type="box"
-            size="0.018 0.450 0.020"
-            pos="0.620 0 1.845"
-            rgba="0.82 0.82 0.78 1"
-            contype="0" conaffinity="0"/>
       <geom name="gondola_ypos_grid_v0" type="box"
             size="0.004 0.004 0.810"
             pos="0.945 -0.360 1.035"
@@ -393,7 +384,7 @@
             contype="0" conaffinity="0"/>
     </body>
 
-    <body name="shelf_yneg" pos="0 -0.93 0">
+    <body name="shelf_yneg" pos="0.1 -0.93 0">
       <geom name="gondola_yneg_base" type="box"
             size="0.235 0.465 0.100"
             pos="0.725 0 0.100"
@@ -429,21 +420,6 @@
             pos="0.965 -0.465 0.935"
             material="shelf_matte"
             contype="1" conaffinity="1"/>
-      <geom name="gondola_yneg_shelf_2_lip" type="box"
-            size="0.018 0.450 0.020"
-            pos="0.620 0 0.945"
-            rgba="0.82 0.82 0.78 1"
-            contype="0" conaffinity="0"/>
-      <geom name="gondola_yneg_shelf_3_lip" type="box"
-            size="0.018 0.450 0.020"
-            pos="0.620 0 1.395"
-            rgba="0.82 0.82 0.78 1"
-            contype="0" conaffinity="0"/>
-      <geom name="gondola_yneg_shelf_4_lip" type="box"
-            size="0.018 0.450 0.020"
-            pos="0.620 0 1.845"
-            rgba="0.82 0.82 0.78 1"
-            contype="0" conaffinity="0"/>
       <geom name="gondola_yneg_grid_v0" type="box"
             size="0.004 0.004 0.810"
             pos="0.945 -0.360 1.035"
@@ -542,14 +518,14 @@
             contype="1" conaffinity="1"
             mass="0"/>
       <geom name="object_left_grasp" type="box"
-            size="0.025 0.006 0.025"
-            pos="0 0.116 0"
+            size="0.025 0.045 0.025"
+            pos="0 0.155 0"
             material="object_grasp_matte"
             contype="0" conaffinity="0"
             mass="0"/>
       <geom name="object_right_grasp" type="box"
-            size="0.025 0.006 0.025"
-            pos="0 -0.116 0"
+            size="0.025 0.045 0.025"
+            pos="0 -0.155 0"
             material="object_grasp_matte"
             contype="0" conaffinity="0"
             mass="0"/>
@@ -600,9 +576,12 @@
         <body name="left_wheel_drive" pos="0 0 -0.18905">
           <inertial pos="0 -0.0015 0" mass="3.80" diaginertia="0.00719 0.01156 0.00719"/>
           <joint name="left_wheel_drive_joint" type="hinge" pos="0 0 0" axis="0 1 0" damping="2" frictionloss="0.2"/>
-          <geom type="mesh" mesh="left_wheel" size="0.07" friction="5.0 1.0 0.3"/>
+          <geom type="mesh" mesh="left_wheel" size="0.07" friction="5.0 1.0 0.3"
+                solref="0.004 1" solimp="0.95 0.99 0.001"/>
           <!-- Contact helper cylinder geom (collision only, invisible) -->
-          <geom type="cylinder" size="0.09 0.035" pos="0 0 0" quat="0.707107 -0.707107 0 0" friction="5.0 1.0 0.3" rgba="0 0 0 0"/>
+          <geom type="cylinder" size="0.09 0.035" pos="0 0 0" quat="0.707107 -0.707107 0 0"
+                friction="5.0 1.0 0.3" rgba="0 0 0 0"
+                solref="0.004 1" solimp="0.95 0.99 0.001"/>
         </body>
       </body>
 
@@ -613,8 +592,11 @@
         <body name="right_wheel_drive" pos="0 0 -0.18905">
           <inertial pos="0 0.0015 0" mass="3.80" diaginertia="0.00719 0.01156 0.00719"/>
           <joint name="right_wheel_drive_joint" type="hinge" pos="0 0 0" axis="0 1 0" damping="2" frictionloss="0.2"/>
-          <geom type="mesh" mesh="right_wheel" size="0.07" friction="5.0 1.0 0.3"/>
-          <geom type="cylinder" size="0.09 0.035" pos="0 0 0" quat="0.707107 -0.707107 0 0" friction="5.0 1.0 0.3" rgba="0 0 0 0"/>
+          <geom type="mesh" mesh="right_wheel" size="0.07" friction="5.0 1.0 0.3"
+                solref="0.004 1" solimp="0.95 0.99 0.001"/>
+          <geom type="cylinder" size="0.09 0.035" pos="0 0 0" quat="0.707107 -0.707107 0 0"
+                friction="5.0 1.0 0.3" rgba="0 0 0 0"
+                solref="0.004 1" solimp="0.95 0.99 0.001"/>
         </body>
       </body>
 
@@ -625,8 +607,11 @@
         <body name="rear_wheel_drive" pos="0 0 -0.18905">
           <inertial pos="0 -0.0015 0" mass="3.80" diaginertia="0.00719 0.01156 0.00719"/>
           <joint name="rear_wheel_drive_joint" type="hinge" pos="0 0 0" axis="0 1 0"  damping="2" frictionloss="0.2"/>
-          <geom type="mesh" mesh="rear_wheel" size="0.07" friction="5.0 1.0 0.3"/>
-          <geom type="cylinder" size="0.09 0.035" pos="0 0 0" quat="0.707107 -0.707107 0 0" friction="5.0 1.0 0.3" rgba="0 0 0 0"/>
+          <geom type="mesh" mesh="rear_wheel" size="0.07" friction="5.0 1.0 0.3"
+                solref="0.004 1" solimp="0.95 0.99 0.001"/>
+          <geom type="cylinder" size="0.09 0.035" pos="0 0 0" quat="0.707107 -0.707107 0 0"
+                friction="5.0 1.0 0.3" rgba="0 0 0 0"
+                solref="0.004 1" solimp="0.95 0.99 0.001"/>
         </body>
       </body>
 
@@ -950,13 +935,13 @@
     <position name="actuator_head_joint2" joint="head_joint2" class="robot" ctrlrange="-0.35 0.35"/>
 
     <!-- Right arm joints -->
-    <position name="arm_r_joint1" joint="arm_r_joint1" class="robot" ctrlrange="-3.14 3.14"/>
-    <position name="arm_r_joint2" joint="arm_r_joint2" class="robot" ctrlrange="-3.14 3.14"/>
-    <position name="arm_r_joint3" joint="arm_r_joint3" class="robot" ctrlrange="-3.14 3.14"/>
-    <position name="arm_r_joint4" joint="arm_r_joint4" class="robot" ctrlrange="-3.14 3.14"/>
-    <position name="arm_r_joint5" joint="arm_r_joint5" class="robot" ctrlrange="-3.14 3.14"/>
-    <position name="arm_r_joint6" joint="arm_r_joint6" class="robot" ctrlrange="-3.14 3.14"/>
-    <position name="arm_r_joint7" joint="arm_r_joint7" class="robot" ctrlrange="-3.14 3.14"/>
+    <position name="arm_r_joint1" joint="arm_r_joint1" class="robot" kp="32000" forcerange="-12000 12000" ctrlrange="-3.14 3.14"/>
+    <position name="arm_r_joint2" joint="arm_r_joint2" class="robot" kp="32000" forcerange="-12000 12000" ctrlrange="-3.14 3.14"/>
+    <position name="arm_r_joint3" joint="arm_r_joint3" class="robot" kp="32000" forcerange="-12000 12000" ctrlrange="-3.14 3.14"/>
+    <position name="arm_r_joint4" joint="arm_r_joint4" class="robot" kp="32000" forcerange="-12000 12000" ctrlrange="-3.14 3.14"/>
+    <position name="arm_r_joint5" joint="arm_r_joint5" class="robot" kp="32000" forcerange="-12000 12000" ctrlrange="-3.14 3.14"/>
+    <position name="arm_r_joint6" joint="arm_r_joint6" class="robot" kp="32000" forcerange="-12000 12000" ctrlrange="-3.14 3.14"/>
+    <position name="arm_r_joint7" joint="arm_r_joint7" class="robot" kp="32000" forcerange="-12000 12000" ctrlrange="-3.14 3.14"/>
 
     <position name="gripper_r_joint1" joint="gripper_r_joint1" ctrlrange="0.000 1.100" class="gripper"/>
     <position name="gripper_r_joint2" joint="gripper_r_joint2" ctrlrange="0.000 1.000" class="gripper"/>
@@ -964,13 +949,13 @@
     <position name="gripper_r_joint4" joint="gripper_r_joint4" ctrlrange="0.000 1.000" class="gripper"/>
 
     <!-- Left arm joints -->
-    <position name="arm_l_joint1" joint="arm_l_joint1" class="robot" ctrlrange="-3.14 3.14"/>
-    <position name="arm_l_joint2" joint="arm_l_joint2" class="robot" ctrlrange="-3.14 3.14"/>
-    <position name="arm_l_joint3" joint="arm_l_joint3" class="robot" ctrlrange="-3.14 3.14"/>
-    <position name="arm_l_joint4" joint="arm_l_joint4" class="robot" ctrlrange="-3.14 3.14"/>
-    <position name="arm_l_joint5" joint="arm_l_joint5" class="robot" ctrlrange="-3.14 3.14"/>
-    <position name="arm_l_joint6" joint="arm_l_joint6" class="robot" ctrlrange="-3.14 3.14"/>
-    <position name="arm_l_joint7" joint="arm_l_joint7" class="robot" ctrlrange="-3.14 3.14"/>
+    <position name="arm_l_joint1" joint="arm_l_joint1" class="robot" kp="32000" forcerange="-12000 12000" ctrlrange="-3.14 3.14"/>
+    <position name="arm_l_joint2" joint="arm_l_joint2" class="robot" kp="32000" forcerange="-12000 12000" ctrlrange="-3.14 3.14"/>
+    <position name="arm_l_joint3" joint="arm_l_joint3" class="robot" kp="32000" forcerange="-12000 12000" ctrlrange="-3.14 3.14"/>
+    <position name="arm_l_joint4" joint="arm_l_joint4" class="robot" kp="32000" forcerange="-12000 12000" ctrlrange="-3.14 3.14"/>
+    <position name="arm_l_joint5" joint="arm_l_joint5" class="robot" kp="32000" forcerange="-12000 12000" ctrlrange="-3.14 3.14"/>
+    <position name="arm_l_joint6" joint="arm_l_joint6" class="robot" kp="32000" forcerange="-12000 12000" ctrlrange="-3.14 3.14"/>
+    <position name="arm_l_joint7" joint="arm_l_joint7" class="robot" kp="32000" forcerange="-12000 12000" ctrlrange="-3.14 3.14"/>
 
     <position name="gripper_l_joint1" joint="gripper_l_joint1" ctrlrange="0.000 1.100" class="gripper"/>
     <position name="gripper_l_joint2" joint="gripper_l_joint2" ctrlrange="0.000 1.000" class="gripper"/>

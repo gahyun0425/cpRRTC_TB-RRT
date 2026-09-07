@@ -1221,6 +1221,66 @@ namespace AORRTC {
             );
     }
 
+    template <typename Robot>
+    __device__ __forceinline__ bool cprrtc_attached_object_collision_check_approx(
+        const float *q,
+        volatile float *sphere_pos_approx,
+        ppln::collision::Environment<float> *env,
+        int tid,
+        volatile unsigned int *motion_cc_flag
+    ) {
+        return true;
+    }
+
+    template <>
+    __device__ __forceinline__ bool
+    cprrtc_attached_object_collision_check_approx<ppln::robots::FfwSg2Mobility>(
+        const float *q,
+        volatile float *sphere_pos_approx,
+        ppln::collision::Environment<float> *env,
+        int tid,
+        volatile unsigned int *motion_cc_flag
+    ) {
+        return
+            ppln::collision::ffw_sg2_mobility_attached_object_collision_check_approx(
+                q,
+                sphere_pos_approx,
+                env,
+                tid,
+                motion_cc_flag
+            );
+    }
+
+    template <typename Robot>
+    __device__ __forceinline__ bool cprrtc_attached_object_collision_check(
+        const float *q,
+        volatile float *sphere_pos,
+        ppln::collision::Environment<float> *env,
+        int tid,
+        volatile unsigned int *motion_cc_flag
+    ) {
+        return true;
+    }
+
+    template <>
+    __device__ __forceinline__ bool
+    cprrtc_attached_object_collision_check<ppln::robots::FfwSg2Mobility>(
+        const float *q,
+        volatile float *sphere_pos,
+        ppln::collision::Environment<float> *env,
+        int tid,
+        volatile unsigned int *motion_cc_flag
+    ) {
+        return
+            ppln::collision::ffw_sg2_mobility_attached_object_collision_check(
+                q,
+                sphere_pos,
+                env,
+                tid,
+                motion_cc_flag
+            );
+    }
+
     // Conservative validator used only by Algorithm 1 Lines 27-32 when a
     // newly projected x_new is reconsidered with a lower-cost parent.  The
     // endpoint is kept fixed; the interpolated edge must already satisfy the
@@ -1307,6 +1367,19 @@ namespace AORRTC {
             (unsigned int *)&local_cc_result[0],
             env_collision_approx ? 1u : 0u
         );
+
+        const bool attached_object_collision_approx =
+            not cprrtc_attached_object_collision_check_approx<Robot>(
+                interp_cfg,
+                sphere_pos_approx,
+                env,
+                tid,
+                local_cc_result
+            );
+        atomicOr(
+            (unsigned int *)&local_cc_result[0],
+            attached_object_collision_approx ? 1u : 0u
+        );
         __syncthreads();
 
         if (local_cc_result[0] == 1u) {
@@ -1330,6 +1403,19 @@ namespace AORRTC {
             atomicOr(
                 (unsigned int *)&local_cc_result[0],
                 env_collision ? 1u : 0u
+            );
+
+            const bool attached_object_collision =
+                not cprrtc_attached_object_collision_check<Robot>(
+                    interp_cfg,
+                    sphere_pos,
+                    env,
+                    tid,
+                    local_cc_result
+                );
+            atomicOr(
+                (unsigned int *)&local_cc_result[0],
+                attached_object_collision ? 1u : 0u
             );
             __syncthreads();
         }
@@ -2598,6 +2684,16 @@ namespace AORRTC {
                     // 여러 thread의 충돌 검사 결과를 하나의 공유 결과로 합치는 코드
                     atomicOr((unsigned int *)&local_cc_result[0],config_in_collision2_approx ? 1u : 0u);
 
+                    bool attached_object_collision_approx = not cprrtc_attached_object_collision_check_approx<Robot>(
+                            interp_cfg,
+                            sphere_pos_approx,
+                            env,
+                            tid,
+                            local_cc_result
+                        );
+
+                    atomicOr((unsigned int *)&local_cc_result[0],attached_object_collision_approx ? 1u : 0u);
+
                     __syncthreads();
 
                     if (tid == 0) {
@@ -2628,6 +2724,16 @@ namespace AORRTC {
 
                         // 각 thread 검사 합치기
                         atomicOr((unsigned int *)&local_cc_result[0],config_in_collision2 ? 1u : 0u);
+
+                        bool attached_object_collision = not cprrtc_attached_object_collision_check<Robot>(
+                                interp_cfg,
+                                sphere_pos,
+                                env,
+                                tid,
+                                local_cc_result
+                            );
+
+                        atomicOr((unsigned int *)&local_cc_result[0],attached_object_collision ? 1u : 0u);
 
                         __syncthreads();
                     }
@@ -3395,6 +3501,16 @@ namespace AORRTC {
 
                             atomicOr((unsigned int *)&local_cc_result[0],config_in_collision2_approx ? 1u : 0u);
 
+                            bool attached_object_collision_approx = not cprrtc_attached_object_collision_check_approx<Robot>(
+                                    interp_cfg,
+                                    sphere_pos_approx,
+                                    env,
+                                    tid,
+                                    local_cc_result
+                                );
+
+                            atomicOr((unsigned int *)&local_cc_result[0],attached_object_collision_approx ? 1u : 0u);
+
                             __syncthreads();
 
 
@@ -3419,6 +3535,16 @@ namespace AORRTC {
                                 bool config_in_collision2 = not cprrtc_detailed_env_collision_check<Robot>(sphere_pos,link_CC,env,tid,local_cc_result);
 
                                 atomicOr((unsigned int *)&local_cc_result[0],config_in_collision2 ? 1u : 0u);
+
+                                bool attached_object_collision = not cprrtc_attached_object_collision_check<Robot>(
+                                        interp_cfg,
+                                        sphere_pos,
+                                        env,
+                                        tid,
+                                        local_cc_result
+                                    );
+
+                                atomicOr((unsigned int *)&local_cc_result[0],attached_object_collision ? 1u : 0u);
 
                                 __syncthreads();
                             }
@@ -4240,6 +4366,13 @@ namespace AORRTC {
         // AORRTC owns independent device symbols in this translation unit.
         reset_device_variables();
         cudaMemcpyToSymbol(d_settings, &settings, sizeof(settings));
+        if constexpr (std::is_same_v<Robot, robots::FfwSg2Mobility>) {
+            cudaMemcpyToSymbol(
+                ppln::collision::ffw_sg2_mobility_attached_object_collision,
+                &settings.ffw_sg2_attached_object_collision,
+                sizeof(settings.ffw_sg2_attached_object_collision)
+            );
+        }
 
         float *nodes[2] = {nullptr, nullptr};
         int *parents[2] = {nullptr, nullptr};
@@ -4665,11 +4798,11 @@ namespace AORRTC {
         int total_rounds = 0;
         int search_round = 0;
 
-        // First solution: one persistent CUDA kernel, matching pRRTC's
-        // execution structure. After the first solution, AORRTC returns to
-        // one planner iteration per kernel launch so the host can restart
-        // fresh bounded searches and enforce the anytime loop.
+        // Keep the initial-phase label for result/debug bookkeeping, but do
+        // not keep the first CUDA kernel alive indefinitely. Returning to the
+        // host every launch lets --time stop runs even before a first solution.
         bool initial_search_phase = true;
+        constexpr bool persistent_initial_search = false;
 
         while (total_rounds < settings.max_iters
                && std::chrono::steady_clock::now() < planning_deadline) {
@@ -4701,7 +4834,7 @@ namespace AORRTC {
                         env,
                         num_goals,
                         search_round,
-                        initial_search_phase
+                        persistent_initial_search
                     );
             }
             else {
@@ -4728,7 +4861,7 @@ namespace AORRTC {
                         env,
                         num_goals,
                         search_round,
-                        initial_search_phase
+                        persistent_initial_search
                     );
             }
             cudaDeviceSynchronize();

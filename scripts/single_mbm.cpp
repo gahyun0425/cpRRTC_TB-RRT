@@ -1,5 +1,6 @@
 #include <nlohmann/json.hpp>
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <fstream>
 #include <iostream>
@@ -22,6 +23,7 @@
 #include "src/planning/Planners.hh"
 #include "src/planning/AORRTC.hh"
 #include "src/planning/pRRTC_settings.hh"
+#include "scripts/ffw_sg2_attached_object_collision.hh"
 #include "scripts/g1_problem.hh"
 #include "scripts/planner_result_json.hh"
 
@@ -38,6 +40,34 @@ struct TraceExportOptions {
     int html_max_tree_nodes = 6000;
     std::string patacon_root;
 };
+
+struct RealDynamicsOptions {
+    int settle_steps = -1;
+    int initial_settle_steps = -1;
+    double speed = 0.0;
+    double base_kp_xy = 0.0;
+    double base_kp_yaw = 0.0;
+    double base_max_speed = 0.0;
+    double base_max_yaw_rate = 0.0;
+    double steer_rate_limit = 0.0;
+    double drive_accel_limit = 0.0;
+    std::string payload_mode;
+
+    bool provided() const {
+        return settle_steps >= 0
+            || initial_settle_steps >= 0
+            || speed > 0.0
+            || base_kp_xy > 0.0
+            || base_kp_yaw > 0.0
+            || base_max_speed > 0.0
+            || base_max_yaw_rate > 0.0
+            || steer_rate_limit > 0.0
+            || drive_accel_limit > 0.0
+            || !payload_mode.empty();
+    }
+};
+
+constexpr float FFW_SG2_DEFAULT_SUPPORT_MARGIN_M = 0.05f;
 
 
 std::string shell_quote(const std::string &value) {
@@ -310,7 +340,8 @@ template <typename Robot>
 void visualize_ffw_sg2_path(
     const PlannerResult<Robot> &result,
     const typename Robot::Configuration &start,
-    const std::vector<std::string> &joint_names
+    const std::vector<std::string> &joint_names,
+    std::array<float, 3> attached_object_frame_offset = {0.1f, 0.0f, 0.0f}
 ) {
     if (result.path.size() < 2) {
         throw std::runtime_error("cannot visualize an unsolved or empty path");
@@ -329,6 +360,11 @@ void visualize_ffw_sg2_path(
     trajectory["joint_names"] = joint_names;
     trajectory["waypoints"] = json::array();
     trajectory["start"] = start;
+    trajectory["attached_object_frame_offset"] = {
+        attached_object_frame_offset[0],
+        attached_object_frame_offset[1],
+        attached_object_frame_offset[2],
+    };
 
     const bool path_is_start_to_goal =
         squared_distance(result.path.front(), start)
@@ -378,6 +414,133 @@ void visualize_ffw_sg2_path(
     std::filesystem::remove(trajectory_path, remove_error);
     if (status != 0) {
         throw std::runtime_error("MuJoCo visualizer exited with an error");
+    }
+}
+
+template <typename Robot>
+void visualize_ffw_sg2_rack_real_path(
+    const PlannerResult<Robot> &result,
+    const typename Robot::Configuration &start,
+    const std::vector<std::string> &joint_names,
+    std::array<float, 3> attached_object_frame_offset,
+    float object_mass_kg,
+    float support_margin_m,
+    const RealDynamicsOptions &real_options
+) {
+    if (result.path.size() < 2) {
+        throw std::runtime_error("cannot visualize an unsolved or empty path");
+    }
+
+    auto squared_distance = [](const auto &a, const auto &b) {
+        float distance = 0.0f;
+        for (std::size_t i = 0; i < a.size(); ++i) {
+            const float difference = a[i] - b[i];
+            distance += difference * difference;
+        }
+        return distance;
+    };
+
+    json trajectory;
+    trajectory["joint_names"] = joint_names;
+    trajectory["waypoints"] = json::array();
+    trajectory["start"] = start;
+    trajectory["attached_object_frame_offset"] = {
+        attached_object_frame_offset[0],
+        attached_object_frame_offset[1],
+        attached_object_frame_offset[2],
+    };
+
+    const bool path_is_start_to_goal =
+        squared_distance(result.path.front(), start)
+        <= squared_distance(result.path.back(), start);
+    if (path_is_start_to_goal) {
+        for (const auto &configuration : result.path) {
+            trajectory["waypoints"].push_back(configuration);
+        }
+    } else {
+        for (auto iterator = result.path.rbegin(); iterator != result.path.rend(); ++iterator) {
+            trajectory["waypoints"].push_back(*iterator);
+        }
+    }
+
+    const auto timestamp = std::chrono::steady_clock::now()
+        .time_since_epoch().count();
+    const auto trajectory_path = std::filesystem::temp_directory_path()
+        / ("prrtc_" + std::string(Robot::name) + "_trajectory_"
+            + std::to_string(timestamp) + ".json");
+    {
+        std::ofstream trajectory_file(trajectory_path);
+        if (!trajectory_file) {
+            throw std::runtime_error("failed to create temporary visualization trajectory");
+        }
+        trajectory_file << trajectory.dump(2) << '\n';
+    }
+
+    const auto visualizer_path = std::filesystem::absolute(
+        "scripts/sim_ffw_sg2_rack_upper_to_lower.py"
+    );
+    const auto model_path = std::filesystem::absolute(
+        "ffw_lift/ffw_sg2_rack_upper_to_lower.xml"
+    );
+    std::string command =
+        "python3 " + shell_quote(visualizer_path.string())
+        + " --model " + shell_quote(model_path.string())
+        + " --trajectory " + shell_quote(trajectory_path.string())
+        + " --attach-payload"
+        + " --object-mass " + std::to_string(object_mass_kg)
+        + " --support-margin " + std::to_string(support_margin_m)
+        + " --input-mode ctrl"
+        + " --real"
+        + " --payload-offset "
+        + std::to_string(attached_object_frame_offset[0])
+        + " "
+        + std::to_string(attached_object_frame_offset[1])
+        + " "
+        + std::to_string(attached_object_frame_offset[2]);
+    if (real_options.settle_steps >= 0) {
+        command += " --settle-steps " + std::to_string(real_options.settle_steps);
+    }
+    if (real_options.initial_settle_steps >= 0) {
+        command += " --real-initial-settle-steps "
+            + std::to_string(real_options.initial_settle_steps);
+    }
+    if (real_options.speed > 0.0) {
+        command += " --speed " + std::to_string(real_options.speed);
+    }
+    if (real_options.base_kp_xy > 0.0) {
+        command += " --real-base-kp-xy " + std::to_string(real_options.base_kp_xy);
+    }
+    if (real_options.base_kp_yaw > 0.0) {
+        command += " --real-base-kp-yaw " + std::to_string(real_options.base_kp_yaw);
+    }
+    if (real_options.base_max_speed > 0.0) {
+        command += " --real-base-max-speed "
+            + std::to_string(real_options.base_max_speed);
+    }
+    if (real_options.base_max_yaw_rate > 0.0) {
+        command += " --real-base-max-yaw-rate "
+            + std::to_string(real_options.base_max_yaw_rate);
+    }
+    if (real_options.steer_rate_limit > 0.0) {
+        command += " --real-steer-rate-limit "
+            + std::to_string(real_options.steer_rate_limit);
+    }
+    if (real_options.drive_accel_limit > 0.0) {
+        command += " --real-drive-accel-limit "
+            + std::to_string(real_options.drive_accel_limit);
+    }
+    if (!real_options.payload_mode.empty()) {
+        command += " --real-payload-mode "
+            + shell_quote(real_options.payload_mode);
+    }
+
+    std::cout.flush();
+    std::cerr.flush();
+    const int status = std::system(command.c_str());
+    std::error_code remove_error;
+    std::filesystem::remove(trajectory_path, remove_error);
+    if (status != 0) {
+        throw std::runtime_error("MuJoCo real rack visualizer exited with an error");
     }
 }
 
@@ -458,6 +621,8 @@ int run_planner(
     Environment<float> &env,
     AORRTC_settings &settings,
     bool visualize,
+    bool real_dynamics,
+    const RealDynamicsOptions &real_options,
     bool print_path,
      bool plot,
     const std::string &robot_name,
@@ -468,6 +633,20 @@ int run_planner(
     int runs
 ) {
     using Configuration = typename Robot::Configuration;
+    if constexpr (std::is_same_v<Robot, robots::FfwSg2Mobility>) {
+        ffw_sg2_attached_object_collision::apply_from_problem(
+            data,
+            settings
+        );
+    } else {
+        settings.ffw_sg2_attached_object_collision = {};
+        if (data.contains("attached_object_collision")) {
+            throw std::invalid_argument(
+                "attached_object_collision is supported only for ffw_sg2_mobility"
+            );
+        }
+    }
+
     Configuration start = data["start"];
     std::vector<Configuration> goals = data["goals"];
     json saved_results = json::array();
@@ -664,14 +843,47 @@ int run_planner(
                 "arm_r_joint5", "arm_r_joint6", "arm_r_joint7"
             });
         } else if constexpr (std::is_same_v<Robot, robots::FfwSg2Mobility>) {
-            visualize_ffw_sg2_path(visualization_result, start, {
+            const auto &attached_object =
+                settings.ffw_sg2_attached_object_collision;
+            const std::array<float, 3> attached_object_frame_offset = {
+                attached_object.enabled ? attached_object.world_offset[0] : 0.1f,
+                attached_object.enabled ? attached_object.world_offset[1] : 0.0f,
+                attached_object.enabled ? attached_object.world_offset[2] : 0.0f,
+            };
+            const std::vector<std::string> joint_names = {
                 "base_x", "base_y", "base_yaw",
                 "lift_joint",
                 "arm_l_joint1", "arm_l_joint2", "arm_l_joint3", "arm_l_joint4",
                 "arm_l_joint5", "arm_l_joint6", "arm_l_joint7",
                 "arm_r_joint1", "arm_r_joint2", "arm_r_joint3", "arm_r_joint4",
                 "arm_r_joint5", "arm_r_joint6", "arm_r_joint7"
-            });
+            };
+            if (real_dynamics) {
+                const float object_mass_kg =
+                    settings.ffw_sg2_object_mass_kg > 0.0f
+                        ? settings.ffw_sg2_object_mass_kg
+                        : 3.0f;
+                const float support_margin_m =
+                    settings.ffw_sg2_support_margin_m > 0.0f
+                        ? settings.ffw_sg2_support_margin_m
+                        : 0.05f;
+                visualize_ffw_sg2_rack_real_path(
+                    visualization_result,
+                    start,
+                    joint_names,
+                    attached_object_frame_offset,
+                    object_mass_kg,
+                    support_margin_m,
+                    real_options
+                );
+            } else {
+                visualize_ffw_sg2_path(
+                    visualization_result,
+                    start,
+                    joint_names,
+                    attached_object_frame_offset
+                );
+            }
         } else if constexpr (std::is_same_v<Robot, robots::FfwSg2Single>) {
             visualize_ffw_sg2_path(visualization_result, start, {
                 "lift_joint",
@@ -694,6 +906,7 @@ int main(int argc, char* argv[]) {
     std::string name = "cage";
     int problem_idx = 1;
     bool visualize = false;
+    bool real_dynamics = false;
     bool plot = false;
     bool trace_trees = false;
     bool rigid_orientation = false;
@@ -702,21 +915,34 @@ int main(int argc, char* argv[]) {
     bool aorrtc = false;
     bool enable_com_constraint = false;
     bool object_mass_option_provided = false;
+    bool support_margin_option_provided = false;
     bool time_option_provided = false;
     float object_mass_kg = 0.0f;
+    float support_margin_m = 0.0f;
     double time_limit_sec = 5.0;
     int runs = 1;
+    int max_concon_nodes = 4;
     std::string save_json_path;
     TraceExportOptions trace_options;
+    RealDynamicsOptions real_options;
 
     if (argc < 4) {
         std::cout
             << "Usage: ./single_mbm <robot_name> <problem_name> <problem_idx> "
-            << "[--visualize] [--save-json PATH] [--run N|--runs N] "
+            << "[--visualize] [--real] [--save-json PATH] [--run N|--runs N] "
             << "[--aorrtc] [--time SECONDS] [--plot] "
-            << "[--com] [--object-mass-kg KG] "
+            << "[--com] [--object-mass-kg KG] [--support-margin M] "
+            << "[--real-speed SPEED] [--real-settle-steps N] "
+            << "[--real-initial-settle-steps N] "
+            << "[--real-payload-mode rigid|equality] "
+            << "[--real-base-kp-xy K] [--real-base-kp-yaw K] "
+            << "[--real-base-max-speed MPS] "
+            << "[--real-base-max-yaw-rate RPS] "
+            << "[--real-steer-rate-limit RPS] "
+            << "[--real-drive-accel-limit RPS2] "
             << "[--rigid-orientation] "
             << "[--no-waypoint-smoothing] "
+            << "[--max-concon-nodes N] "
             << "[--trace-mode auto|path|tree] "
             << "[--html-trace-mode path|tree] "
             << "[--no-print-path] "
@@ -726,16 +952,65 @@ int main(int argc, char* argv[]) {
     }
     robot_name = argv[1];
     name = argv[2];
+    auto parse_nonnegative_int = [](const std::string &option, const std::string &value) {
+        std::size_t consumed = 0;
+        const int parsed = std::stoi(value, &consumed);
+        if (consumed != value.size() || parsed < 0) {
+            throw std::invalid_argument(
+                option + " must be an integer greater than or equal to 0"
+            );
+        }
+        return parsed;
+    };
+    auto parse_positive_double = [](const std::string &option, const std::string &value) {
+        std::size_t consumed = 0;
+        const double parsed = std::stod(value, &consumed);
+        if (consumed != value.size()
+            || !std::isfinite(parsed)
+            || parsed <= 0.0) {
+            throw std::invalid_argument(
+                option + " must be a finite number greater than 0"
+            );
+        }
+        return parsed;
+    };
+    auto parse_nonnegative_double = [](const std::string &option, const std::string &value) {
+        std::size_t consumed = 0;
+        const double parsed = std::stod(value, &consumed);
+        if (consumed != value.size()
+            || !std::isfinite(parsed)
+            || parsed < 0.0) {
+            throw std::invalid_argument(
+                option + " must be a finite number greater than or equal to 0"
+            );
+        }
+        return parsed;
+    };
     try {
         problem_idx = std::stoi(argv[3]);
         for (int index = 4; index < argc; index++) {
             const std::string argument = argv[index];
             if (argument == "--visualize") {
                 visualize = true;
+            } else if (argument == "--real") {
+                real_dynamics = true;
             } else if (argument == "--save-json" && index + 1 < argc) {
                 save_json_path = argv[++index];
             } else if ((argument == "--run" || argument == "--runs") && index + 1 < argc) {
                 runs = std::max(1, std::stoi(argv[++index]));
+            } else if (
+                (
+                    argument == "--max-concon-nodes" ||
+                    argument == "--concon-nodes"
+                ) &&
+                index + 1 < argc
+            ) {
+                max_concon_nodes = std::stoi(argv[++index]);
+                if (max_concon_nodes <= 0) {
+                    throw std::invalid_argument(
+                        "--max-concon-nodes must be positive"
+                    );
+                }
             } else if (argument == "--plot") {
                 plot = true;
             } else if (argument == "--aorrtc") {
@@ -763,6 +1038,17 @@ int main(int argc, char* argv[]) {
                 }
                 object_mass_kg = static_cast<float>(parsed_mass);
                 object_mass_option_provided = true;
+            } else if (
+                (
+                    argument == "--support-margin" ||
+                    argument == "--support-margin-m"
+                ) &&
+                index + 1 < argc
+            ) {
+                support_margin_m = static_cast<float>(
+                    parse_nonnegative_double(argument, argv[++index])
+                );
+                support_margin_option_provided = true;
             } else if (argument == "--time" && index + 1 < argc) {
                 const std::string value = argv[++index];
                 std::size_t consumed = 0;
@@ -773,6 +1059,59 @@ int main(int argc, char* argv[]) {
                     || time_limit_sec <= 0.0) {
                     throw std::invalid_argument(
                         "--time must be a finite number greater than 0"
+                    );
+                }
+            } else if (argument == "--real-settle-steps" && index + 1 < argc) {
+                real_options.settle_steps = parse_nonnegative_int(
+                    argument,
+                    argv[++index]
+                );
+            } else if (argument == "--real-initial-settle-steps" && index + 1 < argc) {
+                real_options.initial_settle_steps = parse_nonnegative_int(
+                    argument,
+                    argv[++index]
+                );
+            } else if (argument == "--real-speed" && index + 1 < argc) {
+                real_options.speed = parse_positive_double(
+                    argument,
+                    argv[++index]
+                );
+            } else if (argument == "--real-base-kp-xy" && index + 1 < argc) {
+                real_options.base_kp_xy = parse_positive_double(
+                    argument,
+                    argv[++index]
+                );
+            } else if (argument == "--real-base-kp-yaw" && index + 1 < argc) {
+                real_options.base_kp_yaw = parse_positive_double(
+                    argument,
+                    argv[++index]
+                );
+            } else if (argument == "--real-base-max-speed" && index + 1 < argc) {
+                real_options.base_max_speed = parse_positive_double(
+                    argument,
+                    argv[++index]
+                );
+            } else if (argument == "--real-base-max-yaw-rate" && index + 1 < argc) {
+                real_options.base_max_yaw_rate = parse_positive_double(
+                    argument,
+                    argv[++index]
+                );
+            } else if (argument == "--real-steer-rate-limit" && index + 1 < argc) {
+                real_options.steer_rate_limit = parse_positive_double(
+                    argument,
+                    argv[++index]
+                );
+            } else if (argument == "--real-drive-accel-limit" && index + 1 < argc) {
+                real_options.drive_accel_limit = parse_positive_double(
+                    argument,
+                    argv[++index]
+                );
+            } else if (argument == "--real-payload-mode" && index + 1 < argc) {
+                real_options.payload_mode = argv[++index];
+                if (real_options.payload_mode != "rigid"
+                    && real_options.payload_mode != "equality") {
+                    throw std::invalid_argument(
+                        "--real-payload-mode must be one of: rigid, equality"
                     );
                 }
             } else if (argument == "--trace-trees") {
@@ -839,6 +1178,21 @@ int main(int argc, char* argv[]) {
                 "--plot requires --aorrtc"
             );
         }
+        if (real_dynamics && !visualize) {
+            throw std::invalid_argument(
+                "--real currently applies only to --visualize"
+            );
+        }
+        if (real_dynamics && robot_name != "ffw_sg2_mobility") {
+            throw std::invalid_argument(
+                "--real is supported only for ffw_sg2_mobility"
+            );
+        }
+        if (!real_dynamics && real_options.provided()) {
+            throw std::invalid_argument(
+                "real dynamics tuning options require --real"
+            );
+        }
 
         if (
             enable_com_constraint &&
@@ -856,9 +1210,27 @@ int main(int argc, char* argv[]) {
                 "--object-mass-kg is supported only for ffw_sg2_mobility"
             );
         }
-        if (object_mass_option_provided && !enable_com_constraint) {
+        if (object_mass_option_provided && !enable_com_constraint && !real_dynamics) {
             throw std::invalid_argument(
-                "--object-mass-kg requires --com"
+                "--object-mass-kg requires --com or --real"
+            );
+        }
+        if (
+            support_margin_option_provided &&
+            robot_name != "ffw_sg2_mobility"
+        ) {
+            throw std::invalid_argument(
+                "--support-margin is supported only for ffw_sg2_mobility"
+            );
+        }
+        if (support_margin_option_provided && !enable_com_constraint && !real_dynamics) {
+            throw std::invalid_argument(
+                "--support-margin requires --com or --real"
+            );
+        }
+        if (real_dynamics && object_mass_option_provided && object_mass_kg <= 0.0f) {
+            throw std::invalid_argument(
+                "--object-mass-kg must be greater than 0 with --real"
             );
         }
 
@@ -933,7 +1305,7 @@ int main(int argc, char* argv[]) {
     settings.dd_min_radius = 1.0;
     settings.dd_alpha = 0.0001;
     settings.em_threshold = 0.1f;
-    settings.max_concon_nodes = 4;
+    settings.max_concon_nodes = max_concon_nodes;
     settings.max_connect_concon_chunks = 16;
 
     if (data.contains("constraints") && data["constraints"].contains("com")) {
@@ -954,6 +1326,15 @@ int main(int argc, char* argv[]) {
     if (object_mass_option_provided) {
         settings.ffw_sg2_object_mass_kg = object_mass_kg;
     }
+    if (support_margin_option_provided) {
+        settings.ffw_sg2_support_margin_m = support_margin_m;
+    } else if (
+        enable_com_constraint &&
+        robot_name == "ffw_sg2_mobility" &&
+        settings.ffw_sg2_support_margin_m <= 0.0f
+    ) {
+        settings.ffw_sg2_support_margin_m = FFW_SG2_DEFAULT_SUPPORT_MARGIN_M;
+    }
 
     try {
         if (robot_name == "g1") {
@@ -961,25 +1342,25 @@ int main(int argc, char* argv[]) {
             settings.g1_constraints = g1_constraint_parameters_from_problem(data);
         }
         if (robot_name == "fetch") {
-            return run_planner<robots::Fetch>(data, env, settings, visualize, print_path, plot,
+            return run_planner<robots::Fetch>(data, env, settings, visualize, real_dynamics, real_options, print_path, plot,
                 robot_name, name, problem_idx, save_json_path, trace_options, runs);
         } else if (robot_name == "panda") {
-            return run_planner<robots::Panda>(data, env, settings, visualize, print_path, plot,
+            return run_planner<robots::Panda>(data, env, settings, visualize, real_dynamics, real_options, print_path, plot,
                 robot_name, name, problem_idx, save_json_path, trace_options, runs);
         } else if (robot_name == "baxter") {
-            return run_planner<robots::Baxter>(data, env, settings, visualize, print_path, plot,
+            return run_planner<robots::Baxter>(data, env, settings, visualize, real_dynamics, real_options, print_path, plot,
                 robot_name, name, problem_idx, save_json_path, trace_options, runs);
         } else if (robot_name == "ffw_sg2") {
-            return run_planner<robots::FfwSg2>(data, env, settings, visualize, print_path, plot,
+            return run_planner<robots::FfwSg2>(data, env, settings, visualize, real_dynamics, real_options, print_path, plot,
                 robot_name, name, problem_idx, save_json_path, trace_options, runs);
         } else if (robot_name == "ffw_sg2_mobility") {
-            return run_planner<robots::FfwSg2Mobility>(data, env, settings, visualize, print_path, plot,
+            return run_planner<robots::FfwSg2Mobility>(data, env, settings, visualize, real_dynamics, real_options, print_path, plot,
                 robot_name, name, problem_idx, save_json_path, trace_options, runs);
         } else if (robot_name == "ffw_sg2_single") {
-            return run_planner<robots::FfwSg2Single>(data, env, settings, visualize, print_path, plot,
+            return run_planner<robots::FfwSg2Single>(data, env, settings, visualize, real_dynamics, real_options, print_path, plot,
                 robot_name, name, problem_idx, save_json_path, trace_options, runs);
         } else if (robot_name == "g1") {
-            return run_planner<robots::G1>(data, env, settings, visualize, print_path, plot,
+            return run_planner<robots::G1>(data, env, settings, visualize, real_dynamics, real_options, print_path, plot,
                 robot_name, name, problem_idx, save_json_path, trace_options, runs);
         } else {
             std::cerr << "Unsupported robot type: " << robot_name << "\n";

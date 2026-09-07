@@ -1324,7 +1324,8 @@ namespace ppln::collision {
         float smoothness_weight,
         bool use_smoothness,
         float max_step,
-        int tid
+        int tid,
+        bool return_when_success = true
     ) {
         // Four CUDA threads form one waypoint group.  The group mapping is
         // waypoint = tid / 4 + 1 and lane = tid % 4.  To preserve the exact
@@ -1348,7 +1349,7 @@ namespace ppln::collision {
         __syncthreads();
 
         for (int iter = 0; iter < max_iters; iter++) {
-            if (waypoint <= granularity) {
+            if (projection_success[0] == 0 && waypoint <= granularity) {
                 const int current_prog = projection_prog[0];
                 if (waypoint > current_prog) {
                     if (lane == 0) {
@@ -1457,7 +1458,7 @@ namespace ppln::collision {
             }
             __syncthreads();
 
-            if (projection_success[0] != 0) {
+            if (projection_success[0] != 0 && return_when_success) {
                 return true;
             }
 
@@ -1473,7 +1474,7 @@ namespace ppln::collision {
             __syncthreads();
         }
 
-        return false;
+        return projection_success[0] != 0;
     }
 
 } // namespace ppln::collision

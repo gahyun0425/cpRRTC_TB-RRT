@@ -4,6 +4,7 @@
 #include <chrono>
 #include <fstream>
 #include <iostream>
+#include <stdexcept>
 #include <type_traits>
 
 #include <cuda_runtime.h>
@@ -12,6 +13,7 @@
 #include "src/collision/factory.hh"
 #include "src/planning/Planners.hh"
 #include "src/planning/pRRTC_settings.hh"
+#include "scripts/ffw_sg2_attached_object_collision.hh"
 #include "scripts/g1_problem.hh"
 
 using json = nlohmann::json;
@@ -168,6 +170,19 @@ void run_planning(
             if constexpr (std::is_same_v<Robot, robots::G1>) {
                 settings.g1_constraints =
                     g1_constraint_parameters_from_problem(data);
+            }
+            if constexpr (std::is_same_v<Robot, robots::FfwSg2Mobility>) {
+                ffw_sg2_attached_object_collision::apply_from_problem(
+                    data,
+                    settings
+                );
+            } else {
+                settings.ffw_sg2_attached_object_collision = {};
+                if (data.contains("attached_object_collision")) {
+                    throw std::invalid_argument(
+                        "attached_object_collision is supported only for ffw_sg2_mobility"
+                    );
+                }
             }
 
             for (int run_index = 1; run_index <= runs; run_index++) {

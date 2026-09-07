@@ -409,7 +409,8 @@ __device__ __forceinline__ bool ffw_sg2_mobility_project_motion(
     float smoothness_weight,
     bool use_smoothness,
     float max_step,
-    int tid
+    int tid,
+    bool return_when_success = true
 ) {
     const int waypoint = tid / 4 + 1;
     const int lane = tid % 4;
@@ -428,7 +429,7 @@ __device__ __forceinline__ bool ffw_sg2_mobility_project_motion(
     __syncthreads();
 
     for (int iter = 0; iter < max_iters; ++iter) {
-        if (waypoint <= granularity) {
+        if (projection_success[0] == 0 && waypoint <= granularity) {
             const int current_prog = projection_prog[0];
             if (waypoint > current_prog) {
                 if (lane == 0) {
@@ -552,7 +553,7 @@ __device__ __forceinline__ bool ffw_sg2_mobility_project_motion(
         }
         __syncthreads();
 
-        if (projection_success[0] != 0) {
+        if (projection_success[0] != 0 && return_when_success) {
             return true;
         }
 
@@ -572,7 +573,7 @@ __device__ __forceinline__ bool ffw_sg2_mobility_project_motion(
         __syncthreads();
     }
 
-    return false;
+    return projection_success[0] != 0;
 }
 
 } // namespace ppln::collision

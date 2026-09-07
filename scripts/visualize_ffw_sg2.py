@@ -41,6 +41,12 @@ GRIPPER_SITE_NAMES = (
     "gripper_l_rh_p12_rn_base",
     "gripper_r_rh_p12_rn_base",
 )
+GRIPPER_JOINT_NAMES = tuple(
+    f"gripper_{side}_joint{index}"
+    for side in ("l", "r")
+    for index in range(1, 5)
+)
+ATTACHED_OBJECT_FRAME_OFFSET = (0.1, 0.0, 0.0)
 SINGLE_ARM_PLANNING_JOINTS = (
     "lift_joint",
     "arm_r_joint1",
@@ -81,7 +87,19 @@ def parse_args() -> argparse.Namespace:
     return args
 
 
-def load_trajectory(path: Path) -> tuple[tuple[str, ...], list[list[float]]]:
+def parse_attached_object_frame_offset(document) -> tuple[float, float, float]:
+    value = document.get("attached_object_frame_offset", ATTACHED_OBJECT_FRAME_OFFSET)
+    if not isinstance(value, (list, tuple)) or len(value) != 3:
+        raise ValueError("attached_object_frame_offset must be [x, y, z]")
+    offset = tuple(float(component) for component in value)
+    if not all(math.isfinite(component) for component in offset):
+        raise ValueError("attached_object_frame_offset contains a non-finite value")
+    return offset
+
+
+def load_trajectory(
+    path: Path
+) -> tuple[tuple[str, ...], list[list[float]], tuple[float, float, float]]:
     document = json.loads(path.read_text(encoding="utf-8"))
     joint_names = tuple(document.get("joint_names", ()))
     if joint_names not in SUPPORTED_JOINT_ORDERS:
@@ -111,7 +129,7 @@ def load_trajectory(path: Path) -> tuple[tuple[str, ...], list[list[float]]]:
         for index in range(len(joint_names))
     ) > 1.0e-5:
         raise ValueError("trajectory was not converted to start-to-goal order")
-    return joint_names, normalized
+    return joint_names, normalized, parse_attached_object_frame_offset(document)
 
 
 def resolve_qpos_addresses(mujoco, model, joint_names) -> list[int | None]:
@@ -132,6 +150,25 @@ def resolve_qpos_addresses(mujoco, model, joint_names) -> list[int | None]:
             raise ValueError(f"planning joint is not scalar: {name}")
         addresses.append(int(model.jnt_qposadr[joint_id]))
     return addresses
+
+
+def close_grippers(mujoco, model, data) -> None:
+    for joint_name in GRIPPER_JOINT_NAMES:
+        joint_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, joint_name)
+        if joint_id < 0:
+            raise ValueError(f"MuJoCo model is missing gripper joint: {joint_name}")
+
+        closed_value = float(model.jnt_range[joint_id][1])
+        data.qpos[int(model.jnt_qposadr[joint_id])] = closed_value
+
+        actuator_id = mujoco.mj_name2id(
+            model,
+            mujoco.mjtObj.mjOBJ_ACTUATOR,
+            joint_name,
+        )
+        if actuator_id >= 0:
+            lower, upper = model.actuator_ctrlrange[actuator_id]
+            data.ctrl[actuator_id] = min(max(closed_value, lower), upper)
 
 
 def validate_joint_limits(
@@ -256,14 +293,14 @@ def matrix_to_quat(matrix) -> tuple[float, float, float, float]:
     )
 
 
-def object_quat_from_grippers(data, left_site: int, right_site: int):
+def object_axes_from_grippers(data, left_site: int, right_site: int):
     left_pos = data.site_xpos[left_site]
     right_pos = data.site_xpos[right_site]
     y_axis = normalize(
         tuple(float(left_pos[index] - right_pos[index]) for index in range(3))
     )
     if y_axis is None:
-        return (1.0, 0.0, 0.0, 0.0)
+        return (1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0)
 
     left_z = site_matrix_column(data, left_site, 2)
     right_z = site_matrix_column(data, right_site, 2)
@@ -282,7 +319,7 @@ def object_quat_from_grippers(data, left_site: int, right_site: int):
 
     z_axis = normalize(cross(x_axis, y_axis))
     if z_axis is None:
-        return (1.0, 0.0, 0.0, 0.0)
+        return (1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0)
 
     left_y = site_matrix_column(data, left_site, 1)
     right_y = site_matrix_column(data, right_site, 1)
@@ -293,15 +330,29 @@ def object_quat_from_grippers(data, left_site: int, right_site: int):
         x_axis = tuple(-value for value in x_axis)
         z_axis = tuple(-value for value in z_axis)
 
-    rotation = (
+    return x_axis, y_axis, z_axis
+
+
+def rotation_from_axes(x_axis, y_axis, z_axis):
+    return (
         (x_axis[0], y_axis[0], z_axis[0]),
         (x_axis[1], y_axis[1], z_axis[1]),
         (x_axis[2], y_axis[2], z_axis[2]),
     )
-    return matrix_to_quat(rotation)
 
 
-def place_object_at_gripper_pose(mujoco, model, data, object_qposadr) -> None:
+def object_quat_from_grippers(data, left_site: int, right_site: int):
+    x_axis, y_axis, z_axis = object_axes_from_grippers(data, left_site, right_site)
+    return matrix_to_quat(rotation_from_axes(x_axis, y_axis, z_axis))
+
+
+def place_object_at_gripper_pose(
+    mujoco,
+    model,
+    data,
+    object_qposadr,
+    attached_object_frame_offset,
+) -> None:
     site_ids = [
         mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_SITE, site_name)
         for site_name in GRIPPER_SITE_NAMES
@@ -309,14 +360,22 @@ def place_object_at_gripper_pose(mujoco, model, data, object_qposadr) -> None:
     if min(site_ids) < 0:
         raise ValueError("MuJoCo model is missing gripper sites for object replay")
 
+    x_axis, y_axis, z_axis = object_axes_from_grippers(data, site_ids[0], site_ids[1])
+    frame_offset = attached_object_frame_offset
+    world_offset = tuple(
+        x_axis[axis] * frame_offset[0]
+        + y_axis[axis] * frame_offset[1]
+        + z_axis[axis] * frame_offset[2]
+        for axis in range(3)
+    )
+
     for axis in range(3):
-        data.qpos[object_qposadr + axis] = 0.5 * (
+        center = 0.5 * (
             data.site_xpos[site_ids[0]][axis] + data.site_xpos[site_ids[1]][axis]
         )
-    data.qpos[object_qposadr + 3 : object_qposadr + 7] = object_quat_from_grippers(
-        data,
-        site_ids[0],
-        site_ids[1],
+        data.qpos[object_qposadr + axis] = center + world_offset[axis]
+    data.qpos[object_qposadr + 3 : object_qposadr + 7] = matrix_to_quat(
+        rotation_from_axes(x_axis, y_axis, z_axis)
     )
     mujoco.mj_forward(model, data)
 
@@ -330,6 +389,7 @@ def apply_configuration(
     configuration,
     base_body,
     object_qposadr,
+    attached_object_frame_offset,
 ) -> None:
     for address, value in zip(addresses, configuration):
         if address is None:
@@ -353,9 +413,16 @@ def apply_configuration(
             math.sin(half_yaw),
         )
     data.qvel[:] = 0.0
+    close_grippers(mujoco, model, data)
     mujoco.mj_forward(model, data)
     if object_qposadr is not None:
-        place_object_at_gripper_pose(mujoco, model, data, object_qposadr)
+        place_object_at_gripper_pose(
+            mujoco,
+            model,
+            data,
+            object_qposadr,
+            attached_object_frame_offset,
+        )
 
 
 def interpolated_frames(waypoints, fps: float, speed: float):
@@ -371,7 +438,14 @@ def interpolated_frames(waypoints, fps: float, speed: float):
             ]
 
 
-def replay(model_path: Path, joint_names, waypoints, fps: float, speed: float) -> None:
+def replay(
+    model_path: Path,
+    joint_names,
+    waypoints,
+    attached_object_frame_offset,
+    fps: float,
+    speed: float,
+) -> None:
     try:
         import mujoco
         import mujoco.viewer
@@ -399,6 +473,7 @@ def replay(model_path: Path, joint_names, waypoints, fps: float, speed: float) -
         waypoints[0],
         base_body,
         object_qposadr,
+        attached_object_frame_offset,
     )
 
     print("MuJoCo viewer: start -> goal 경로를 반복 재생합니다.")
@@ -421,6 +496,7 @@ def replay(model_path: Path, joint_names, waypoints, fps: float, speed: float) -
                 waypoints[0],
                 base_body,
                 object_qposadr,
+                attached_object_frame_offset,
             )
             viewer.sync()
             time.sleep(0.75)
@@ -437,6 +513,7 @@ def replay(model_path: Path, joint_names, waypoints, fps: float, speed: float) -
                     configuration,
                     base_body,
                     object_qposadr,
+                    attached_object_frame_offset,
                 )
                 viewer.sync()
                 deadline += frame_period
@@ -453,7 +530,9 @@ def main() -> int:
     if not trajectory_path.is_file():
         raise FileNotFoundError(f"trajectory not found: {trajectory_path}")
 
-    joint_names, waypoints = load_trajectory(trajectory_path)
+    joint_names, waypoints, attached_object_frame_offset = load_trajectory(
+        trajectory_path
+    )
     validate_only = args.validate_only or os.environ.get(
         "PRRTC_MUJOCO_VALIDATE_ONLY"
     ) == "1"
@@ -475,6 +554,7 @@ def main() -> int:
             waypoints[0],
             base_body,
             object_qposadr,
+            attached_object_frame_offset,
         )
         print(
             f"validated {len(waypoints)} waypoints, {len(joint_names)} joints, "
@@ -482,7 +562,14 @@ def main() -> int:
         )
         return 0
 
-    replay(model_path, joint_names, waypoints, args.fps, args.speed)
+    replay(
+        model_path,
+        joint_names,
+        waypoints,
+        attached_object_frame_offset,
+        args.fps,
+        args.speed,
+    )
     return 0
 
 

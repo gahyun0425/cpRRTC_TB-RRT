@@ -2,6 +2,25 @@
 
 #include "G1ConstraintParameters.hh"
 
+constexpr int FFW_SG2_ATTACHED_OBJECT_MAX_SPHERES = 256;
+constexpr int FFW_SG2_ATTACHED_OBJECT_MAX_IGNORED_ROBOT_SPHERES = 96;
+constexpr int FFW_SG2_ATTACHED_OBJECT_MAX_IGNORED_ROBOT_APPROX_SPHERES = 32;
+
+struct FfwSg2AttachedObjectCollisionSpec {
+    bool enabled = false;
+    int sphere_count = 0;
+    float world_offset[3] = {0.0f, 0.0f, 0.0f};
+    float spheres[FFW_SG2_ATTACHED_OBJECT_MAX_SPHERES][4] = {};
+    int ignored_robot_sphere_count = 0;
+    int ignored_robot_spheres[
+        FFW_SG2_ATTACHED_OBJECT_MAX_IGNORED_ROBOT_SPHERES
+    ] = {};
+    int ignored_robot_approx_sphere_count = 0;
+    int ignored_robot_approx_spheres[
+        FFW_SG2_ATTACHED_OBJECT_MAX_IGNORED_ROBOT_APPROX_SPHERES
+    ] = {};
+};
+
 struct pRRTC_settings {
     int max_samples = 1000000;
     // Tree 하나가 만들 수 있는 최대 Tangent Space 개수
@@ -17,6 +36,7 @@ struct pRRTC_settings {
     bool ffw_sg2_enable_com_constraint = false;
     float ffw_sg2_support_margin_m = 0.0f;
     float ffw_sg2_object_mass_kg = 0.0f;
+    FfwSg2AttachedObjectCollisionSpec ffw_sg2_attached_object_collision{};
 
     int balance = 1;
     float tree_ratio = 1.0;

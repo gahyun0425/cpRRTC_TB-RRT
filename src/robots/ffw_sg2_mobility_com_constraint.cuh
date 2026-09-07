@@ -9,6 +9,9 @@ namespace ppln::collision {
 #define FFW_SG2_MOBILITY_COM_CONSTRAINT_DIM \
     (FFW_SG2_MOBILITY_COM_EQUALITY_DIM + FFW_SG2_MOBILITY_COM_INEQUALITY_DIM)
 #define FFW_SG2_MOBILITY_COM_MAX_ACTIVE_JOINTS 8
+#define FFW_SG2_MOBILITY_ATTACHED_OBJECT_FRAME_OFFSET_X 0.1f
+#define FFW_SG2_MOBILITY_ATTACHED_OBJECT_FRAME_OFFSET_Y 0.0f
+#define FFW_SG2_MOBILITY_ATTACHED_OBJECT_FRAME_OFFSET_Z 0.0f
 
 __device__ __forceinline__ void ffw_sg2_mobility_com_transform_point(
     const float T[16],
@@ -55,6 +58,104 @@ __device__ __forceinline__ void ffw_sg2_mobility_com_accumulate_link(
     weighted[1] += mass * point[1];
     weighted[2] += mass * point[2];
     total_mass += mass;
+}
+
+__device__ __forceinline__ void ffw_sg2_mobility_com_attached_object_offset_base(
+    const float left_p[3],
+    const float right_p[3],
+    const float left_R[9],
+    const float right_R[9],
+    float offset[3]
+) {
+    const FfwSg2AttachedObjectCollisionSpec &spec =
+        ffw_sg2_mobility_attached_object_collision;
+    const float frame_offset[3] = {
+        spec.enabled ?
+            spec.world_offset[0] :
+            FFW_SG2_MOBILITY_ATTACHED_OBJECT_FRAME_OFFSET_X,
+        spec.enabled ?
+            spec.world_offset[1] :
+            FFW_SG2_MOBILITY_ATTACHED_OBJECT_FRAME_OFFSET_Y,
+        spec.enabled ?
+            spec.world_offset[2] :
+            FFW_SG2_MOBILITY_ATTACHED_OBJECT_FRAME_OFFSET_Z
+    };
+
+    float y_axis[3] = {
+        left_p[0] - right_p[0],
+        left_p[1] - right_p[1],
+        left_p[2] - right_p[2]
+    };
+    if (!ffw_sg2_mobility_normalize3(y_axis)) {
+        offset[0] = frame_offset[0];
+        offset[1] = frame_offset[1];
+        offset[2] = frame_offset[2];
+        return;
+    }
+
+    float x_axis[3] = {
+        left_R[2] + right_R[2],
+        left_R[5] + right_R[5],
+        left_R[8] + right_R[8]
+    };
+    if (!ffw_sg2_mobility_normalize3(x_axis)) {
+        x_axis[0] = 1.0f;
+        x_axis[1] = 0.0f;
+        x_axis[2] = 0.0f;
+    }
+
+    const float projection = ffw_sg2_mobility_dot3(x_axis, y_axis);
+    x_axis[0] -= projection * y_axis[0];
+    x_axis[1] -= projection * y_axis[1];
+    x_axis[2] -= projection * y_axis[2];
+    if (!ffw_sg2_mobility_normalize3(x_axis)) {
+        const float base_z[3] = {0.0f, 0.0f, 1.0f};
+        ffw_sg2_mobility_cross3(y_axis, base_z, x_axis);
+    }
+    if (!ffw_sg2_mobility_normalize3(x_axis)) {
+        x_axis[0] = 1.0f;
+        x_axis[1] = 0.0f;
+        x_axis[2] = 0.0f;
+    }
+
+    float z_axis[3];
+    ffw_sg2_mobility_cross3(x_axis, y_axis, z_axis);
+    if (!ffw_sg2_mobility_normalize3(z_axis)) {
+        offset[0] = frame_offset[0];
+        offset[1] = frame_offset[1];
+        offset[2] = frame_offset[2];
+        return;
+    }
+
+    float z_hint[3] = {
+        left_R[1] - right_R[1],
+        left_R[4] - right_R[4],
+        left_R[7] - right_R[7]
+    };
+    if (
+        ffw_sg2_mobility_normalize3(z_hint) &&
+        ffw_sg2_mobility_dot3(z_axis, z_hint) < 0.0f
+    ) {
+        x_axis[0] = -x_axis[0];
+        x_axis[1] = -x_axis[1];
+        x_axis[2] = -x_axis[2];
+        z_axis[0] = -z_axis[0];
+        z_axis[1] = -z_axis[1];
+        z_axis[2] = -z_axis[2];
+    }
+
+    offset[0] =
+        x_axis[0] * frame_offset[0] +
+        y_axis[0] * frame_offset[1] +
+        z_axis[0] * frame_offset[2];
+    offset[1] =
+        x_axis[1] * frame_offset[0] +
+        y_axis[1] * frame_offset[1] +
+        z_axis[1] * frame_offset[2];
+    offset[2] =
+        x_axis[2] * frame_offset[0] +
+        y_axis[2] * frame_offset[1] +
+        z_axis[2] * frame_offset[2];
 }
 
 __device__ __forceinline__ void ffw_sg2_mobility_com_apply_fixed_rpy(
@@ -564,9 +665,18 @@ __device__ __forceinline__ void ffw_sg2_mobility_com_object_proxy_base(
     ffw_sg2_fk_left(arm_q, left_p, left_R);
     ffw_sg2_fk_right(arm_q, right_p, right_R);
 
-    object_com[0] = 0.5f * (left_p[0] + right_p[0]);
-    object_com[1] = 0.5f * (left_p[1] + right_p[1]);
-    object_com[2] = 0.5f * (left_p[2] + right_p[2]);
+    float object_offset[3];
+    ffw_sg2_mobility_com_attached_object_offset_base(
+        left_p,
+        right_p,
+        left_R,
+        right_R,
+        object_offset
+    );
+
+    object_com[0] = 0.5f * (left_p[0] + right_p[0]) + object_offset[0];
+    object_com[1] = 0.5f * (left_p[1] + right_p[1]) + object_offset[1];
+    object_com[2] = 0.5f * (left_p[2] + right_p[2]) + object_offset[2];
 }
 
 __device__ __forceinline__ void ffw_sg2_mobility_com_total_com_base(
@@ -1565,29 +1675,30 @@ __device__ __forceinline__ void ffw_sg2_mobility_com_object_proxy_jacobian_base(
     const float q[FFW_SG2_MOBILITY_DIM],
     float J_object_com[3 * FFW_SG2_MOBILITY_DIM]
 ) {
-    const float *arm_q = q + FFW_SG2_MOBILITY_BASE_DOF;
-
     ffw_sg2_mobility_com_zero_jacobian(J_object_com);
 
-    float left_p[3], left_R[9], J_left[6 * FFW_SG2_DIM];
-    float right_p[3], right_R[9], J_right[6 * FFW_SG2_DIM];
-    ffw_sg2_fk_jacobian_left(arm_q, left_p, left_R, J_left);
-    ffw_sg2_fk_jacobian_right(arm_q, right_p, right_R, J_right);
+    constexpr float eps = 1.0e-4f;
+    for (int col = FFW_SG2_MOBILITY_BASE_DOF; col < FFW_SG2_MOBILITY_DIM; ++col) {
+        float q_plus[FFW_SG2_MOBILITY_DIM];
+        float q_minus[FFW_SG2_MOBILITY_DIM];
+        for (int joint = 0; joint < FFW_SG2_MOBILITY_DIM; ++joint) {
+            q_plus[joint] = q[joint];
+            q_minus[joint] = q[joint];
+        }
+        q_plus[col] += eps;
+        q_minus[col] -= eps;
 
-    for (int arm_col = 0; arm_col < FFW_SG2_DIM; ++arm_col) {
-        const int col = FFW_SG2_MOBILITY_BASE_DOF + arm_col;
+        float object_plus[3], object_minus[3];
+        ffw_sg2_mobility_com_object_proxy_base(q_plus, object_plus);
+        ffw_sg2_mobility_com_object_proxy_base(q_minus, object_minus);
+
+        const float inv_step = 0.5f / eps;
         J_object_com[0 * FFW_SG2_MOBILITY_DIM + col] =
-            0.5f *
-            (J_left[0 * FFW_SG2_DIM + arm_col] +
-             J_right[0 * FFW_SG2_DIM + arm_col]);
+            (object_plus[0] - object_minus[0]) * inv_step;
         J_object_com[1 * FFW_SG2_MOBILITY_DIM + col] =
-            0.5f *
-            (J_left[1 * FFW_SG2_DIM + arm_col] +
-             J_right[1 * FFW_SG2_DIM + arm_col]);
+            (object_plus[1] - object_minus[1]) * inv_step;
         J_object_com[2 * FFW_SG2_MOBILITY_DIM + col] =
-            0.5f *
-            (J_left[2 * FFW_SG2_DIM + arm_col] +
-             J_right[2 * FFW_SG2_DIM + arm_col]);
+            (object_plus[2] - object_minus[2]) * inv_step;
     }
 }
 
@@ -2015,7 +2126,8 @@ __device__ __forceinline__ bool ffw_sg2_mobility_com_project_motion(
     float smoothness_weight,
     bool use_smoothness,
     float max_step,
-    int tid
+    int tid,
+    bool return_when_success = true
 ) {
     const int waypoint = tid / 4 + 1;
     const int lane = tid % 4;
@@ -2034,7 +2146,7 @@ __device__ __forceinline__ bool ffw_sg2_mobility_com_project_motion(
     __syncthreads();
 
     for (int iter = 0; iter < max_iters; ++iter) {
-        if (waypoint <= granularity) {
+        if (projection_success[0] == 0 && waypoint <= granularity) {
             const int current_prog = projection_prog[0];
             if (waypoint > current_prog) {
                 if (lane == 0) {
@@ -2160,7 +2272,7 @@ __device__ __forceinline__ bool ffw_sg2_mobility_com_project_motion(
         }
         __syncthreads();
 
-        if (projection_success[0] != 0) {
+        if (projection_success[0] != 0 && return_when_success) {
             return true;
         }
 
@@ -2180,7 +2292,7 @@ __device__ __forceinline__ bool ffw_sg2_mobility_com_project_motion(
         __syncthreads();
     }
 
-    return false;
+    return projection_success[0] != 0;
 }
 
 } // namespace ppln::collision

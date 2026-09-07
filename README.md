@@ -108,6 +108,51 @@ planning joints to MuJoCo `qpos` entries by name, reverses pRRTC's returned
 goal-to-start path, and smoothly replays the resulting start-to-goal path. The
 playback repeats until the MuJoCo window is closed.
 
+### FFW-SG2 mobility attached object collision
+
+`ffw_sg2_mobility` problem entries can include `attached_object_collision`.
+The object is represented by sphere proxies in the attached object frame. Its
+frame is reconstructed from the midpoint and orientation of the two gripper
+sites, with `world_offset` interpreted in that attached object frame so it moves
+with the grippers during replay.
+The planner checks these object spheres against world collision geometry and
+against all robot spheres except the contact links.
+The bundled `ffw_sg2_mobility` `tray_lift` problem uses `box_sphere_grid` to
+generate a dense conservative sphere cover of the MuJoCo `object_collision`
+box. The generated spheres are placed at voxel centers, and each radius is the
+voxel half-diagonal plus `radius_padding`, so the sphere union covers the full
+box instead of leaving shell gaps.
+
+Example:
+
+```json
+"attached_object_collision": {
+  "enabled": true,
+  "world_offset": [0.1, 0.0, 0.0],
+  "box_sphere_grid": {
+    "half_extents": [0.12, 0.11, 0.06],
+    "counts": [7, 7, 5],
+    "radius_padding": 0.001
+  },
+  "contact_links": [
+    "gripper_l_rh_p12_rn_base",
+    "gripper_l_rh_p12_rn_r1",
+    "gripper_l_rh_p12_rn_r2",
+    "gripper_l_rh_p12_rn_l1",
+    "gripper_l_rh_p12_rn_l2",
+    "gripper_r_rh_p12_rn_base",
+    "gripper_r_rh_p12_rn_r1",
+    "gripper_r_rh_p12_rn_r2",
+    "gripper_r_rh_p12_rn_l1",
+    "gripper_r_rh_p12_rn_l2"
+  ]
+}
+```
+
+If `contact_links` is omitted, both grippers are used as the default contact
+set. Advanced cases can add `ignored_robot_spheres` or
+`ignored_robot_approx_spheres` with explicit runtime sphere indices.
+
 ### Tree trace HTML
 
 Export the complete bidirectional planning tree to JSON, GraphML, and a

@@ -122,10 +122,20 @@ namespace pRRTC {
     __constant__ pRRTC_settings d_settings;
 
     constexpr int MAX_GRANULARITY = 16;
-    constexpr int MAX_THREADS_PER_BLOCK = 4*MAX_GRANULARITY;
+    constexpr int CONCON_COLLISION_THREADS_PER_EDGE = 4 * MAX_GRANULARITY;
+    constexpr int MAX_PARALLEL_CONCON_EDGES = 5;
+    constexpr int MAX_CONCON_NODE_ANCHORS =
+        MAX_PARALLEL_CONCON_EDGES + 1;
+    constexpr int MAX_THREADS_PER_BLOCK =
+        CONCON_COLLISION_THREADS_PER_EDGE * MAX_PARALLEL_CONCON_EDGES;
 
     // cpRRTC projected motion shared buffer용
     constexpr int MAX_ROBOT_DIM = ppln::robots::G1::dimension;
+    constexpr int CONCON_MOTION_SEGMENT_STRIDE =
+        (MAX_GRANULARITY + 1) * MAX_ROBOT_DIM;
+    constexpr int CONCON_PROJECTION_STATE_STRIDE = MAX_GRANULARITY + 1;
+    constexpr int MAX_CONCON_PROJECTION_STATES =
+        MAX_PARALLEL_CONCON_EDGES * CONCON_PROJECTION_STATE_STRIDE;
     constexpr int FFW_SG2_TANGENT_DIM = 9; // 기본 constraint에 따른 tangent dim 15 - 6 = 9. 최대로 필요한 tangent 차원
     constexpr int MAX_TANGENT_DIM = ppln::collision::G1_TANGENT_DIM;
 
@@ -727,6 +737,310 @@ namespace pRRTC {
     }
 
     template <typename Robot>
+    __device__ __forceinline__ float cprrtc_config_distance_from_volatile(
+        volatile const float *q_a,
+        const float *q_b
+    ) {
+        float result = 0.0f;
+
+        #pragma unroll
+        for (int joint = 0; joint < Robot::dimension; joint++) {
+            const float weight =
+                cprrtc_joint_distance_weight<Robot>(joint);
+            const float weighted_diff =
+                weight * (q_a[joint] - q_b[joint]);
+            result += weighted_diff * weighted_diff;
+        }
+
+        return sqrtf(result);
+    }
+
+    template <typename Robot>
+    __device__ __noinline__ bool cprrtc_project_prebuilt_motion(
+        volatile float *motion_segment,
+        volatile float *motion_segment_next,
+        int waypoint_count,
+        volatile unsigned char *projection_valid,
+        volatile int *projection_prog,
+        volatile unsigned int *projection_success,
+        int tid,
+        bool use_smoothness,
+        bool return_when_success = true
+    ) {
+        if (waypoint_count <= 0) {
+            if (tid == 0) {
+                projection_prog[0] = 0;
+                projection_success[0] = 1;
+                projection_valid[0] = 1;
+            }
+            __syncthreads();
+            return true;
+        }
+
+        if constexpr (std::is_same_v<Robot, robots::FfwSg2>) {
+            return ppln::collision::ffw_sg2_project_motion(
+                motion_segment,
+                motion_segment_next,
+                waypoint_count,
+                d_settings.rigid_orientation,
+                projection_valid,
+                projection_prog,
+                projection_success,
+                d_settings.projection_max_iters,
+                d_settings.projection_alpha,
+                d_settings.projection_damping,
+                d_settings.projection_task_tolerance,
+                d_settings.projection_smoothness_threshold,
+                d_settings.projection_smoothness_weight,
+                use_smoothness,
+                d_settings.projection_max_step,
+                tid,
+                return_when_success
+            );
+        } else if constexpr (std::is_same_v<Robot, robots::FfwSg2Mobility>) {
+            if (d_settings.ffw_sg2_enable_com_constraint) {
+                return ppln::collision::ffw_sg2_mobility_com_project_motion(
+                    motion_segment,
+                    motion_segment_next,
+                    waypoint_count,
+                    d_settings.ffw_sg2_support_margin_m,
+                    d_settings.ffw_sg2_object_mass_kg,
+                    projection_valid,
+                    projection_prog,
+                    projection_success,
+                    d_settings.projection_max_iters,
+                    d_settings.projection_alpha,
+                    d_settings.projection_damping,
+                    d_settings.projection_task_tolerance,
+                    d_settings.projection_smoothness_threshold,
+                    d_settings.projection_smoothness_weight,
+                    use_smoothness,
+                    d_settings.projection_max_step,
+                    tid,
+                    return_when_success
+                );
+            }
+
+            return ppln::collision::ffw_sg2_mobility_project_motion(
+                motion_segment,
+                motion_segment_next,
+                waypoint_count,
+                projection_valid,
+                projection_prog,
+                projection_success,
+                d_settings.projection_max_iters,
+                d_settings.projection_alpha,
+                d_settings.projection_damping,
+                d_settings.projection_task_tolerance,
+                d_settings.projection_smoothness_threshold,
+                d_settings.projection_smoothness_weight,
+                use_smoothness,
+                d_settings.projection_max_step,
+                tid,
+                return_when_success
+            );
+        } else if constexpr (std::is_same_v<Robot, robots::G1>) {
+            return ppln::collision::g1_project_motion(
+                motion_segment,
+                motion_segment_next,
+                waypoint_count,
+                d_settings.g1_constraints,
+                projection_valid,
+                projection_prog,
+                projection_success,
+                d_settings.projection_max_iters,
+                d_settings.projection_alpha,
+                d_settings.beta,
+                d_settings.gamma,
+                d_settings.projection_damping,
+                d_settings.projection_task_tolerance,
+                d_settings.projection_smoothness_threshold,
+                d_settings.projection_smoothness_weight,
+                use_smoothness,
+                d_settings.projection_max_step,
+                tid,
+                return_when_success
+            );
+        } else {
+            if (tid == 0) {
+                projection_prog[0] = waypoint_count;
+                projection_success[0] = 1;
+                projection_valid[0] = 1;
+            }
+            __syncthreads();
+            return true;
+        }
+    }
+
+    template <typename Robot>
+    __device__ __noinline__ bool
+    cprrtc_project_concon_node_anchors(
+        volatile const float *q_start,
+        const float *node_nominal_targets,
+        int edge_count,
+        volatile float *node_motion,
+        volatile float *node_motion_next,
+        volatile unsigned char *projection_valid,
+        volatile int *projection_prog,
+        volatile unsigned int *projection_success,
+        int tid
+    ) {
+        static constexpr auto dim = Robot::dimension;
+
+        static_assert(
+            dim <= MAX_ROBOT_DIM,
+            "Robot dimension exceeds cpRRTC node motion buffer"
+        );
+
+        if (edge_count <= 0) {
+            if (tid == 0) {
+                projection_prog[0] = 0;
+                projection_success[0] = 0;
+                projection_valid[0] = 1;
+            }
+            __syncthreads();
+            return false;
+        }
+
+        const int waypoint = tid / 4 + 1;
+        const int lane = tid % 4;
+
+        if (tid < dim) {
+            node_motion[tid] = q_start[tid];
+        }
+
+        if (waypoint <= edge_count) {
+            for (int joint = lane; joint < dim; joint += 4) {
+                node_motion[waypoint * dim + joint] =
+                    node_nominal_targets[
+                        (waypoint - 1) * MAX_ROBOT_DIM + joint
+                    ];
+            }
+        }
+        __syncthreads();
+
+        return cprrtc_project_prebuilt_motion<Robot>(
+            node_motion,
+            node_motion_next,
+            edge_count,
+            projection_valid,
+            projection_prog,
+            projection_success,
+            tid,
+            false
+        );
+    }
+
+    template <typename Robot>
+    __device__ __noinline__ void
+    cprrtc_project_concon_edge_segments_from_node_anchors(
+        int edge_count,
+        volatile const float *node_anchors,
+        volatile float *edge_motion_segments,
+        volatile float *edge_motion_segment_next,
+        volatile unsigned char *edge_projection_valid,
+        volatile int *edge_projection_prog,
+        volatile unsigned int *edge_projection_success,
+        volatile int *first_projection_failure_edge,
+        int tid
+    ) {
+        static constexpr auto dim = Robot::dimension;
+        const int edge_slot = tid / CONCON_COLLISION_THREADS_PER_EDGE;
+        const int edge_tid =
+            tid - edge_slot * CONCON_COLLISION_THREADS_PER_EDGE;
+
+        if (edge_count <= 0) {
+            if (tid == 0) {
+                first_projection_failure_edge[0] = 0;
+            }
+            __syncthreads();
+            return;
+        }
+
+        const int source_edge_slot =
+            edge_slot < edge_count ? edge_slot : edge_count - 1;
+        volatile float *edge_motion =
+            &edge_motion_segments[edge_slot * CONCON_MOTION_SEGMENT_STRIDE];
+        volatile float *edge_motion_next =
+            &edge_motion_segment_next[
+                edge_slot * CONCON_MOTION_SEGMENT_STRIDE
+            ];
+        volatile unsigned char *edge_valid =
+            &edge_projection_valid[
+                edge_slot * CONCON_PROJECTION_STATE_STRIDE
+            ];
+        volatile int *edge_prog = &edge_projection_prog[edge_slot];
+        volatile unsigned int *edge_success =
+            &edge_projection_success[edge_slot];
+
+        const int edge_segment_values =
+            (d_settings.granularity + 1) * dim;
+        for (
+            int value = edge_tid;
+            value < edge_segment_values;
+            value += CONCON_COLLISION_THREADS_PER_EDGE
+        ) {
+            const int local_waypoint = value / dim;
+            const int joint = value - local_waypoint * dim;
+            const float alpha =
+                static_cast<float>(local_waypoint) /
+                static_cast<float>(d_settings.granularity);
+            const float q0 =
+                node_anchors[source_edge_slot * dim + joint];
+            const float q1 =
+                node_anchors[(source_edge_slot + 1) * dim + joint];
+
+            edge_motion[local_waypoint * dim + joint] =
+                q0 + alpha * (q1 - q0);
+        }
+        __syncthreads();
+
+        const int internal_waypoint_count =
+            d_settings.granularity > 0 ? d_settings.granularity - 1 : 0;
+        cprrtc_project_prebuilt_motion<Robot>(
+            edge_motion,
+            edge_motion_next,
+            internal_waypoint_count,
+            edge_valid,
+            edge_prog,
+            edge_success,
+            edge_tid,
+            d_settings.projection_smoothness,
+            false
+        );
+        __syncthreads();
+
+        if (edge_tid < dim) {
+            edge_motion[edge_tid] =
+                node_anchors[source_edge_slot * dim + edge_tid];
+            edge_motion[
+                d_settings.granularity * dim + edge_tid
+            ] =
+                node_anchors[
+                    (source_edge_slot + 1) * dim + edge_tid
+                ];
+        }
+        __syncthreads();
+
+        if (tid == 0) {
+            first_projection_failure_edge[0] = edge_count;
+        }
+        __syncthreads();
+
+        if (
+            edge_slot < edge_count &&
+            edge_tid == 0 &&
+            edge_success[0] == 0u
+        ) {
+            atomicMin(
+                (int *)first_projection_failure_edge,
+                edge_slot
+            );
+        }
+        __syncthreads();
+    }
+
+    template <typename Robot>
     __device__ __forceinline__ bool cprrtc_store_tangent_basis(
         const float *q,
         float *tree_tangent_bases,
@@ -1096,6 +1410,337 @@ namespace pRRTC {
             );
     }
 
+    template <typename Robot>
+    __device__ __forceinline__ bool cprrtc_attached_object_collision_check_approx(
+        const float *q,
+        volatile float *sphere_pos_approx,
+        ppln::collision::Environment<float> *env,
+        int tid,
+        volatile unsigned int *motion_cc_flag
+    ) {
+        return true;
+    }
+
+    template <>
+    __device__ __forceinline__ bool
+    cprrtc_attached_object_collision_check_approx<ppln::robots::FfwSg2Mobility>(
+        const float *q,
+        volatile float *sphere_pos_approx,
+        ppln::collision::Environment<float> *env,
+        int tid,
+        volatile unsigned int *motion_cc_flag
+    ) {
+        return
+            ppln::collision::ffw_sg2_mobility_attached_object_collision_check_approx(
+                q,
+                sphere_pos_approx,
+                env,
+                tid,
+                motion_cc_flag
+            );
+    }
+
+    template <typename Robot>
+    __device__ __forceinline__ bool cprrtc_attached_object_collision_check(
+        const float *q,
+        volatile float *sphere_pos,
+        ppln::collision::Environment<float> *env,
+        int tid,
+        volatile unsigned int *motion_cc_flag
+    ) {
+        return true;
+    }
+
+    template <>
+    __device__ __forceinline__ bool
+    cprrtc_attached_object_collision_check<ppln::robots::FfwSg2Mobility>(
+        const float *q,
+        volatile float *sphere_pos,
+        ppln::collision::Environment<float> *env,
+        int tid,
+        volatile unsigned int *motion_cc_flag
+    ) {
+        return
+            ppln::collision::ffw_sg2_mobility_attached_object_collision_check(
+                q,
+                sphere_pos,
+                env,
+                tid,
+                motion_cc_flag
+            );
+    }
+
+    template <typename Robot>
+    __device__ __forceinline__ void
+    cprrtc_check_projected_edges_collision_parallel(
+        int edge_count,
+        volatile float *edge_motion_segments,
+        volatile float *sphere_pos_scratch,
+        volatile float *sphere_pos_approx_scratch,
+        volatile int *link_cc_scratch,
+        float *transform_scratch,
+        ppln::collision::Environment<float> *env,
+        volatile unsigned int *edge_cc_result,
+        bool *edge_run_detailed_env_check,
+        bool *edge_run_self_collision_check,
+        bool *edge_run_detailed_self_check,
+        bool *any_detailed_env_check,
+        bool *any_detailed_self_check,
+        volatile int *first_collision_edge,
+        int tid
+    ) {
+        using Collision = robots::CollisionTraits<Robot>;
+        static constexpr int dim = Robot::dimension;
+        static constexpr int fine_scratch_stride =
+            Collision::fine_sphere_count * Collision::batch_size * 3;
+        static constexpr int approx_scratch_stride =
+            Collision::approximate_sphere_count * Collision::batch_size * 3;
+        static constexpr int link_scratch_stride =
+            Collision::joint_flag_stride * Collision::batch_size;
+        static constexpr int transform_scratch_stride =
+            Collision::batch_size * Collision::transform_slots * 16;
+
+        if (edge_count <= 0) {
+            return;
+        }
+
+        const int edge_slot = tid / CONCON_COLLISION_THREADS_PER_EDGE;
+        const int edge_tid = tid - edge_slot * CONCON_COLLISION_THREADS_PER_EDGE;
+        const int safe_edge_slot =
+            edge_slot < edge_count ? edge_slot : edge_count - 1;
+        const int waypoint = edge_tid / 4 + 1;
+
+        volatile float *edge_motion =
+            &edge_motion_segments[
+                safe_edge_slot * CONCON_MOTION_SEGMENT_STRIDE
+            ];
+        volatile float *edge_sphere_pos =
+            &sphere_pos_scratch[edge_slot * fine_scratch_stride];
+        volatile float *edge_sphere_pos_approx =
+            &sphere_pos_approx_scratch[edge_slot * approx_scratch_stride];
+        volatile int *edge_link_cc =
+            &link_cc_scratch[edge_slot * link_scratch_stride];
+        float *edge_transform =
+            &transform_scratch[edge_slot * transform_scratch_stride];
+
+        float interp_cfg[dim];
+        #pragma unroll
+        for (int joint = 0; joint < dim; joint++) {
+            interp_cfg[joint] = edge_motion[waypoint * dim + joint];
+        }
+
+        if (tid < MAX_PARALLEL_CONCON_EDGES) {
+            edge_cc_result[tid] = 0u;
+            edge_run_detailed_env_check[tid] = false;
+            edge_run_self_collision_check[tid] = false;
+            edge_run_detailed_self_check[tid] = false;
+        }
+        if (tid == 0) {
+            first_collision_edge[0] = edge_count;
+            any_detailed_env_check[0] = false;
+            any_detailed_self_check[0] = false;
+        }
+        __syncthreads();
+
+        for (int r = edge_tid; r < link_scratch_stride;
+             r += CONCON_COLLISION_THREADS_PER_EDGE) {
+            edge_link_cc[r] = 0;
+        }
+        __syncthreads();
+
+        ppln::collision::fk_approx<Robot>(
+            interp_cfg,
+            edge_sphere_pos_approx,
+            edge_transform,
+            edge_tid
+        );
+        __syncthreads();
+
+        if (edge_slot < edge_count && edge_slot < first_collision_edge[0]) {
+            const bool env_collision_approx =
+                not ppln::collision::env_collision_check_approx<Robot>(
+                    edge_sphere_pos_approx,
+                    edge_link_cc,
+                    env,
+                    edge_tid
+                );
+            atomicOr(
+                (unsigned int *)&edge_cc_result[edge_slot],
+                env_collision_approx ? 1u : 0u
+            );
+
+            const bool attached_object_collision_approx =
+                not cprrtc_attached_object_collision_check_approx<Robot>(
+                    interp_cfg,
+                    edge_sphere_pos_approx,
+                    env,
+                    edge_tid,
+                    &edge_cc_result[edge_slot]
+                );
+            atomicOr(
+                (unsigned int *)&edge_cc_result[edge_slot],
+                attached_object_collision_approx ? 1u : 0u
+            );
+        }
+        __syncthreads();
+
+        if (tid < edge_count) {
+            edge_run_detailed_env_check[tid] = edge_cc_result[tid] != 0u;
+            if (edge_run_detailed_env_check[tid]) {
+                edge_cc_result[tid] = 0u;
+            }
+        }
+        __syncthreads();
+
+        if (tid == 0) {
+            bool run_any = false;
+            for (int edge = 0; edge < edge_count; edge++) {
+                run_any = run_any || edge_run_detailed_env_check[edge];
+            }
+            any_detailed_env_check[0] = run_any;
+        }
+        __syncthreads();
+
+        if (any_detailed_env_check[0]) {
+            ppln::collision::fk<Robot>(
+                interp_cfg,
+                edge_sphere_pos,
+                edge_transform,
+                edge_tid
+            );
+        }
+        __syncthreads();
+
+        if (
+            edge_slot < edge_count &&
+            edge_slot < first_collision_edge[0] &&
+            edge_run_detailed_env_check[edge_slot]
+        ) {
+            const bool env_collision =
+                not cprrtc_detailed_env_collision_check<Robot>(
+                    edge_sphere_pos,
+                    edge_link_cc,
+                    env,
+                    edge_tid,
+                    &edge_cc_result[edge_slot]
+                );
+            atomicOr(
+                (unsigned int *)&edge_cc_result[edge_slot],
+                env_collision ? 1u : 0u
+            );
+
+            const bool attached_object_collision =
+                not cprrtc_attached_object_collision_check<Robot>(
+                    interp_cfg,
+                    edge_sphere_pos,
+                    env,
+                    edge_tid,
+                    &edge_cc_result[edge_slot]
+                );
+            atomicOr(
+                (unsigned int *)&edge_cc_result[edge_slot],
+                attached_object_collision ? 1u : 0u
+            );
+        }
+        __syncthreads();
+
+        if (
+            tid < edge_count &&
+            edge_run_detailed_env_check[tid] &&
+            edge_cc_result[tid] != 0u
+        ) {
+            atomicMin((int *)&first_collision_edge[0], tid);
+        }
+        __syncthreads();
+
+        for (int r = edge_tid; r < link_scratch_stride;
+             r += CONCON_COLLISION_THREADS_PER_EDGE) {
+            edge_link_cc[r] = 0;
+        }
+        __syncthreads();
+
+        if (tid < edge_count) {
+            edge_run_self_collision_check[tid] =
+                edge_cc_result[tid] == 0u && tid < first_collision_edge[0];
+        }
+        __syncthreads();
+
+        if (
+            edge_slot < edge_count &&
+            edge_slot < first_collision_edge[0] &&
+            edge_run_self_collision_check[edge_slot]
+        ) {
+            const bool self_collision_approx =
+                not ppln::collision::self_collision_check_approx<Robot>(
+                    edge_sphere_pos_approx,
+                    edge_link_cc,
+                    edge_tid
+                );
+            atomicOr(
+                (unsigned int *)&edge_cc_result[edge_slot],
+                self_collision_approx ? 1u : 0u
+            );
+        }
+        __syncthreads();
+
+        if (tid < edge_count) {
+            edge_run_detailed_self_check[tid] =
+                edge_run_self_collision_check[tid] &&
+                edge_cc_result[tid] != 0u;
+            if (edge_run_detailed_self_check[tid]) {
+                edge_cc_result[tid] = 0u;
+            }
+        }
+        __syncthreads();
+
+        if (tid == 0) {
+            bool run_any = false;
+            for (int edge = 0; edge < edge_count; edge++) {
+                run_any = run_any || edge_run_detailed_self_check[edge];
+            }
+            any_detailed_self_check[0] = run_any;
+        }
+        __syncthreads();
+
+        if (any_detailed_self_check[0]) {
+            ppln::collision::fk<Robot>(
+                interp_cfg,
+                edge_sphere_pos,
+                edge_transform,
+                edge_tid
+            );
+        }
+        __syncthreads();
+
+        if (
+            edge_slot < edge_count &&
+            edge_slot < first_collision_edge[0] &&
+            edge_run_detailed_self_check[edge_slot]
+        ) {
+            const bool self_collision =
+                not cprrtc_detailed_self_collision_check<Robot>(
+                    edge_sphere_pos,
+                    edge_link_cc,
+                    edge_tid,
+                    &edge_cc_result[edge_slot]
+                );
+            atomicOr(
+                (unsigned int *)&edge_cc_result[edge_slot],
+                self_collision ? 1u : 0u
+            );
+        }
+        __syncthreads();
+
+        if (
+            tid < edge_count &&
+            edge_run_detailed_self_check[tid] &&
+            edge_cc_result[tid] != 0u
+        ) {
+            atomicMin((int *)&first_collision_edge[0], tid);
+        }
+        __syncthreads();
+    }
+
     __device__ __forceinline__
     int cprrtc_reserve_slot(volatile int *counter,int capacity){
         int current =atomicAdd((int *)counter,0);
@@ -1127,7 +1772,7 @@ namespace pRRTC {
 
         // TS 안에서 등록된 순서에 따라 64개 thread 목록에 고르게 배정
         const int ordinal =atomicAdd(&ts_node_count[ts_id],1);
-        const int lane =ordinal % MAX_THREADS_PER_BLOCK;
+        const int lane =ordinal % blockDim.x;
         const int head_slot =ts_id * MAX_THREADS_PER_BLOCK + lane;
 
         int old_head =atomicAdd(&ts_lane_head[head_slot],0);
@@ -1265,7 +1910,11 @@ namespace pRRTC {
         float **radii,
         HaltonState<Robot> *halton_states,
         curandState *rng_states,
-        ppln::collision::Environment<float> *env
+        ppln::collision::Environment<float> *env,
+        volatile float *concon_sphere_pos_scratch,
+        volatile float *concon_sphere_pos_approx_scratch,
+        volatile int *concon_link_cc_scratch,
+        float *concon_transform_scratch
     )
     {
         static constexpr auto dim = Robot::dimension;
@@ -1277,10 +1926,6 @@ namespace pRRTC {
         __shared__ float config[dim];
         __shared__ float sdata[MAX_THREADS_PER_BLOCK];
         __shared__ int sindex[MAX_THREADS_PER_BLOCK];
-        __shared__ volatile unsigned int local_cc_result[1];
-        __shared__ bool run_detailed_env_check;
-        __shared__ bool run_self_collision_check;
-        __shared__ bool run_detailed_self_check;
         __shared__ float *t_nodes;
         __shared__ float *o_nodes;
         __shared__ int *t_parents;
@@ -1311,7 +1956,6 @@ namespace pRRTC {
         __shared__ float *nearest_ts_node;
         // q_rand와 nearest_ts_node 사이 거리
         __shared__ float q_rand_dist;
-        __shared__ float delta[dim];
         // q_rand - q_near_TS의 normalized direction
         __shared__ float extend_dir[dim];
         // ConCon 후보 검사에 임시로 사용할 nominal configuration
@@ -1332,15 +1976,8 @@ namespace pRRTC {
         // FFW-SG2에서는 concon_count, 다른 robot에서는 기존처럼 1
         __shared__ int extend_edge_count;
         __shared__ int index;
-        __shared__ float vec[dim];
         __shared__ bool should_skip;
         // cpRRTC CONNECT state
-        // projection 전 target까지 거리
-        __shared__ float connect_distance_before;
-        // projection 후 target까지 거리
-        __shared__ float connect_distance_after;
-        // projection 후 실제로 target에 가까워졌는지
-        __shared__ bool connect_made_progress;
         // target 도달 여부
         __shared__ bool connection_reached_shared;
         __shared__ unsigned int n_extensions;
@@ -1352,16 +1989,44 @@ namespace pRRTC {
         __shared__ bool connect_failed;
         __shared__ bool connect_reached;
         // cpRRTC parallel projection shared memory
-        __align__(16) __shared__ volatile float motion_segment[(MAX_GRANULARITY + 1) * MAX_ROBOT_DIM];
-        __align__(16) __shared__ volatile float motion_segment_next[(MAX_GRANULARITY + 1) * MAX_ROBOT_DIM];
-        __shared__ volatile unsigned char motion_projection_valid[MAX_GRANULARITY + 1];
-        __shared__ volatile int motion_projection_prog[1];
-        __shared__ volatile unsigned int motion_projection_success[1];
-        __align__(16) __shared__ volatile float sphere_pos[Collision::fine_sphere_count * Collision::batch_size * 3];
-        __align__(16) __shared__ volatile float sphere_pos_approx[Collision::approximate_sphere_count * Collision::batch_size * 3];
-        __align__(16) __shared__ volatile int link_CC[Collision::joint_flag_stride * Collision::batch_size];
-        __align__(16) __shared__ float T[Collision::batch_size * Collision::transform_slots * 16];
-
+        __align__(16) __shared__ volatile float motion_segment[
+            MAX_CONCON_NODE_ANCHORS * MAX_ROBOT_DIM
+        ];
+        __align__(16) __shared__ volatile float motion_segment_next[
+            MAX_PARALLEL_CONCON_EDGES * CONCON_MOTION_SEGMENT_STRIDE
+        ];
+        __shared__ volatile unsigned char motion_projection_valid[
+            MAX_CONCON_PROJECTION_STATES
+        ];
+        __shared__ volatile int motion_projection_prog[
+            MAX_PARALLEL_CONCON_EDGES
+        ];
+        __shared__ volatile unsigned int motion_projection_success[
+            MAX_PARALLEL_CONCON_EDGES
+        ];
+        __shared__ volatile int concon_first_projection_failure_edge[1];
+        __align__(16) __shared__ volatile float concon_motion_segments[
+            MAX_PARALLEL_CONCON_EDGES * CONCON_MOTION_SEGMENT_STRIDE
+        ];
+        __shared__ float concon_nominal_targets[
+            MAX_PARALLEL_CONCON_EDGES * MAX_ROBOT_DIM
+        ];
+        __shared__ volatile unsigned int concon_edge_cc_result[
+            MAX_PARALLEL_CONCON_EDGES
+        ];
+        __shared__ bool concon_run_detailed_env_check[
+            MAX_PARALLEL_CONCON_EDGES
+        ];
+        __shared__ bool concon_run_self_collision_check[
+            MAX_PARALLEL_CONCON_EDGES
+        ];
+        __shared__ bool concon_run_detailed_self_check[
+            MAX_PARALLEL_CONCON_EDGES
+        ];
+        __shared__ bool concon_any_detailed_env_check;
+        __shared__ bool concon_any_detailed_self_check;
+        __shared__ volatile int concon_first_collision_edge[1];
+        __shared__ int concon_projected_edge_count;
         int iter = 0;
 
         while (true) {
@@ -1478,7 +2143,6 @@ namespace pRRTC {
                     Robot::scale_cfg((float *)config);
                 }
 
-                local_cc_result[0] = 0;
             }
 
             __syncthreads();
@@ -1524,13 +2188,6 @@ namespace pRRTC {
                     tid
                 );
             }
-
-            // reset link_CC every iteration
-            for (int r = tid; r < Collision::joint_flag_stride * Collision::batch_size; r += blockDim.x) {
-                link_CC[r]=0;
-            }
-
-            __syncthreads();
 
             // parallelized nearest neighbor search
             float local_min_dist = FLT_MAX;
@@ -1726,31 +2383,35 @@ namespace pRRTC {
             }
             __syncthreads();
 
-            const int waypoint = tid / 4 + 1;
-            float interp_cfg[dim];
-            
-            for (int edge_step = 1; edge_step <= extend_edge_count; edge_step++) {
-                // 이번 edge의 target 설정
+            if (tid == 0) {
+                concon_projected_edge_count = 0;
+            }
+            __syncthreads();
+
+            for (
+                int edge_step = 1;
+                edge_step <= extend_edge_count;
+                edge_step++
+            ) {
+                // prefix motion의 nominal endpoint 설정
                 if (tid < dim) {
                     if constexpr (TangentSpaceTraits<Robot>::enabled) {
                         // selected Tangent Space 위 nominal target
                         // q_k =q_near_TS + k * range * extend_dir
                         concon_probe[tid] =nearest_ts_node[tid]+((float)edge_step*d_settings.range*extend_dir[tid]);
                     }
-                    // config = 현재 실제 projected node
-                    // concon_probe = 이번 nominal target
-                    // 이 둘 사이를 granularity만큼 interpolation
-                    delta[tid] =(concon_probe[tid]-config[tid])/(float)d_settings.granularity;
+                    concon_nominal_targets[
+                        (edge_step - 1) * MAX_ROBOT_DIM + tid
+                    ] = concon_probe[tid];
                 }
                 __syncthreads();
+            }
 
-                // cpRRTC EXTEND
-                // 1. q_near -> q_steer straight-line motion 생성
-                // 2. FFW SG2는 analytic-Jacobian ParallelProject 수행
-                // 3. projected waypoint들에 대해 기존 collision check 수행
-                const bool projection_good = cprrtc_project_motion<Robot>(
+            const bool projection_good =
+                cprrtc_project_concon_node_anchors<Robot>(
                     config,
-                    delta,
+                    concon_nominal_targets,
+                    extend_edge_count,
                     motion_segment,
                     motion_segment_next,
                     motion_projection_valid,
@@ -1758,164 +2419,110 @@ namespace pRRTC {
                     motion_projection_success,
                     tid
                 );
-                __syncthreads();
+            __syncthreads();
 
-                // projection 후 마지막 waypoint가 실제로 tree에 저장할 endpoint
-                // ξ_projected = [q_near, q'_1, ..., q'_N]
-                // q'_N을 저장한다.
-                float stored_edge_endpoint = 0.0f;
-
-                if (tid < dim) {
-                    stored_edge_endpoint =motion_segment[d_settings.granularity * dim + tid];
+            if (tid == 0) {
+                int valid_edges =
+                    projection_good
+                        ? extend_edge_count
+                        : motion_projection_prog[0];
+                if (valid_edges > extend_edge_count) {
+                    valid_edges = extend_edge_count;
                 }
-
-                // waypoint ↔ thread mapping
-                // waypoint 1 : tid  0,1,2,3
-                // waypoint 2 : tid  4,5,6,7
-                // ...
-                // Projection에서는 lane 0만 analytic Jacobian 계산.
-                // 이제 collision 단계에서는 다시 4개 thread가 모두 사용된다.
-                bool motion_collision_free = false;
-
-                // projection이 성공한 motion만 collision check
-                if (projection_good) {
-                    // 각 4-thread group이 자신이 담당하는 projected waypoint를 읽는다.
-                    for (int i = 0; i < dim; i++) {
-                        interp_cfg[i] =motion_segment[waypoint * dim + i];
-                    }
-
-                    // 새로운 motion collision check 시작
-                    if (tid == 0) {
-                        local_cc_result[0] = 0;
-                    }
-                    __syncthreads();
-
-                    for (int r = tid; r < Collision::joint_flag_stride * Collision::batch_size; r += blockDim.x) {
-                        link_CC[r] = 0;
-                    }
-                    __syncthreads();
-
-                    // 기존 approximate FK / environment collision check
-                    int detailed_FK = 0;
-
-                    ppln::collision::fk_approx<Robot>(interp_cfg,sphere_pos_approx,T,tid);
-
-                    __syncthreads();
-
-                    // environment와 근사 collisoin 검사
-                    bool config_in_collision2_approx = not ppln::collision::env_collision_check_approx<Robot>(sphere_pos_approx,link_CC,env,tid);
-
-                    // 여러 thread의 충돌 검사 결과를 하나의 공유 결과로 합치는 코드
-                    atomicOr((unsigned int *)&local_cc_result[0],config_in_collision2_approx ? 1u : 0u);
-
-                    __syncthreads();
-
-                    if (tid == 0) {
-                        run_detailed_env_check = local_cc_result[0] == 1;
-                    }
-                    __syncthreads();
-
-                    // approximate env collision 가능성이 있으면 detailed env collision
-                    if (run_detailed_env_check) { // 근사 충돌 검사 결과 확인
-                        if (tid == 0) {
-                            local_cc_result[0] = 0;
-                        }
-                        __syncthreads();
-
-                        ppln::collision::fk<Robot>(interp_cfg,sphere_pos,T,tid); // 정밀 FK 계산
-
-                        detailed_FK = 1; // 정밀 FK 수행 여부. flag
-                        __syncthreads();
-
-                        // 정밀 충돌 검사
-                        bool config_in_collision2 = not cprrtc_detailed_env_collision_check<Robot>(
-                                sphere_pos,
-                                link_CC,
-                                env,
-                                tid,
-                                local_cc_result
-                            );
-
-                        // 각 thread 검사 합치기
-                        atomicOr((unsigned int *)&local_cc_result[0],config_in_collision2 ? 1u : 0u);
-
-                        __syncthreads();
-                    }
-
-                    // self collision용 link flag 초기화
-                    for (int r = tid; r < Collision::joint_flag_stride * Collision::batch_size; r += blockDim.x) {
-                        link_CC[r] = 0;
-                    }
-
-                    __syncthreads();
-
-                    if (tid == 0) {
-                        run_self_collision_check = local_cc_result[0] == 0;
-                    }
-                    __syncthreads();
-
-                    // environment가 collision-free일 때 self collision 검사
-                    if (run_self_collision_check) {
-                        bool config_in_collision_approx = not ppln::collision::self_collision_check_approx<Robot>(
-                                sphere_pos_approx,
-                                link_CC,
-                                tid
-                            );
-
-                        atomicOr((unsigned int *)&local_cc_result[0],config_in_collision_approx ? 1u : 0u);
-
-                        __syncthreads();
-
-                        if (tid == 0) {
-                            run_detailed_self_check = local_cc_result[0] == 1;
-                        }
-                        __syncthreads();
-
-                        // approximate self collision 가능성이 있으면 detailed 검사
-                        if (run_detailed_self_check) {
-                            if (tid == 0) {
-                                local_cc_result[0] = 0;
-                            }
-
-                            __syncthreads();
-
-                            if (detailed_FK == 0) {
-                                ppln::collision::fk<Robot>(interp_cfg,sphere_pos,T,tid);
-
-                                detailed_FK = 1;
-
-                                __syncthreads();
-                            }
-
-                            bool config_in_collision =not cprrtc_detailed_self_collision_check<Robot>(
-                                    sphere_pos,
-                                    link_CC,
-                                    tid,
-                                    local_cc_result
-                                ); 
-
-                            atomicOr((unsigned int *)&local_cc_result[0],config_in_collision ? 1u : 0u);
-
-                            __syncthreads();
-                        }
-                    }
-
-                    motion_collision_free =(local_cc_result[0] == 0);
+                if (valid_edges < 0) {
+                    valid_edges = 0;
                 }
-                __syncthreads();
+                concon_projected_edge_count = valid_edges;
+            }
+            __syncthreads();
 
+            cprrtc_project_concon_edge_segments_from_node_anchors<Robot>(
+                concon_projected_edge_count,
+                motion_segment,
+                concon_motion_segments,
+                motion_segment_next,
+                motion_projection_valid,
+                motion_projection_prog,
+                motion_projection_success,
+                concon_first_projection_failure_edge,
+                tid
+            );
+            __syncthreads();
 
-                // projection도 성공하고 collision도 없어야 edge 성공
-                bool edge_good = projection_good && motion_collision_free;
+            if (tid == 0) {
+                if (
+                    concon_first_projection_failure_edge[0] <
+                    concon_projected_edge_count
+                ) {
+                    concon_projected_edge_count =
+                        concon_first_projection_failure_edge[0];
+                }
+            }
+            __syncthreads();
 
-                __syncthreads();
+            cprrtc_check_projected_edges_collision_parallel<Robot>(
+                concon_projected_edge_count,
+                concon_motion_segments,
+                &concon_sphere_pos_scratch[
+                    bid * d_settings.max_concon_nodes *
+                    Collision::fine_sphere_count * Collision::batch_size * 3
+                ],
+                &concon_sphere_pos_approx_scratch[
+                    bid * d_settings.max_concon_nodes *
+                    Collision::approximate_sphere_count *
+                    Collision::batch_size * 3
+                ],
+                &concon_link_cc_scratch[
+                    bid * d_settings.max_concon_nodes *
+                    Collision::joint_flag_stride * Collision::batch_size
+                ],
+                &concon_transform_scratch[
+                    bid * d_settings.max_concon_nodes *
+                    Collision::batch_size * Collision::transform_slots * 16
+                ],
+                env,
+                concon_edge_cc_result,
+                concon_run_detailed_env_check,
+                concon_run_self_collision_check,
+                concon_run_detailed_self_check,
+                &concon_any_detailed_env_check,
+                &concon_any_detailed_self_check,
+                concon_first_collision_edge,
+                tid
+            );
+            __syncthreads();
 
-                // 현재 ConCon edge가 실패하면 이후 edge는 검사하지 않는다.
-                if (!edge_good) {
+            if (tid < dim) {
+                config[tid] = nearest_node[tid];
+            }
+            if (tid == 0) {
+                concon_parent_idx = sindex[0];
+            }
+            __syncthreads();
+
+            for (
+                int edge_step = 1;
+                edge_step <= concon_projected_edge_count;
+                edge_step++
+            ) {
+                if (edge_step - 1 >= concon_first_collision_edge[0]) {
                     break;
                 }
 
-                if (edge_good) {
+                float stored_edge_endpoint = 0.0f;
+                if (tid < dim) {
+                    concon_probe[tid] =
+                        concon_nominal_targets[
+                            (edge_step - 1) * MAX_ROBOT_DIM + tid
+                        ];
+                    stored_edge_endpoint =
+                        concon_motion_segments[
+                            (edge_step - 1) * CONCON_MOTION_SEGMENT_STRIDE +
+                            d_settings.granularity * dim + tid
+                        ];
+                }
+                __syncthreads();
+
                     // grow tree
                     if (tid == 0) {
                         index = cprrtc_reserve_slot(
@@ -2103,7 +2710,6 @@ namespace pRRTC {
                         concon_valid_count++;
                     }
                     __syncthreads();
-                }
             } // edge 검사 완료
 
             // ConCon validation 전체가 끝난 뒤 CONNECT 여부 결정
@@ -2158,8 +2764,6 @@ namespace pRRTC {
 
                     // 계산 결과가 0이더라도 1로 보정
                     if (n_extensions < 1u) {n_extensions = 1u;}
-
-                    local_cc_result[0] = 0;
 
                     connection_reached_shared =connect_reached;
                 }
@@ -2313,7 +2917,6 @@ namespace pRRTC {
 
                         // 첫 CONNECT edge의 parent는 EXTEND에서 마지막으로 추가된 실제 node
                         concon_parent_idx = index;
-                        local_cc_result[0] = 0;
                     }
 
                     // config를 현재 실제 projected configuration으로 복구
@@ -2322,28 +2925,36 @@ namespace pRRTC {
                     }
                     __syncthreads();
 
-                    // 이번 chunk에서 생성한 ConCon candidate들을 앞에서부터 하나씩 검증
-                    for (int edge_step = 1; edge_step <= concon_count; edge_step++) {
+                    if (tid == 0) {
+                        concon_projected_edge_count = 0;
+                    }
+                    __syncthreads();
 
-                        if constexpr (TraceTrees) {
-                            if (tid == 0) {
-                                should_skip = (solved != 0);
-                            }
-                            __syncthreads();
-                            if (should_skip) {
-                                return;
-                            }
+                    if constexpr (TraceTrees) {
+                        if (tid == 0) {
+                            should_skip = (solved != 0);
                         }
-                        else {
-                            if (tid == 0) {
-                                should_skip = (solved != 0);
-                            }
-                            __syncthreads();
-                            if (should_skip) {
-                                return;
-                            }
+                        __syncthreads();
+                        if (should_skip) {
+                            return;
                         }
+                    }
+                    else {
+                        if (tid == 0) {
+                            should_skip = (solved != 0);
+                        }
+                        __syncthreads();
+                        if (should_skip) {
+                            return;
+                        }
+                    }
 
+                    // 이번 chunk의 nominal endpoint를 먼저 만들고 prefix motion 하나로 projection한다.
+                    for (
+                        int edge_step = 1;
+                        edge_step <= concon_count;
+                        edge_step++
+                    ) {
                         if (tid < dim) {
                             if constexpr (TangentSpaceTraits<Robot>::enabled) {
                                 // 이번 edge의 Tangent Space 위 nominal target 생성
@@ -2373,14 +2984,18 @@ namespace pRRTC {
                             //          ↓
                             // 이번 TS nominal target
                             // 사이를 granularity만큼 나눈다.
-                            delta[tid] =(concon_probe[tid]- config[tid])/static_cast<float>(d_settings.granularity);
+                            concon_nominal_targets[
+                                (edge_step - 1) * MAX_ROBOT_DIM + tid
+                            ] = concon_probe[tid];
                         }
                         __syncthreads();
+                    }
 
-                        // 4. ParallelProject
-                        const bool extension_projection_good = cprrtc_project_motion<Robot>(
+                    const bool extension_projection_good =
+                        cprrtc_project_concon_node_anchors<Robot>(
                                 config,
-                                delta,
+                                concon_nominal_targets,
+                                concon_count,
                                 motion_segment,
                                 motion_segment_next,
                                 motion_projection_valid,
@@ -2388,163 +3003,141 @@ namespace pRRTC {
                                 motion_projection_success,
                                 tid
                             );
-                        __syncthreads();
-
-                        // 5. projected endpoint
-                        float connect_projected_endpoint = 0.0f;
-
-                        if (tid < dim) {
-                            connect_projected_endpoint =motion_segment[d_settings.granularity* dim+ tid];
-                        }
-                        __syncthreads();
-
-                        const float distance_before_value = cprrtc_shared_config_distance<Robot>(
-                            config,
-                            connect_target_node,
-                            sdata,
-                            tid
-                        );
-
-                    const float distance_after_value = cprrtc_shared_config_distance<Robot>(
-                            &motion_segment[d_settings.granularity * dim],
-                            connect_target_node,
-                            sdata,
-                            tid
-                        );
+                    __syncthreads();
 
                     if (tid == 0) {
-                        connect_distance_before = distance_before_value;
-                        connect_distance_after = distance_after_value;
-                        connect_made_progress = extension_projection_good && connect_distance_after < connect_distance_before - d_settings.connect_progress_epsilon;
+                        int valid_edges =
+                            extension_projection_good
+                                ? concon_count
+                                : motion_projection_prog[0];
+                        if (valid_edges > concon_count) {
+                            valid_edges = concon_count;
+                        }
+                        if (valid_edges < 0) {
+                            valid_edges = 0;
+                        }
+
+                        for (int edge_step = 1; edge_step <= valid_edges; edge_step++) {
+                            const float distance_before =
+                                cprrtc_config_distance_from_volatile<Robot>(
+                                    &motion_segment[
+                                        (edge_step - 1) * dim
+                                    ],
+                                    connect_target_node
+                                );
+                            const float distance_after =
+                                cprrtc_config_distance_from_volatile<Robot>(
+                                    &motion_segment[
+                                        edge_step * dim
+                                    ],
+                                    connect_target_node
+                                );
+
+                            if (
+                                distance_after >=
+                                distance_before -
+                                    d_settings.connect_progress_epsilon
+                            ) {
+                                valid_edges = edge_step - 1;
+                                break;
+                            }
+                        }
+
+                        concon_projected_edge_count = valid_edges;
                     }
                     __syncthreads();
 
-                    if (!extension_projection_good || !connect_made_progress) {
-                        break;
-                    }
+                    cprrtc_project_concon_edge_segments_from_node_anchors<Robot>(
+                        concon_projected_edge_count,
+                        motion_segment,
+                        concon_motion_segments,
+                        motion_segment_next,
+                        motion_projection_valid,
+                        motion_projection_prog,
+                        motion_projection_success,
+                        concon_first_projection_failure_edge,
+                        tid
+                    );
+                    __syncthreads();
 
-                        bool extension_collision_free = false;
-                        if (extension_projection_good) {
-                            // 7. projected waypoint 가져오기
-                            for (int i = 0; i < dim; i++) {
-                                interp_cfg[i] =
-                                    motion_segment[waypoint * dim + i];
-                            }
-                            __syncthreads();
-
-                            // 8. projected motion에 대해 기존 4-thread/waypoint collision check
-                            // 새로운 CONNECT segment 검사 시작
-                            if (tid == 0) {
-                                local_cc_result[0] = 0;
-                            }
-                            __syncthreads();
-
-
-                            // link collision flag 초기화
-                            for (int r = tid; r < Collision::joint_flag_stride * Collision::batch_size; r += blockDim.x
-                            ) {
-                                link_CC[r] = 0;
-                            }
-                            __syncthreads();
-
-
-                            int detailed_FK = 0;
-
-                            // approximate FK + environment CC
-                            ppln::collision::fk_approx<Robot>(interp_cfg,sphere_pos_approx,T,tid);
-
-                            __syncthreads();
-
-                            bool config_in_collision2_approx =not ppln::collision::env_collision_check_approx<Robot>(sphere_pos_approx,link_CC,env,tid);
-
-                            atomicOr((unsigned int *)&local_cc_result[0],config_in_collision2_approx ? 1u : 0u);
-
-                            __syncthreads();
-
-
-                            if (tid == 0) {
-                                run_detailed_env_check = local_cc_result[0] == 1;
-                            }
-                            __syncthreads();
-
-                            // approximate env에서 걸렸으면 detailed env 검사
-                            if (run_detailed_env_check) {
-                                if (tid == 0) {
-                                    local_cc_result[0] = 0;
-                                }
-                                __syncthreads();
-
-                                ppln::collision::fk<Robot>(interp_cfg,sphere_pos,T,tid);
-
-                                detailed_FK = 1;
-
-                                __syncthreads();
-
-                                bool config_in_collision2 = not cprrtc_detailed_env_collision_check<Robot>(sphere_pos,link_CC,env,tid,local_cc_result);
-
-                                atomicOr((unsigned int *)&local_cc_result[0],config_in_collision2 ? 1u : 0u);
-
-                                __syncthreads();
-                            }
-
-                            // self collision용 flag 초기화
-                            for (int r = tid; r < Collision::joint_flag_stride * Collision::batch_size; r += blockDim.x) {
-                                link_CC[r] = 0;
-                            }
-                            __syncthreads();
-
-                            if (tid == 0) {
-                                run_self_collision_check = local_cc_result[0] == 0;
-                            }
-                            __syncthreads();
-
-                            // environment collision-free이면 self collision
-                            if (run_self_collision_check) {
-                                bool config_in_collision_approx =not ppln::collision::self_collision_check_approx<Robot>(sphere_pos_approx,link_CC,tid);
-
-                                atomicOr((unsigned int *)&local_cc_result[0],config_in_collision_approx ? 1u : 0u);
-
-                                __syncthreads();
-
-                                if (tid == 0) {
-                                    run_detailed_self_check =
-                                        local_cc_result[0] == 1;
-                                }
-                                __syncthreads();
-
-                                if (run_detailed_self_check) {
-                                    if (tid == 0) {
-                                        local_cc_result[0] = 0;
-                                    }
-                                    __syncthreads();
-
-
-                                    if (detailed_FK == 0) {
-                                        ppln::collision::fk<Robot>(interp_cfg,sphere_pos,T,tid);
-
-                                        detailed_FK = 1;
-
-                                        __syncthreads();
-                                    }
-
-
-                                    bool config_in_collision =not cprrtc_detailed_self_collision_check<Robot>(sphere_pos,link_CC,tid,local_cc_result);
-
-                                    atomicOr((unsigned int *)&local_cc_result[0],config_in_collision ? 1u : 0u);
-
-                                    __syncthreads();
-                                }
-                            }
-
-                            extension_collision_free = (local_cc_result[0] == 0);
+                    if (tid == 0) {
+                        if (
+                            concon_first_projection_failure_edge[0] <
+                            concon_projected_edge_count
+                        ) {
+                            concon_projected_edge_count =
+                                concon_first_projection_failure_edge[0];
                         }
-                        bool ext_edge_good = extension_projection_good && connect_made_progress && extension_collision_free;
+                    }
+                    __syncthreads();
 
-                        __syncthreads();
+                    cprrtc_check_projected_edges_collision_parallel<Robot>(
+                        concon_projected_edge_count,
+                        concon_motion_segments,
+                        &concon_sphere_pos_scratch[
+                            bid * d_settings.max_concon_nodes *
+                            Collision::fine_sphere_count *
+                            Collision::batch_size * 3
+                        ],
+                        &concon_sphere_pos_approx_scratch[
+                            bid * d_settings.max_concon_nodes *
+                            Collision::approximate_sphere_count *
+                            Collision::batch_size * 3
+                        ],
+                        &concon_link_cc_scratch[
+                            bid * d_settings.max_concon_nodes *
+                            Collision::joint_flag_stride *
+                            Collision::batch_size
+                        ],
+                        &concon_transform_scratch[
+                            bid * d_settings.max_concon_nodes *
+                            Collision::batch_size *
+                            Collision::transform_slots * 16
+                        ],
+                        env,
+                        concon_edge_cc_result,
+                        concon_run_detailed_env_check,
+                        concon_run_self_collision_check,
+                        concon_run_detailed_self_check,
+                        &concon_any_detailed_env_check,
+                        &concon_any_detailed_self_check,
+                        concon_first_collision_edge,
+                        tid
+                    );
+                    __syncthreads();
 
-                        if (!ext_edge_good) {
+                    if (tid < dim) {
+                        config[tid] = nearest_node[tid];
+                    }
+                    if (tid == 0) {
+                        concon_parent_idx = index;
+                    }
+                    __syncthreads();
+
+                    // collision-free로 확인된 edge만 앞에서부터 tree에 추가한다.
+                    for (
+                        int edge_step = 1;
+                        edge_step <= concon_projected_edge_count;
+                        edge_step++
+                    ) {
+                        if (edge_step - 1 >= concon_first_collision_edge[0]) {
                             break;
                         }
+
+                        float connect_projected_endpoint = 0.0f;
+                        if (tid < dim) {
+                            concon_probe[tid] =
+                                concon_nominal_targets[
+                                    (edge_step - 1) * MAX_ROBOT_DIM + tid
+                                ];
+                            connect_projected_endpoint =
+                                concon_motion_segments[
+                                    (edge_step - 1) *
+                                        CONCON_MOTION_SEGMENT_STRIDE +
+                                    d_settings.granularity * dim + tid
+                                ];
+                        }
+                        __syncthreads();
 
                         // CONNECT node slot 확보
                         if (tid == 0) {
@@ -2998,6 +3591,21 @@ namespace pRRTC {
                 "pRRTC granularity must match the selected robot's collision batch size"
             );
         }
+        if (settings.granularity > MAX_GRANULARITY) {
+            throw std::invalid_argument(
+                "pRRTC prefix ConCon projection supports granularity up to 16"
+            );
+        }
+        if (settings.max_concon_nodes <= 0) {
+            throw std::invalid_argument(
+                "pRRTC max_concon_nodes must be positive"
+            );
+        }
+        if (settings.max_concon_nodes > MAX_PARALLEL_CONCON_EDGES) {
+            throw std::invalid_argument(
+                "pRRTC parallel ConCon collision check supports up to 5 edges"
+            );
+        }
         if constexpr (TangentSpaceTraits<Robot>::enabled) {
             if (settings.max_tangent_spaces <= 0) {
                 throw std::invalid_argument(
@@ -3016,6 +3624,13 @@ namespace pRRTC {
 
         // copy data to GPU
         cudaMemcpyToSymbol(d_settings, &settings, sizeof(settings));
+        if constexpr (std::is_same_v<Robot, robots::FfwSg2Mobility>) {
+            cudaMemcpyToSymbol(
+                ppln::collision::ffw_sg2_mobility_attached_object_collision,
+                &settings.ffw_sg2_attached_object_collision,
+                sizeof(settings.ffw_sg2_attached_object_collision)
+            );
+        }
         int num_goals = goals.size();
         float *nodes[2];
         int *parents[2];
@@ -3050,6 +3665,10 @@ namespace pRRTC {
         int **d_ts_node_count = nullptr;
         int **d_ts_lane_head = nullptr;
         int **d_node_next_in_ts = nullptr;
+        float *concon_sphere_pos_scratch = nullptr;
+        float *concon_sphere_pos_approx_scratch = nullptr;
+        int *concon_link_cc_scratch = nullptr;
+        float *concon_transform_scratch = nullptr;
         cudaMalloc(&d_nodes, 2 * sizeof(float*));
         cudaMalloc(&d_parents, 2 * sizeof(int*));
         cudaMalloc(&d_radii, 2 * sizeof(float*));
@@ -3157,6 +3776,31 @@ namespace pRRTC {
         ppln::collision::Environment<float> *env;
         setup_environment_on_device(env, h_environment);
         cudaCheckError(cudaGetLastError());
+
+        const std::size_t concon_scratch_slots =
+            static_cast<std::size_t>(settings.num_new_configs) *
+            static_cast<std::size_t>(settings.max_concon_nodes);
+        cudaMalloc(
+            &concon_sphere_pos_scratch,
+            concon_scratch_slots * Collision::fine_sphere_count *
+                Collision::batch_size * 3 * sizeof(float)
+        );
+        cudaMalloc(
+            &concon_sphere_pos_approx_scratch,
+            concon_scratch_slots * Collision::approximate_sphere_count *
+                Collision::batch_size * 3 * sizeof(float)
+        );
+        cudaMalloc(
+            &concon_link_cc_scratch,
+            concon_scratch_slots * Collision::joint_flag_stride *
+                Collision::batch_size * sizeof(int)
+        );
+        cudaMalloc(
+            &concon_transform_scratch,
+            concon_scratch_slots * Collision::batch_size *
+                Collision::transform_slots * 16 * sizeof(float)
+        );
+        cudaCheckError(cudaGetLastError());
         
         // Setup pinned memory for signaling
         int *h_solved;
@@ -3209,8 +3853,10 @@ namespace pRRTC {
         res.copy_ns = get_elapsed_nanoseconds(copy_start_time);
 
         auto kernel_start_time = std::chrono::steady_clock::now();
+        const int concon_threads_per_block =
+            CONCON_COLLISION_THREADS_PER_EDGE * settings.max_concon_nodes;
         if (settings.trace_trees) {
-            rrtc<Robot, true><<<settings.num_new_configs, 4*settings.granularity>>> (
+            rrtc<Robot, true><<<settings.num_new_configs, concon_threads_per_block>>> (
                 d_nodes,
                 d_parents,
                 d_node_ready,
@@ -3229,10 +3875,14 @@ namespace pRRTC {
                 d_radii,
                 halton_states,
                 rng_states,
-                env
+                env,
+                concon_sphere_pos_scratch,
+                concon_sphere_pos_approx_scratch,
+                concon_link_cc_scratch,
+                concon_transform_scratch
             );
         } else {
-            rrtc<Robot, false><<<settings.num_new_configs, 4*settings.granularity>>> (
+            rrtc<Robot, false><<<settings.num_new_configs, concon_threads_per_block>>> (
                 d_nodes,
                 d_parents,
                 d_node_ready,
@@ -3251,7 +3901,11 @@ namespace pRRTC {
                 d_radii,
                 halton_states,
                 rng_states,
-                env
+                env,
+                concon_sphere_pos_scratch,
+                concon_sphere_pos_approx_scratch,
+                concon_link_cc_scratch,
+                concon_transform_scratch
             );
         }
 
@@ -3435,6 +4089,10 @@ namespace pRRTC {
         cudaFree(d_ts_node_count);
         cudaFree(d_ts_lane_head);
         cudaFree(d_node_next_in_ts);
+        cudaFree(concon_sphere_pos_scratch);
+        cudaFree(concon_sphere_pos_approx_scratch);
+        cudaFree(concon_link_cc_scratch);
+        cudaFree(concon_transform_scratch);
         cudaFreeHost(h_solved);
         cudaCheckError(cudaGetLastError());
         res.wall_ns = get_elapsed_nanoseconds(start_time);
