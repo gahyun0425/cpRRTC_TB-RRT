@@ -765,6 +765,7 @@ namespace pRRTC {
         volatile unsigned int *projection_success,
         int tid,
         bool use_smoothness,
+        float smoothness_threshold,
         bool return_when_success = true
     ) {
         if (waypoint_count <= 0) {
@@ -790,7 +791,7 @@ namespace pRRTC {
                 d_settings.projection_alpha,
                 d_settings.projection_damping,
                 d_settings.projection_task_tolerance,
-                d_settings.projection_smoothness_threshold,
+                smoothness_threshold,
                 d_settings.projection_smoothness_weight,
                 use_smoothness,
                 d_settings.projection_max_step,
@@ -812,7 +813,7 @@ namespace pRRTC {
                     d_settings.projection_alpha,
                     d_settings.projection_damping,
                     d_settings.projection_task_tolerance,
-                    d_settings.projection_smoothness_threshold,
+                    smoothness_threshold,
                     d_settings.projection_smoothness_weight,
                     use_smoothness,
                     d_settings.projection_max_step,
@@ -832,7 +833,7 @@ namespace pRRTC {
                 d_settings.projection_alpha,
                 d_settings.projection_damping,
                 d_settings.projection_task_tolerance,
-                d_settings.projection_smoothness_threshold,
+                smoothness_threshold,
                 d_settings.projection_smoothness_weight,
                 use_smoothness,
                 d_settings.projection_max_step,
@@ -854,7 +855,7 @@ namespace pRRTC {
                 d_settings.gamma,
                 d_settings.projection_damping,
                 d_settings.projection_task_tolerance,
-                d_settings.projection_smoothness_threshold,
+                smoothness_threshold,
                 d_settings.projection_smoothness_weight,
                 use_smoothness,
                 d_settings.projection_max_step,
@@ -919,6 +920,9 @@ namespace pRRTC {
         }
         __syncthreads();
 
+        const float node_smoothness_threshold =
+            static_cast<float>(d_settings.granularity) *
+            d_settings.projection_smoothness_threshold;
         return cprrtc_project_prebuilt_motion<Robot>(
             node_motion,
             node_motion_next,
@@ -927,7 +931,8 @@ namespace pRRTC {
             projection_prog,
             projection_success,
             tid,
-            false
+            d_settings.projection_smoothness,
+            node_smoothness_threshold
         );
     }
 
@@ -957,22 +962,74 @@ namespace pRRTC {
             return;
         }
 
+        const int waypoint = tid / 4 + 1;
+        const int lane = tid % 4;
+        const int total_waypoint_count =
+            edge_count * d_settings.granularity;
+
+        // Keep the ConCon prefix continuous while including each projected
+        // node (waypoints granularity, 2 * granularity, ...) in smoothing.
+        volatile float *prefix_motion = edge_motion_segment_next;
+        volatile float *prefix_motion_next = edge_motion_segments;
+
+        if (tid < dim) {
+            prefix_motion[tid] = node_anchors[tid];
+        }
+        if (waypoint <= total_waypoint_count) {
+            const int prefix_edge_slot =
+                (waypoint - 1) / d_settings.granularity;
+            const int local_waypoint =
+                (waypoint - 1) % d_settings.granularity + 1;
+            const float alpha =
+                static_cast<float>(local_waypoint) /
+                static_cast<float>(d_settings.granularity);
+
+            for (int joint = lane; joint < dim; joint += 4) {
+                const float q0 =
+                    node_anchors[prefix_edge_slot * dim + joint];
+                const float q1 =
+                    node_anchors[(prefix_edge_slot + 1) * dim + joint];
+                prefix_motion[waypoint * dim + joint] =
+                    q0 + alpha * (q1 - q0);
+            }
+        }
+        __syncthreads();
+
+        const bool projection_good = cprrtc_project_prebuilt_motion<Robot>(
+            prefix_motion,
+            prefix_motion_next,
+            total_waypoint_count,
+            edge_projection_valid,
+            edge_projection_prog,
+            edge_projection_success,
+            tid,
+            d_settings.projection_smoothness,
+            d_settings.projection_smoothness_threshold,
+            false
+        );
+        __syncthreads();
+
+        if (tid == 0) {
+            int completed_waypoints = projection_good
+                ? total_waypoint_count
+                : edge_projection_prog[0];
+            if (completed_waypoints < 0) {
+                completed_waypoints = 0;
+            }
+            if (completed_waypoints > total_waypoint_count) {
+                completed_waypoints = total_waypoint_count;
+            }
+            first_projection_failure_edge[0] =
+                completed_waypoints / d_settings.granularity;
+        }
+        __syncthreads();
+
+        // Collision checking keeps one source duplicate per edge. Repack the
+        // continuous projected prefix without changing the thread layout.
         const int source_edge_slot =
             edge_slot < edge_count ? edge_slot : edge_count - 1;
         volatile float *edge_motion =
             &edge_motion_segments[edge_slot * CONCON_MOTION_SEGMENT_STRIDE];
-        volatile float *edge_motion_next =
-            &edge_motion_segment_next[
-                edge_slot * CONCON_MOTION_SEGMENT_STRIDE
-            ];
-        volatile unsigned char *edge_valid =
-            &edge_projection_valid[
-                edge_slot * CONCON_PROJECTION_STATE_STRIDE
-            ];
-        volatile int *edge_prog = &edge_projection_prog[edge_slot];
-        volatile unsigned int *edge_success =
-            &edge_projection_success[edge_slot];
-
         const int edge_segment_values =
             (d_settings.granularity + 1) * dim;
         for (
@@ -982,60 +1039,10 @@ namespace pRRTC {
         ) {
             const int local_waypoint = value / dim;
             const int joint = value - local_waypoint * dim;
-            const float alpha =
-                static_cast<float>(local_waypoint) /
-                static_cast<float>(d_settings.granularity);
-            const float q0 =
-                node_anchors[source_edge_slot * dim + joint];
-            const float q1 =
-                node_anchors[(source_edge_slot + 1) * dim + joint];
-
+            const int prefix_waypoint =
+                source_edge_slot * d_settings.granularity + local_waypoint;
             edge_motion[local_waypoint * dim + joint] =
-                q0 + alpha * (q1 - q0);
-        }
-        __syncthreads();
-
-        const int internal_waypoint_count =
-            d_settings.granularity > 0 ? d_settings.granularity - 1 : 0;
-        cprrtc_project_prebuilt_motion<Robot>(
-            edge_motion,
-            edge_motion_next,
-            internal_waypoint_count,
-            edge_valid,
-            edge_prog,
-            edge_success,
-            edge_tid,
-            d_settings.projection_smoothness,
-            false
-        );
-        __syncthreads();
-
-        if (edge_tid < dim) {
-            edge_motion[edge_tid] =
-                node_anchors[source_edge_slot * dim + edge_tid];
-            edge_motion[
-                d_settings.granularity * dim + edge_tid
-            ] =
-                node_anchors[
-                    (source_edge_slot + 1) * dim + edge_tid
-                ];
-        }
-        __syncthreads();
-
-        if (tid == 0) {
-            first_projection_failure_edge[0] = edge_count;
-        }
-        __syncthreads();
-
-        if (
-            edge_slot < edge_count &&
-            edge_tid == 0 &&
-            edge_success[0] == 0u
-        ) {
-            atomicMin(
-                (int *)first_projection_failure_edge,
-                edge_slot
-            );
+                prefix_motion[prefix_waypoint * dim + joint];
         }
         __syncthreads();
     }
@@ -3067,6 +3074,41 @@ namespace pRRTC {
                         ) {
                             concon_projected_edge_count =
                                 concon_first_projection_failure_edge[0];
+                        }
+
+                        // Endpoint nodes can move during edge smoothing, so
+                        // recheck CONNECT progress using the final prefix.
+                        for (
+                            int edge_step = 1;
+                            edge_step <= concon_projected_edge_count;
+                            edge_step++
+                        ) {
+                            volatile float *projected_edge =
+                                &concon_motion_segments[
+                                    (edge_step - 1) *
+                                    CONCON_MOTION_SEGMENT_STRIDE
+                                ];
+                            const float distance_before =
+                                cprrtc_config_distance_from_volatile<Robot>(
+                                    projected_edge,
+                                    connect_target_node
+                                );
+                            const float distance_after =
+                                cprrtc_config_distance_from_volatile<Robot>(
+                                    &projected_edge[
+                                        d_settings.granularity * dim
+                                    ],
+                                    connect_target_node
+                                );
+
+                            if (
+                                distance_after >=
+                                distance_before -
+                                    d_settings.connect_progress_epsilon
+                            ) {
+                                concon_projected_edge_count = edge_step - 1;
+                                break;
+                            }
                         }
                     }
                     __syncthreads();
