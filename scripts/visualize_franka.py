@@ -33,6 +33,43 @@ DUAL_JOINTS = SINGLE_JOINTS + tuple(
     f"panda1_joint{index}" for index in range(1, 8)
 )
 
+# These are the fixed T_EE_object transforms used by
+# src/robots/franka_collision.cuh. They must not be reconstructed from the
+# object's default XML pose because random problem starts have different
+# world poses.
+SINGLE_ATTACHED_ROTATION = (
+    5.65184217e-06,
+    4.04983458e-06,
+    -1.0,
+    7.46365351e-06,
+    1.0,
+    4.04987676e-06,
+    1.0,
+    -7.46367640e-06,
+    5.65181194e-06,
+)
+SINGLE_ATTACHED_TRANSLATION = (
+    -0.0299951539,
+    -3.27119653e-06,
+    -0.0200040056,
+)
+DUAL_ATTACHED_ROTATION = (
+    1.0,
+    -1.12881255e-05,
+    4.01251945e-06,
+    -1.12881331e-05,
+    -1.0,
+    1.89331703e-06,
+    4.01249807e-06,
+    -1.89336233e-06,
+    -1.0,
+)
+DUAL_ATTACHED_TRANSLATION = (
+    -7.26699543e-08,
+    0.124998270,
+    0.0499992695,
+)
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
@@ -64,37 +101,63 @@ def parse_args() -> argparse.Namespace:
     return args
 
 
-def load_trajectory(path: Path) -> tuple[tuple[str, ...], list[list[float]]]:
+def load_trajectories(path: Path):
     document = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(document, dict):
+        raise ValueError("trajectory document must be a JSON object")
     joint_names = tuple(document.get("joint_names", ()))
     if joint_names not in (SINGLE_JOINTS, DUAL_JOINTS):
         raise ValueError("trajectory joint order is not Franka single or dual")
-    waypoints = document.get("waypoints")
-    if not isinstance(waypoints, list) or len(waypoints) < 2:
-        raise ValueError("trajectory must contain at least two waypoints")
-    normalized: list[list[float]] = []
-    for index, waypoint in enumerate(waypoints):
-        if not isinstance(waypoint, list) or len(waypoint) != len(joint_names):
-            raise ValueError(
-                f"waypoint {index} is not a {len(joint_names)}-DoF configuration"
-            )
-        row = [float(value) for value in waypoint]
-        if not all(math.isfinite(value) for value in row):
-            raise ValueError(f"waypoint {index} contains a non-finite value")
-        normalized.append(row)
-    expected_start = document.get("start")
-    if not isinstance(expected_start, list) or len(expected_start) != len(joint_names):
-        raise ValueError("trajectory is missing its start configuration")
-    if max(
-        abs(normalized[0][index] - float(expected_start[index]))
-        for index in range(len(joint_names))
-    ) > 1.0e-5:
-        raise ValueError("trajectory was not converted to start-to-goal order")
-    return joint_names, GeometricPathWaypoints(
-        normalized,
-        document.get("geometric_path"),
-        document.get("path_smoothing", True),
-    )
+
+    raw_trajectories = document.get("trajectories")
+    if raw_trajectories is None:
+        raw_trajectories = [document]
+    if not isinstance(raw_trajectories, list) or not raw_trajectories:
+        raise ValueError("trajectory bundle must contain at least one trajectory")
+
+    trajectories = []
+    for trajectory_index, trajectory in enumerate(raw_trajectories):
+        if not isinstance(trajectory, dict):
+            raise ValueError(f"trajectory {trajectory_index} is not a JSON object")
+        label = str(
+            trajectory.get("label", f"trajectory {trajectory_index + 1}")
+        )
+        waypoints = trajectory.get("waypoints")
+        if not isinstance(waypoints, list) or len(waypoints) < 2:
+            raise ValueError(f"{label} must contain at least two waypoints")
+        normalized: list[list[float]] = []
+        for waypoint_index, waypoint in enumerate(waypoints):
+            if not isinstance(waypoint, list) or len(waypoint) != len(joint_names):
+                raise ValueError(
+                    f"{label} waypoint {waypoint_index} is not a "
+                    f"{len(joint_names)}-DoF configuration"
+                )
+            row = [float(value) for value in waypoint]
+            if not all(math.isfinite(value) for value in row):
+                raise ValueError(
+                    f"{label} waypoint {waypoint_index} contains a non-finite value"
+                )
+            normalized.append(row)
+        expected_start = trajectory.get("start")
+        if (
+            not isinstance(expected_start, list)
+            or len(expected_start) != len(joint_names)
+        ):
+            raise ValueError(f"{label} is missing its start configuration")
+        if max(
+            abs(normalized[0][index] - float(expected_start[index]))
+            for index in range(len(joint_names))
+        ) > 1.0e-5:
+            raise ValueError(f"{label} was not converted to start-to-goal order")
+        trajectories.append((
+            label,
+            GeometricPathWaypoints(
+                normalized,
+                trajectory.get("geometric_path"),
+                trajectory.get("path_smoothing", True),
+            ),
+        ))
+    return joint_names, trajectories
 
 
 def resolve_addresses(mujoco, model, joint_names: tuple[str, ...]) -> list[int]:
@@ -148,9 +211,7 @@ def interpolated_frames(
     )
 
 
-def resolve_attached_object(
-    mujoco, model, data, joint_names, addresses, start
-) -> dict[str, object]:
+def resolve_attached_object(mujoco, model, joint_names) -> dict[str, object]:
     object_id = mujoco.mj_name2id(
         model, mujoco.mjtObj.mjOBJ_BODY, "object"
     )
@@ -163,8 +224,9 @@ def resolve_attached_object(
         raise ValueError("attached object joint is not free")
     qpos_address = int(model.jnt_qposadr[joint_id])
 
-    # Both source models name the left/single attachment site end_effector;
-    # the dual model names only the right site end_effector1.
+    # Both source models name the left/single attachment site end_effector.
+    # The dual model additionally names its right attachment site end_effector1;
+    # the planner parents the payload to the left site.
     site_name = "end_effector"
     site_id = mujoco.mj_name2id(
         model, mujoco.mjtObj.mjOBJ_SITE, site_name
@@ -172,17 +234,25 @@ def resolve_attached_object(
     if site_id < 0:
         raise ValueError(f"MuJoCo model is missing attachment site: {site_name}")
 
-    apply_configuration(data, addresses, start)
-    mujoco.mj_forward(model, data)
-    ee_position = np.asarray(data.site_xpos[site_id]).copy()
-    ee_rotation = np.asarray(data.site_xmat[site_id]).reshape(3, 3).copy()
-    object_position = np.asarray(data.xpos[object_id]).copy()
-    object_rotation = np.asarray(data.xmat[object_id]).reshape(3, 3).copy()
+    if joint_names == SINGLE_JOINTS:
+        relative_position = np.asarray(
+            SINGLE_ATTACHED_TRANSLATION, dtype=np.float64
+        )
+        relative_rotation = np.asarray(
+            SINGLE_ATTACHED_ROTATION, dtype=np.float64
+        ).reshape(3, 3)
+    else:
+        relative_position = np.asarray(
+            DUAL_ATTACHED_TRANSLATION, dtype=np.float64
+        )
+        relative_rotation = np.asarray(
+            DUAL_ATTACHED_ROTATION, dtype=np.float64
+        ).reshape(3, 3)
     return {
         "site_id": site_id,
         "qpos_address": qpos_address,
-        "relative_position": ee_rotation.T @ (object_position - ee_position),
-        "relative_rotation": ee_rotation.T @ object_rotation,
+        "relative_position": relative_position,
+        "relative_rotation": relative_rotation,
     }
 
 
@@ -226,7 +296,7 @@ def configure_replay_camera(
 def save_video(
     model_path: Path,
     joint_names,
-    waypoints,
+    trajectories,
     fps: float,
     speed: float,
     output_path: Path,
@@ -248,14 +318,9 @@ def save_video(
     model.vis.global_.offheight = max(int(model.vis.global_.offheight), height)
     data = mujoco.MjData(model)
     addresses = resolve_addresses(mujoco, model, joint_names)
-    validate_limits(mujoco, model, joint_names, waypoints)
-    set_grippers(mujoco, model, data, joint_names == DUAL_JOINTS)
-    attachment = resolve_attached_object(
-        mujoco, model, data, joint_names, addresses, waypoints[0]
-    )
-    apply_attached_configuration(
-        mujoco, model, data, addresses, waypoints[0], attachment
-    )
+    for _, waypoints in trajectories:
+        validate_limits(mujoco, model, joint_names, waypoints)
+    attachment = resolve_attached_object(mujoco, model, joint_names)
 
     cameras = {}
     for view in views:
@@ -280,22 +345,32 @@ def save_video(
         with MultiViewVideoWriter(
             output_path, views, width, height, fps
         ) as writer:
-            for _ in range(start_frame_count):
-                write_frame(writer)
-            for configuration in interpolated_frames(
-                waypoints, fps, speed, acceleration
-            ):
-                apply_attached_configuration(
-                    mujoco,
-                    model,
-                    data,
-                    addresses,
-                    configuration,
-                    attachment,
+            for trajectory_index, (label, waypoints) in enumerate(trajectories):
+                print(
+                    f"[{trajectory_index + 1}/{len(trajectories)}] {label}",
+                    flush=True,
                 )
-                write_frame(writer)
-            for _ in range(end_frame_count):
-                write_frame(writer)
+                mujoco.mj_resetData(model, data)
+                set_grippers(mujoco, model, data, joint_names == DUAL_JOINTS)
+                apply_attached_configuration(
+                    mujoco, model, data, addresses, waypoints[0], attachment
+                )
+                for _ in range(start_frame_count):
+                    write_frame(writer)
+                for configuration in interpolated_frames(
+                    waypoints, fps, speed, acceleration
+                ):
+                    apply_attached_configuration(
+                        mujoco,
+                        model,
+                        data,
+                        addresses,
+                        configuration,
+                        attachment,
+                    )
+                    write_frame(writer)
+                for _ in range(end_frame_count):
+                    write_frame(writer)
             frame_count = writer.frame_count
     finally:
         renderer.close()
@@ -310,7 +385,7 @@ def save_video(
 def replay(
     model_path,
     joint_names,
-    waypoints,
+    trajectories,
     fps,
     speed,
     acceleration=DEFAULT_TRAJECTORY_ACCELERATION,
@@ -321,57 +396,75 @@ def replay(
     model = mujoco.MjModel.from_xml_path(str(model_path))
     data = mujoco.MjData(model)
     addresses = resolve_addresses(mujoco, model, joint_names)
-    validate_limits(mujoco, model, joint_names, waypoints)
-    set_grippers(mujoco, model, data, joint_names == DUAL_JOINTS)
-    attachment = resolve_attached_object(
-        mujoco, model, data, joint_names, addresses, waypoints[0]
-    )
+    for _, waypoints in trajectories:
+        validate_limits(mujoco, model, joint_names, waypoints)
+    attachment = resolve_attached_object(mujoco, model, joint_names)
     frame_period = 1.0 / fps
-    print("MuJoCo viewer: Franka start -> goal 경로를 반복 재생합니다.")
-    print("창을 닫으면 single_mbm 실행이 종료됩니다.")
+    print(
+        f"MuJoCo viewer: Franka start -> goal 경로 "
+        f"{len(trajectories)}개를 순서대로 반복 재생합니다."
+    )
+    print("창을 닫으면 MuJoCo 시각화가 종료됩니다.")
     with mujoco.viewer.launch_passive(model, data) as viewer:
         configure_replay_camera(mujoco, viewer.cam, joint_names)
         while viewer.is_running():
-            apply_attached_configuration(
-                mujoco, model, data, addresses, waypoints[0], attachment
-            )
-            viewer.sync()
-            time.sleep(0.75)
-            deadline = time.perf_counter()
-            for configuration in interpolated_frames(
-                waypoints, fps, speed, acceleration
-            ):
+            for trajectory_index, (label, waypoints) in enumerate(trajectories):
                 if not viewer.is_running():
                     return
+                print(
+                    f"[{trajectory_index + 1}/{len(trajectories)}] {label}",
+                    flush=True,
+                )
+                mujoco.mj_resetData(model, data)
+                set_grippers(mujoco, model, data, joint_names == DUAL_JOINTS)
                 apply_attached_configuration(
-                    mujoco, model, data, addresses, configuration, attachment
+                    mujoco, model, data, addresses, waypoints[0], attachment
                 )
                 viewer.sync()
-                deadline += frame_period
-                time.sleep(max(0.0, deadline - time.perf_counter()))
-            time.sleep(1.0)
+                time.sleep(0.75)
+                deadline = time.perf_counter()
+                for configuration in interpolated_frames(
+                    waypoints, fps, speed, acceleration
+                ):
+                    if not viewer.is_running():
+                        return
+                    apply_attached_configuration(
+                        mujoco,
+                        model,
+                        data,
+                        addresses,
+                        configuration,
+                        attachment,
+                    )
+                    viewer.sync()
+                    deadline += frame_period
+                    time.sleep(max(0.0, deadline - time.perf_counter()))
+                time.sleep(1.0)
 
 
 def main() -> int:
     args = parse_args()
     model_path = args.model.resolve()
-    joint_names, waypoints = load_trajectory(args.trajectory)
+    joint_names, trajectories = load_trajectories(args.trajectory)
     if args.validate_only:
         import mujoco
 
         model = mujoco.MjModel.from_xml_path(str(model_path))
         data = mujoco.MjData(model)
         addresses = resolve_addresses(mujoco, model, joint_names)
-        validate_limits(mujoco, model, joint_names, waypoints)
-        set_grippers(mujoco, model, data, joint_names == DUAL_JOINTS)
-        attachment = resolve_attached_object(
-            mujoco, model, data, joint_names, addresses, waypoints[0]
-        )
-        apply_attached_configuration(
-            mujoco, model, data, addresses, waypoints[0], attachment
-        )
+        attachment = resolve_attached_object(mujoco, model, joint_names)
+        waypoint_count = 0
+        for _, waypoints in trajectories:
+            mujoco.mj_resetData(model, data)
+            validate_limits(mujoco, model, joint_names, waypoints)
+            set_grippers(mujoco, model, data, joint_names == DUAL_JOINTS)
+            apply_attached_configuration(
+                mujoco, model, data, addresses, waypoints[0], attachment
+            )
+            waypoint_count += len(waypoints)
         print(
-            f"validated {len(waypoints)} waypoints, {len(joint_names)} joints, "
+            f"validated {len(trajectories)} trajectories, "
+            f"{waypoint_count} waypoints, {len(joint_names)} joints, "
             f"model nq={model.nq}"
         )
         return 0
@@ -379,7 +472,7 @@ def main() -> int:
         save_video(
             model_path,
             joint_names,
-            waypoints,
+            trajectories,
             args.fps,
             args.speed,
             args.video,
@@ -392,7 +485,7 @@ def main() -> int:
     replay(
         model_path,
         joint_names,
-        waypoints,
+        trajectories,
         args.fps,
         args.speed,
         args.acceleration,

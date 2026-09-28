@@ -110,6 +110,89 @@ Run the bundled problem once:
 ./build_patacon/single_mbm igris_c igris_c_shelf_lift 1
 ```
 
+### Standalone planning JSON
+
+`single_mbm` can infer the compiled robot backend, dimension, problem name,
+start, goals, world, and constraints from one JSON entry point:
+
+```bash
+./build_patacon/single_mbm --config scripts/franka_single_problems.json
+./build_patacon/single_mbm --config scripts/g1_problems.json --visualize
+./build_patacon/single_mbm --config scripts/igris_c_problems.json --validate-config
+```
+
+The existing collection layout remains supported. If a collection contains
+multiple problem groups, add `"selected_problem": {"name": "...", "index": 1}`
+at the top level. A direct, single-query file uses this layout:
+
+```json
+{
+  "schema_version": 1,
+  "robot": {"model": "franka_single", "dimension": 7},
+  "name": "direct_demo",
+  "query": {
+    "start": [1.018291, -0.276863, -0.648974, -0.990170, -0.539716, 2.329168, -2.144403],
+    "goals": [[-0.064490, -0.725273, -0.044019, -2.522677, -0.413973, 3.385743, -1.982525]]
+  },
+  "world": {"sphere": [], "cylinder": [], "box": []}
+}
+```
+
+`robot.dimension` is validated against the selected compiled backend; it does
+not override CUDA array dimensions. Constraint declarations can keep the
+legacy robot parameter object or use the common `items` representation:
+
+```json
+{
+  "constraints": {
+    "tolerance_squared": 0.000001,
+    "items": [
+      {
+        "type": "fixed_frame_pose",
+        "frame": "left_foot",
+        "target": {
+          "quaternion_wxyz": [1, 0, 0, 0],
+          "position": [0.12, 0.175, 0]
+        }
+      },
+      {
+        "type": "fixed_frame_pose",
+        "frame": "right_foot",
+        "target": {
+          "quaternion_wxyz": [1, 0, 0, 0],
+          "position": [0.12, -0.175, 0]
+        }
+      },
+      {
+        "type": "relative_pose",
+        "frame_a": "left_hand",
+        "frame_b": "right_hand",
+        "target": [1, 0, 0, 0, 0, -0.303, 0]
+      },
+      {
+        "type": "axis_alignment",
+        "frame": "left_hand",
+        "local_axis": [1, 0, 0],
+        "target_world_axis": [0, 0, 1]
+      },
+      {
+        "type": "com_support",
+        "support_frames": ["left_foot", "right_foot"],
+        "support_polygon": [0.105, -0.169, 0.105, 0.169, 0.005, 0.166, 0.005, -0.166],
+        "support_margin_m": 0.05,
+        "payload_mass_kg": 0.0
+      }
+    ]
+  }
+}
+```
+
+The common JSON layer normalizes these declarations into the existing
+robot-specific CUDA constraint parameters. FK, collision, projection, and
+tangent-space execution remain in the precompiled robot backends, so adding a
+new task needs only JSON while adding an entirely new robot still requires a
+backend implementation and rebuild.
+
 Evaluate every problem in each bundled problem file:
 
 ```bash
@@ -151,8 +234,9 @@ Both benchmark executables accept `--problem-file PATH`, `--save-json PATH`,
   `--real-drive-accel-limit`.
 
 `evaluate_mbm` additionally accepts `--max-problems N`. Its `--plot` option
-requires `--aorrtc`, and its `--visualize` option is limited to `g1`,
-`franka_single`, and `franka`.
+requires `--aorrtc`. Its `--visualize` option supports `g1`, `franka_single`,
+`franka`, `ffw_sg2`, and `ffw_sg2_mobility`; IGRIS-C evaluation visualization
+is intentionally excluded.
 
 Tangent-Space backtracking prevention is always enabled for both the standard
 pRRTC path and `--aorrtc`; no command-line option is required.
@@ -236,6 +320,11 @@ output filename, problem name, and seed automatically:
 ./build_patacon/generate_franka_dual_random_pairs --rigid-orientation
 ```
 
+For dual-arm datasets, both randomized endpoints are projected onto the source
+demo's fixed bimanual relative pose. The attached tray therefore keeps the
+planner's fixed left-end-effector transform while the right gripper remains at
+the source grasp pose.
+
 Evaluate the generated datasets with the planner robot identifiers
 `franka_single` and `franka`; `franka_dual` is not a valid planner identifier.
 
@@ -256,6 +345,11 @@ Evaluate the generated datasets with the planner robot identifiers
   --problem-file scripts/franka_dual_random_pairs_rigid_orientation_100.json \
   --rigid-orientation --no-print-path
 ```
+
+Add `--visualize` to any Franka `evaluate_mbm` command to cycle through every
+solved path in one MuJoCo window. The visualizer uses the same fixed
+end-effector-to-object transforms as the CUDA collision model instead of
+deriving a transform from the object's default XML world pose.
 
 Run either generator with `--help` to see its dataset controls, including
 `--template`, `--output`, `--source-name`, `--source-index`, `--problem-name`,
@@ -385,6 +479,13 @@ models, G1, and IGRIS-C:
 
 Interactive viewers repeat the start-to-goal trajectory until their window is
 closed. MP4 export renders one traversal instead.
+
+For problem sets, `evaluate_mbm --visualize` cycles every solved run in one
+window for Franka single/dual, G1, fixed-base FFW-SG2, and mobile FFW-SG2.
+Each transition resets MuJoCo and applies that problem's start state and
+attached-object frame offset. G1 problem-set replay explicitly uses `qpos`;
+single-run G1 visualization keeps its existing torque-PD default. IGRIS-C is
+not enabled for `evaluate_mbm --visualize`.
 
 For continuous G1 replanning with the PATACON planner, run:
 

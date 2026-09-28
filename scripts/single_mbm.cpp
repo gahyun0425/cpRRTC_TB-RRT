@@ -17,6 +17,7 @@
 #include <vector>
 #include <iomanip>
 #include <limits>
+#include <optional>
 
 #include <cuda_runtime.h>
 
@@ -25,10 +26,9 @@
 #include "src/planning/Planners.hh"
 #include "src/planning/AORRTC.hh"
 #include "src/planning/pRRTC_settings.hh"
+#include "src/config/PlanningProblemJson.hh"
+#include "src/constraints/RobotConstraintAdapter.hh"
 #include "scripts/ffw_sg2_attached_object_collision.hh"
-#include "scripts/g1_problem.hh"
-#include "scripts/igris_c_problem.hh"
-#include "scripts/franka_problem.hh"
 #include "scripts/planner_result_json.hh"
 
 using json = nlohmann::json;
@@ -1136,12 +1136,12 @@ int run_planner(
         }
     }
 
-    Configuration start = data["start"];
-    std::vector<Configuration> goals = data["goals"];
+    ppln::constraints::apply_constraint_backend_defaults<Robot>(settings);
+    auto prepared_query =
+        ppln::constraints::prepare_constraint_query<Robot>(data, settings);
+    Configuration start = prepared_query.start;
+    std::vector<Configuration> goals = std::move(prepared_query.goals);
     if constexpr (std::is_same_v<Robot, robots::G1>) {
-        start = g1_start_from_problem(data, settings.rigid_orientation);
-        goals = g1_goals_from_problem(data, settings.rigid_orientation)
-            .template get<std::vector<Configuration>>();
         if (g1_replanning.enabled) {
             if (!pRRTC::project_g1_configuration(start, settings)) {
                 throw std::runtime_error(
@@ -1160,13 +1160,6 @@ int run_planner(
             data["rigid_orientation_endpoints"]["start"] = start;
             data["rigid_orientation_endpoints"]["goals"] = goals;
         }
-    }
-    if constexpr (
-        std::is_same_v<Robot, robots::FrankaSingle> ||
-        std::is_same_v<Robot, robots::Franka>
-    ) {
-        settings.franka_constraints =
-            franka_constraint_parameters_from_start<Robot>(start);
     }
     json saved_results = json::array();
     int solved_count = 0;
@@ -1770,11 +1763,14 @@ int main(int argc, char* argv[]) {
     bool projection_smoothness = true;
     bool print_path = true;
     bool collect_diagnostics = false;
+    bool validate_config_only = false;
     bool aorrtc = false;
     bool enable_com_constraint = false;
     bool object_mass_option_provided = false;
     bool support_margin_option_provided = false;
     bool time_option_provided = false;
+    bool range_option_provided = false;
+    bool rigid_orientation_option_provided = false;
     float object_mass_kg = 0.0f;
     float support_margin_m = 0.0f;
     float planner_range = 0.4f;
@@ -1787,8 +1783,13 @@ int main(int argc, char* argv[]) {
     TraceExportOptions trace_options;
     RealDynamicsOptions real_options;
     G1ReplanningOptions g1_replanning;
+    std::optional<ppln::config::SelectedPlanningProblem> selected_problem;
+    const bool standalone_config_mode = argc >= 2 &&
+        std::string(argv[1]) == "--config";
+    int option_start = 4;
 
-    if (argc < 4) {
+    if ((!standalone_config_mode && argc < 4) ||
+        (standalone_config_mode && argc < 3)) {
         std::cout
             << "Usage: ./single_mbm <robot_name> <problem_name> <problem_idx> "
             << "[--visualize] [--replanning] [--real] "
@@ -1806,6 +1807,7 @@ int main(int argc, char* argv[]) {
             << "[--real-steer-rate-limit RPS] "
             << "[--real-drive-accel-limit RPS2] "
             << "[--rigid-orientation] "
+            << "[--validate-config] "
             << "[--diagnostics] "
             << "[--no-path-smoothing] "
             << "[--no-waypoint-smoothing] "
@@ -1814,11 +1816,29 @@ int main(int argc, char* argv[]) {
             << "[--html-trace-mode path|tree] "
             << "[--no-print-path] "
             << "[--html-max-tree-nodes N] [--graphml PATH] [--html PATH] "
-            << "[--patacon-root PATH]\n";
+            << "[--patacon-root PATH]\n"
+            << "       ./single_mbm --config <planning.json> [options]\n";
         return 1;
     }
-    robot_name = argv[1];
-    name = argv[2];
+    try {
+        if (standalone_config_mode) {
+            problem_file_path = argv[2];
+            selected_problem = ppln::config::load_selected_problem(
+                problem_file_path
+            );
+            robot_name = selected_problem->robot_name;
+            name = selected_problem->problem_name;
+            problem_idx = selected_problem->problem_index;
+            option_start = 3;
+        } else {
+            robot_name = argv[1];
+            name = argv[2];
+            problem_idx = std::stoi(argv[3]);
+        }
+    } catch (const std::exception &error) {
+        std::cerr << "single_mbm config error: " << error.what() << "\n";
+        return 1;
+    }
     auto parse_nonnegative_int = [](const std::string &option, const std::string &value) {
         std::size_t consumed = 0;
         const int parsed = std::stoi(value, &consumed);
@@ -1869,8 +1889,7 @@ int main(int argc, char* argv[]) {
         return parsed;
     };
     try {
-        problem_idx = std::stoi(argv[3]);
-        for (int index = 4; index < argc; index++) {
+        for (int index = option_start; index < argc; index++) {
             const std::string argument = argv[index];
             if (argument == "--visualize") {
                 visualize = true;
@@ -1885,6 +1904,11 @@ int main(int argc, char* argv[]) {
             } else if (argument == "--save-json" && index + 1 < argc) {
                 save_json_path = argv[++index];
             } else if (argument == "--problem-file" && index + 1 < argc) {
+                if (standalone_config_mode) {
+                    throw std::invalid_argument(
+                        "--problem-file cannot be combined with --config"
+                    );
+                }
                 problem_file_path = argv[++index];
             } else if ((argument == "--run" || argument == "--runs") && index + 1 < argc) {
                 runs = std::max(1, std::stoi(argv[++index]));
@@ -1894,6 +1918,7 @@ int main(int argc, char* argv[]) {
                 planner_range = static_cast<float>(
                     parse_positive_double(argument, argv[++index])
                 );
+                range_option_provided = true;
             } else if (
                 (
                     argument == "--max-concon-nodes" ||
@@ -2054,9 +2079,13 @@ int main(int argc, char* argv[]) {
                 argument == "--rigid-orientiation"
             ) {
                 rigid_orientation = true;
+                rigid_orientation_option_provided = true;
             }
             else if (argument == "--diagnostics") {
                 collect_diagnostics = true;
+            }
+            else if (argument == "--validate-config") {
+                validate_config_only = true;
             }
             else if (argument == "--no-waypoint-smoothing") {
                 projection_smoothness = false;
@@ -2227,27 +2256,63 @@ int main(int argc, char* argv[]) {
     const std::string path = problem_file_path.empty()
         ? "scripts/" + robot_name + "_problems.json"
         : problem_file_path;
-    std::ifstream f(path);
-    if (!f) {
-        std::cerr << "Failed to open problem file: " << path << "\n";
-        return 1;
-    }
-    json all_data;
     try {
-        all_data = json::parse(f);
+        if (!selected_problem.has_value()) {
+            selected_problem = ppln::config::load_selected_problem(
+                path, robot_name, name, problem_idx
+            );
+        }
     } catch (const std::exception &error) {
-        std::cerr << "Failed to parse problem file: " << error.what() << "\n";
+        std::cerr << "single_mbm config error: " << error.what() << "\n";
         return 1;
     }
-    if (!all_data.contains("problems")
-        || !all_data["problems"].contains(name)
-        || problem_idx < 1
-        || problem_idx > static_cast<int>(all_data["problems"][name].size())) {
-        std::cerr << "Unknown problem or problem index: " << name
-                  << " " << problem_idx << "\n";
-        return 1;
+    json data = selected_problem->data;
+    if (data.contains("planner")) {
+        const auto &planner = data.at("planner");
+        if (!planner.is_object()) {
+            std::cerr << "single_mbm config error: planner must be an object\n";
+            return 1;
+        }
+        if (!range_option_provided && planner.contains("range")) {
+            try {
+                planner_range = static_cast<float>(
+                    parse_positive_double(
+                        "planner.range",
+                        planner.at("range").dump()
+                    )
+                );
+            } catch (const std::exception &error) {
+                std::cerr << "single_mbm config error: "
+                          << error.what() << "\n";
+                return 1;
+            }
+        }
+        if (!rigid_orientation_option_provided &&
+            planner.contains("rigid_orientation")) {
+            try {
+                rigid_orientation =
+                    planner.at("rigid_orientation").get<bool>();
+            } catch (const std::exception &) {
+                std::cerr << "single_mbm config error: "
+                          << "planner.rigid_orientation must be boolean\n";
+                return 1;
+            }
+        }
     }
-    json data = all_data["problems"][name][problem_idx - 1];
+    if (!rigid_orientation_option_provided && robot_name == "g1" &&
+        data.contains("constraints") &&
+        data.at("constraints").contains("bimanual_axis")) {
+        rigid_orientation = true;
+    }
+    if (validate_config_only) {
+        std::cout << "config_valid: " << path << "\n"
+                  << "robot: " << robot_name << "\n"
+                  << "dimension: "
+                  << ppln::config::compiled_robot_dimension(robot_name) << "\n"
+                  << "problem: " << name << "\n"
+                  << "problem_index: " << problem_idx << "\n";
+        return 0;
+    }
     if (not data["valid"]) {
         return -1;
     }
@@ -2343,14 +2408,6 @@ int main(int argc, char* argv[]) {
     }
 
     try {
-        if (robot_name == "g1") {
-            settings.granularity = robots::G1::resolution;
-            settings.g1_constraints = g1_constraint_parameters_from_problem(data);
-        } else if (robot_name == "igris_c") {
-            settings.granularity = robots::IgrisC::resolution;
-            settings.igris_c_constraints =
-                igris_c_constraint_parameters_from_problem(data);
-        }
         if (g1_replanning.server) {
             return run_g1_replan_server(data, settings, g1_replanning);
         }

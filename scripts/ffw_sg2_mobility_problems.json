@@ -1,5 +1,6 @@
 {
-  "robot": "ffw_sg2_mobility",
+  "schema_version": 1,
+  "robot": {"model": "ffw_sg2_mobility", "dimension": 18},
   "joints": [
     "base_x",
     "base_y",

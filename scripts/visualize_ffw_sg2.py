@@ -147,40 +147,33 @@ def parse_attached_object_frame_offset(document) -> tuple[float, float, float]:
     return offset
 
 
-def load_trajectory(
-    path: Path
-) -> tuple[tuple[str, ...], list[list[float]], tuple[float, float, float]]:
-    document = json.loads(path.read_text(encoding="utf-8"))
-    joint_names = tuple(document.get("joint_names", ()))
-    if joint_names not in SUPPORTED_JOINT_ORDERS:
-        raise ValueError(
-            "trajectory joint order does not match a supported FFW-SG2 planning order"
-        )
-
+def normalize_trajectory(document, joint_names, label):
+    if not isinstance(document, dict):
+        raise ValueError(f"{label} is not a JSON object")
     waypoints = document.get("waypoints")
     if not isinstance(waypoints, list) or len(waypoints) < 2:
-        raise ValueError("trajectory must contain at least two waypoints")
+        raise ValueError(f"{label} must contain at least two waypoints")
     for index, waypoint in enumerate(waypoints):
         if not isinstance(waypoint, list) or len(waypoint) != len(joint_names):
             raise ValueError(
-                f"waypoint {index} is not a {len(joint_names)}-DoF configuration"
+                f"{label} waypoint {index} is not a "
+                f"{len(joint_names)}-DoF configuration"
             )
         if not all(math.isfinite(float(value)) for value in waypoint):
-            raise ValueError(f"waypoint {index} contains a non-finite value")
+            raise ValueError(f"{label} waypoint {index} contains a non-finite value")
     normalized = [[float(value) for value in waypoint] for waypoint in waypoints]
 
     expected_start = document.get("start")
     if not isinstance(expected_start, list) or len(expected_start) != len(joint_names):
         raise ValueError(
-            f"trajectory is missing its {len(joint_names)}-DoF start configuration"
+            f"{label} is missing its {len(joint_names)}-DoF start configuration"
         )
     if max(
         abs(normalized[0][index] - float(expected_start[index]))
         for index in range(len(joint_names))
     ) > 1.0e-5:
-        raise ValueError("trajectory was not converted to start-to-goal order")
+        raise ValueError(f"{label} was not converted to start-to-goal order")
     return (
-        joint_names,
         GeometricPathWaypoints(
             normalized,
             document.get("geometric_path"),
@@ -188,6 +181,30 @@ def load_trajectory(
         ),
         parse_attached_object_frame_offset(document),
     )
+
+
+def load_trajectories(path: Path):
+    document = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(document, dict):
+        raise ValueError("trajectory document must be a JSON object")
+    joint_names = tuple(document.get("joint_names", ()))
+    if joint_names not in SUPPORTED_JOINT_ORDERS:
+        raise ValueError(
+            "trajectory joint order does not match a supported FFW-SG2 planning order"
+        )
+    raw_trajectories = document.get("trajectories")
+    if raw_trajectories is None:
+        raw_trajectories = [document]
+    if not isinstance(raw_trajectories, list) or not raw_trajectories:
+        raise ValueError("trajectory bundle must contain at least one trajectory")
+    trajectories = []
+    for index, trajectory in enumerate(raw_trajectories):
+        label = str(trajectory.get("label", f"trajectory {index + 1}"))
+        waypoints, offset = normalize_trajectory(
+            trajectory, joint_names, label
+        )
+        trajectories.append((label, waypoints, offset))
+    return joint_names, trajectories
 
 
 def apply_visual_style(mujoco, model, joint_names: tuple[str, ...]) -> None:
@@ -286,26 +303,29 @@ def close_grippers(mujoco, model, data) -> None:
 
 
 def validate_joint_limits(
-    mujoco, model, joint_names, waypoints: list[list[float]]
+    mujoco,
+    model,
+    joint_names,
+    waypoints: list[list[float]],
+    label: str = "trajectory",
 ) -> None:
-    tolerance = 1.0e-6
+    # The planner stores limits as float while MuJoCo reads XML values as
+    # double. Allow only that representation gap; never alter the trajectory.
+    tolerance = 1.0e-4
     for waypoint_index, waypoint in enumerate(waypoints):
         for name, value in zip(joint_names, waypoint):
             if name in MOBILITY_BASE_LIMITS:
                 lower, upper = MOBILITY_BASE_LIMITS[name]
-                if value < lower - tolerance or value > upper + tolerance:
-                    raise ValueError(
-                        f"waypoint {waypoint_index}, {name}={value} is outside "
-                        f"[{lower}, {upper}]"
-                    )
-                continue
-            joint_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, name)
-            if not model.jnt_limited[joint_id]:
-                continue
-            lower, upper = model.jnt_range[joint_id]
+            else:
+                joint_id = mujoco.mj_name2id(
+                    model, mujoco.mjtObj.mjOBJ_JOINT, name
+                )
+                if not model.jnt_limited[joint_id]:
+                    continue
+                lower, upper = model.jnt_range[joint_id]
             if value < lower - tolerance or value > upper + tolerance:
                 raise ValueError(
-                    f"waypoint {waypoint_index}, {name}={value} is outside "
+                    f"{label}: waypoint {waypoint_index}, {name}={value} is outside "
                     f"[{lower}, {upper}]"
                 )
 
@@ -708,8 +728,7 @@ def save_video(
 def replay(
     model_path: Path,
     joint_names,
-    waypoints,
-    attached_object_frame_offset,
+    trajectories,
     fps: float,
     speed: float,
     input_mode: str,
@@ -735,58 +754,33 @@ def replay(
     )
     base_body = resolve_mobility_base_body(mujoco, model, joint_names)
     object_qposadr = resolve_object_freejoint(mujoco, model, joint_names)
-    validate_joint_limits(mujoco, model, joint_names, waypoints)
+    for label, waypoints, _ in trajectories:
+        validate_joint_limits(mujoco, model, joint_names, waypoints, label)
     if joint_names == SINGLE_ARM_PLANNING_JOINTS:
         left_arm_addresses = resolve_qpos_addresses(mujoco, model, LEFT_ARM_JOINTS)
         for address in left_arm_addresses:
             data.qpos[address] = 0.0
-    apply_configuration(
-        mujoco,
-        model,
-        data,
-        joint_names,
-        qpos_addresses,
-        ctrl_addresses,
-        waypoints[0],
-        base_body,
-        object_qposadr,
-        attached_object_frame_offset,
-        input_mode,
-        settle_steps,
-        seed_qpos=input_mode == "ctrl",
+    print(
+        f"MuJoCo viewer: start -> goal 경로 {len(trajectories)}개를 "
+        "순서대로 반복 재생합니다."
     )
-
-    print("MuJoCo viewer: start -> goal 경로를 반복 재생합니다.")
-    print("창을 닫으면 single_mbm 실행이 종료됩니다.")
+    print("창을 닫으면 MuJoCo 시각화가 종료됩니다.")
     with mujoco.viewer.launch_passive(model, data) as viewer:
         configure_replay_camera(mujoco, viewer.cam, joint_names)
         viewer.sync()
 
         frame_period = 1.0 / fps
         while viewer.is_running():
-            apply_configuration(
-                mujoco,
-                model,
-                data,
-                joint_names,
-                qpos_addresses,
-                ctrl_addresses,
-                waypoints[0],
-                base_body,
-                object_qposadr,
-                attached_object_frame_offset,
-                input_mode,
-                settle_steps,
-                seed_qpos=input_mode == "ctrl",
-            )
-            viewer.sync()
-            time.sleep(0.75)
-            deadline = time.perf_counter()
-            for configuration in interpolated_frames(
-                waypoints, fps, speed, acceleration
+            for trajectory_index, (label, waypoints, offset) in enumerate(
+                trajectories
             ):
                 if not viewer.is_running():
                     return
+                print(
+                    f"[{trajectory_index + 1}/{len(trajectories)}] {label}",
+                    flush=True,
+                )
+                mujoco.mj_resetData(model, data)
                 apply_configuration(
                     mujoco,
                     model,
@@ -794,17 +788,40 @@ def replay(
                     joint_names,
                     qpos_addresses,
                     ctrl_addresses,
-                    configuration,
+                    waypoints[0],
                     base_body,
                     object_qposadr,
-                    attached_object_frame_offset,
+                    offset,
                     input_mode,
                     settle_steps,
+                    seed_qpos=input_mode == "ctrl",
                 )
                 viewer.sync()
-                deadline += frame_period
-                time.sleep(max(0.0, deadline - time.perf_counter()))
-            time.sleep(1.0)
+                time.sleep(0.75)
+                deadline = time.perf_counter()
+                for configuration in interpolated_frames(
+                    waypoints, fps, speed, acceleration
+                ):
+                    if not viewer.is_running():
+                        return
+                    apply_configuration(
+                        mujoco,
+                        model,
+                        data,
+                        joint_names,
+                        qpos_addresses,
+                        ctrl_addresses,
+                        configuration,
+                        base_body,
+                        object_qposadr,
+                        offset,
+                        input_mode,
+                        settle_steps,
+                    )
+                    viewer.sync()
+                    deadline += frame_period
+                    time.sleep(max(0.0, deadline - time.perf_counter()))
+                time.sleep(1.0)
 
 
 def main() -> int:
@@ -816,9 +833,7 @@ def main() -> int:
     if not trajectory_path.is_file():
         raise FileNotFoundError(f"trajectory not found: {trajectory_path}")
 
-    joint_names, waypoints, attached_object_frame_offset = load_trajectory(
-        trajectory_path
-    )
+    joint_names, trajectories = load_trajectories(trajectory_path)
     validate_only = args.validate_only or os.environ.get(
         "PRRTC_MUJOCO_VALIDATE_ONLY"
     ) == "1"
@@ -836,29 +851,39 @@ def main() -> int:
         )
         base_body = resolve_mobility_base_body(mujoco, model, joint_names)
         object_qposadr = resolve_object_freejoint(mujoco, model, joint_names)
-        validate_joint_limits(mujoco, model, joint_names, waypoints)
-        apply_configuration(
-            mujoco,
-            model,
-            data,
-            joint_names,
-            qpos_addresses,
-            ctrl_addresses,
-            waypoints[0],
-            base_body,
-            object_qposadr,
-            attached_object_frame_offset,
-            args.input_mode,
-            args.settle_steps,
-            seed_qpos=args.input_mode == "ctrl",
-        )
+        waypoint_count = 0
+        for label, waypoints, offset in trajectories:
+            mujoco.mj_resetData(model, data)
+            validate_joint_limits(
+                mujoco, model, joint_names, waypoints, label
+            )
+            apply_configuration(
+                mujoco,
+                model,
+                data,
+                joint_names,
+                qpos_addresses,
+                ctrl_addresses,
+                waypoints[0],
+                base_body,
+                object_qposadr,
+                offset,
+                args.input_mode,
+                args.settle_steps,
+                seed_qpos=args.input_mode == "ctrl",
+            )
+            waypoint_count += len(waypoints)
         print(
-            f"validated {len(waypoints)} waypoints, {len(joint_names)} joints, "
+            f"validated {len(trajectories)} trajectories, "
+            f"{waypoint_count} waypoints, {len(joint_names)} joints, "
             f"model nq={model.nq}"
         )
         return 0
 
     if args.video is not None:
+        if len(trajectories) != 1:
+            raise ValueError("FFW-SG2 bundle MP4 rendering is not supported")
+        _, waypoints, attached_object_frame_offset = trajectories[0]
         save_video(
             model_path,
             joint_names,
@@ -879,8 +904,7 @@ def main() -> int:
     replay(
         model_path,
         joint_names,
-        waypoints,
-        attached_object_frame_offset,
+        trajectories,
         args.fps,
         args.speed,
         args.input_mode,

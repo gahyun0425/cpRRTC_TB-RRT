@@ -1,5 +1,6 @@
 {
-  "robot": "ffw_sg2",
+  "schema_version": 1,
+  "robot": {"model": "ffw_sg2", "dimension": 15},
   "joints": [
     "lift_joint",
     "arm_l_joint1",

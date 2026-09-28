@@ -135,6 +135,22 @@ target_compile_options(single_mbm PRIVATE
     -Wno-c++11-narrowing
 )
 
+### Unified robot/problem JSON and constraint-codec validation
+
+add_executable(validate_problem_config
+    scripts/validate_problem_config.cpp
+)
+
+target_include_directories(validate_problem_config
+    PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
+target_link_libraries(validate_problem_config
+    PRIVATE
+    nlohmann_json::nlohmann_json
+)
+
 set_target_properties(evaluate_mbm single_mbm PROPERTIES
     CUDA_SEPARABLE_COMPILATION ${PATACON_CUDA_SEPARABLE_COMPILATION}
 )

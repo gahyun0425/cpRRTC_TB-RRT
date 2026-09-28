@@ -341,15 +341,14 @@ def load_planning_velocity_limits(
     )
 
 
-def load_trajectory(
-    path: Path,
-) -> tuple[
+def normalize_trajectory(document) -> tuple[
     list[list[float]],
     dict[str, list],
     dict | None,
     float | None,
 ]:
-    document = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(document, dict):
+        raise ValueError("trajectory must be a JSON object")
     waypoints_value = document.get("waypoints")
     if not isinstance(waypoints_value, list) or len(waypoints_value) < 2:
         raise ValueError("trajectory must contain at least two waypoints")
@@ -404,6 +403,22 @@ def load_trajectory(
         payload,
         planning_time_sec,
     )
+
+
+def load_trajectories(path: Path):
+    document = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(document, dict):
+        raise ValueError("trajectory document must be a JSON object")
+    raw_trajectories = document.get("trajectories")
+    if raw_trajectories is None:
+        raw_trajectories = [document]
+    if not isinstance(raw_trajectories, list) or not raw_trajectories:
+        raise ValueError("trajectory bundle must contain at least one trajectory")
+    trajectories = []
+    for index, trajectory in enumerate(raw_trajectories):
+        label = str(trajectory.get("label", f"trajectory {index + 1}"))
+        trajectories.append((label, *normalize_trajectory(trajectory)))
+    return trajectories
 
 
 def resolve_model_layout(mujoco, model) -> tuple[int, list[int]]:
@@ -1621,6 +1636,82 @@ def replay(
             time.sleep(1.0)
 
 
+def replay_trajectory_bundle(
+    model_path: Path,
+    trajectories,
+    environment: dict[str, list],
+    payload: dict | None,
+    fps: float,
+    velocity_limits: np.ndarray,
+    acceleration: float,
+) -> None:
+    import mujoco
+    import mujoco.viewer
+
+    model = build_kinematic_model(mujoco, model_path, payload)
+    data = mujoco.MjData(model)
+    base_address, joint_addresses = resolve_model_layout(mujoco, model)
+    prepared = []
+    for label, waypoints, *_ in trajectories:
+        validate_joint_limits(mujoco, model, waypoints)
+        prepared.append((
+            label,
+            waypoints,
+            time_parameterize_waypoints(
+                waypoints, velocity_limits, acceleration, fps
+            ),
+        ))
+
+    print(
+        f"MuJoCo viewer: G1 경로 {len(prepared)}개를 "
+        "qpos 모드로 순서대로 반복 재생합니다."
+    )
+    with mujoco.viewer.launch_passive(model, data) as viewer:
+        with viewer.lock():
+            add_environment_geometries(mujoco, viewer, environment)
+            configure_replay_camera(mujoco, viewer.cam)
+        viewer.sync()
+
+        frame_period = 1.0 / fps
+        while viewer.is_running():
+            for trajectory_index, (label, waypoints, trajectory) in enumerate(
+                prepared
+            ):
+                if not viewer.is_running():
+                    return
+                print(
+                    f"[{trajectory_index + 1}/{len(prepared)}] {label}",
+                    flush=True,
+                )
+                mujoco.mj_resetData(model, data)
+                apply_configuration(
+                    mujoco,
+                    model,
+                    data,
+                    base_address,
+                    joint_addresses,
+                    waypoints[0],
+                )
+                viewer.sync()
+                time.sleep(0.75)
+                deadline = time.perf_counter()
+                for configuration in time_parameterized_frames(trajectory, fps):
+                    if not viewer.is_running():
+                        return
+                    apply_configuration(
+                        mujoco,
+                        model,
+                        data,
+                        base_address,
+                        joint_addresses,
+                        configuration,
+                    )
+                    viewer.sync()
+                    deadline += frame_period
+                    time.sleep(max(0.0, deadline - time.perf_counter()))
+                time.sleep(1.0)
+
+
 def main() -> int:
     args = parse_args()
     model_path = args.model.expanduser().resolve()
@@ -1633,11 +1724,24 @@ def main() -> int:
     if not trajectory_path.is_file():
         raise FileNotFoundError(f"trajectory not found: {trajectory_path}")
 
-    waypoints, environment, payload, planning_time_sec = load_trajectory(
-        trajectory_path
-    )
-    validate_environment(environment)
-    validate_payload(payload)
+    trajectories = load_trajectories(trajectory_path)
+    _, waypoints, environment, payload, planning_time_sec = trajectories[0]
+    for label, _, item_environment, item_payload, _ in trajectories:
+        validate_environment(item_environment)
+        validate_payload(item_payload)
+        if item_environment != environment or item_payload != payload:
+            raise ValueError(
+                f"{label} uses different environment or payload metadata"
+            )
+    if len(trajectories) > 1 and (
+        args.snapshot is not None or args.video is not None
+    ):
+        raise ValueError(
+            "G1 trajectory bundles support interactive playback and "
+            "validation only"
+        )
+    if len(trajectories) > 1 and args.control_mode != "qpos":
+        raise ValueError("G1 trajectory bundles require --control-mode qpos")
     if args.snapshot is not None:
         save_snapshot(
             model_path,
@@ -1684,26 +1788,31 @@ def main() -> int:
             model = build_kinematic_model(mujoco, model_path, payload)
         data = mujoco.MjData(model)
         base_address, joint_addresses = resolve_model_layout(mujoco, model)
-        validate_joint_limits(mujoco, model, waypoints)
-        trajectory = time_parameterize_waypoints(
-            waypoints,
-            velocity_limits,
-            args.acceleration,
-            args.fps,
-        )
-        if args.control_mode == "qpos":
-            for configuration in time_parameterized_frames(
-                trajectory,
+        waypoint_count = 0
+        prepared_trajectories = []
+        for _, item_waypoints, *_ in trajectories:
+            validate_joint_limits(mujoco, model, item_waypoints)
+            prepared_trajectories.append(time_parameterize_waypoints(
+                item_waypoints,
+                velocity_limits,
+                args.acceleration,
                 args.fps,
-            ):
-                apply_configuration(
-                    mujoco,
-                    model,
-                    data,
-                    base_address,
-                    joint_addresses,
-                    configuration,
-                )
+            ))
+            waypoint_count += len(item_waypoints)
+        if args.control_mode == "qpos":
+            for trajectory in prepared_trajectories:
+                for configuration in time_parameterized_frames(
+                    trajectory,
+                    args.fps,
+                ):
+                    apply_configuration(
+                        mujoco,
+                        model,
+                        data,
+                        base_address,
+                        joint_addresses,
+                        configuration,
+                    )
         if args.control_mode == "ctrl":
             control_layout = resolve_control_layout(mujoco, model)
             configure_control_damping(model, control_layout, args.gain_scale)
@@ -1735,8 +1844,8 @@ def main() -> int:
             len(environment[key]) for key in ("sphere", "cylinder", "box")
         )
         print(
-            f"validated {len(waypoints)} prepared waypoints "
-            f"({trajectory_timing_description(trajectory)}), "
+            f"validated {len(trajectories)} trajectories, "
+            f"{waypoint_count} source waypoints, "
             f"35 planning coordinates -> model nq={model.nq}, "
             f"nu={model.nu}, control_mode={args.control_mode}, "
             f"{primitive_count} environment primitives, "
@@ -1744,17 +1853,28 @@ def main() -> int:
         )
         return 0
 
-    replay(
-        model_path,
-        waypoints,
-        environment,
-        payload,
-        args.fps,
-        velocity_limits,
-        args.acceleration,
-        args.control_mode,
-        args.gain_scale,
-    )
+    if len(trajectories) > 1:
+        replay_trajectory_bundle(
+            model_path,
+            trajectories,
+            environment,
+            payload,
+            args.fps,
+            velocity_limits,
+            args.acceleration,
+        )
+    else:
+        replay(
+            model_path,
+            waypoints,
+            environment,
+            payload,
+            args.fps,
+            velocity_limits,
+            args.acceleration,
+            args.control_mode,
+            args.gain_scale,
+        )
     return 0
 
 

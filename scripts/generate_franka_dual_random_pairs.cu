@@ -597,22 +597,30 @@ __global__ void project_and_validate_candidates(
     }
     __syncthreads();
     if (tid == 0) {
-        projection_valid = project_configuration(
-            result.goal, input.parameters, rigid_orientation
-        ) ? 1 : 0;
-        result.projection_valid = projection_valid;
-        result.start_constraint_residual =
-            ppln::collision::franka_constraint_error_norm<Robot>(
-                result.start, input.parameters, rigid_orientation
-            );
-        result.goal_constraint_residual = projection_valid != 0
-            ? ppln::collision::franka_constraint_error_norm<Robot>(
+        const bool start_projection_valid = project_configuration(
+            result.start, input.parameters, rigid_orientation
+        );
+        const bool goal_projection_valid = start_projection_valid &&
+            project_configuration(
                 result.goal, input.parameters, rigid_orientation
-            )
-            : 1.0e30f;
-        payload_position(result.start, result.start_payload_position);
+            );
+        projection_valid =
+            start_projection_valid && goal_projection_valid ? 1 : 0;
+        result.projection_valid = projection_valid;
         if (projection_valid != 0) {
+            result.start_constraint_residual =
+                ppln::collision::franka_constraint_error_norm<Robot>(
+                    result.start, input.parameters, rigid_orientation
+                );
+            result.goal_constraint_residual =
+                ppln::collision::franka_constraint_error_norm<Robot>(
+                    result.goal, input.parameters, rigid_orientation
+                );
+            payload_position(result.start, result.start_payload_position);
             payload_position(result.goal, result.goal_payload_position);
+        } else {
+            result.start_constraint_residual = 1.0e30f;
+            result.goal_constraint_residual = 1.0e30f;
         }
     }
     __syncthreads();
@@ -668,7 +676,7 @@ CandidateInput make_candidate_input(
     std::copy(start.begin(), start.end(), input.start);
     std::copy(goal.begin(), goal.end(), input.goal);
     input.parameters =
-        franka_constraint_parameters_from_start<Robot>(start);
+        franka_constraint_parameters_from_start<Robot>(reference_start);
     return input;
 }
 
@@ -972,14 +980,14 @@ json generate_output(
     }
 
     return {
-        {"format", "franka_dual_random_start_goal_pairs_v1"},
+        {"format", "franka_dual_random_start_goal_pairs_v2"},
         {"generator", {
             {"executable", "build/generate_franka_dual_random_pairs"},
             {"seed", options.seed},
             {"count", options.count},
             {"sampling", options.rigid_orientation
-                ? "Gaussian joint perturbation followed by Franka dual relative-pose plus world-yaw-axis projection and rejection"
-                : "Gaussian joint perturbation followed by Franka dual relative-pose projection and rejection"},
+                ? "Gaussian joint perturbation; both endpoints projected onto the source Franka dual relative pose plus world-yaw axis, then rejected on validation failure"
+                : "Gaussian joint perturbation; both endpoints projected onto the source Franka dual relative pose, then rejected on validation failure"},
             {"start_joint_sigma_rad", options.start_sigma},
             {"goal_joint_sigma_rad", options.goal_sigma},
             {"rigid_orientation", options.rigid_orientation},
@@ -1006,6 +1014,7 @@ json generate_output(
             {"validation", {
                 {"joint_limits", true},
                 {"dual_relative_pose_constraint", true},
+                {"source_dual_relative_pose_preserved", true},
                 {"rigid_orientation_world_yaw_axis_constraint",
                     options.rigid_orientation},
                 {"robot_self_collision", true},

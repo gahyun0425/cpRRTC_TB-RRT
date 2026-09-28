@@ -1,4 +1,6 @@
 {
+  "schema_version": 1,
+  "robot": {"model": "franka", "dimension": 14},
   "source": "cptbrrt_pkg robots/franka profile and world_collision.yaml",
   "problems": {
     "demo": [

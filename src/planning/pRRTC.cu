@@ -1698,6 +1698,31 @@ namespace pRRTC {
                 prefix_motion[prefix_waypoint * dim + joint];
         }
         __syncthreads();
+
+        // A projection backend may report success even when an already-valid
+        // waypoint has drifted just outside a joint boundary.  Reject the
+        // first affected edge before collision checking or tree insertion.
+        // Checking the repacked segment also covers every interpolated
+        // waypoint, rather than only the endpoint stored in the tree.
+        if (edge_slot < edge_count) {
+            for (
+                int value = edge_tid;
+                value < edge_segment_values;
+                value += CONCON_COLLISION_THREADS_PER_EDGE
+            ) {
+                const int joint = value % dim;
+                if (!planning::joint_value_within_limits<Robot>(
+                        edge_motion[value],
+                        joint
+                    )) {
+                    atomicMin(
+                        (int *)&first_projection_failure_edge[0],
+                        edge_slot
+                    );
+                }
+            }
+        }
+        __syncthreads();
     }
 
     template <typename Robot>
