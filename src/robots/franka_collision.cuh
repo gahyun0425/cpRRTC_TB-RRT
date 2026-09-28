@@ -318,7 +318,7 @@ __device__ __forceinline__ void fk<ppln::robots::FrankaSingle>(
     float *transforms,
     int tid
 ) {
-    fk<ppln::robots::Panda>(q, sphere_positions, transforms, tid);
+    fk<ppln::robots::PandaCollisionModel>(q, sphere_positions, transforms, tid);
 }
 
 template <>
@@ -328,7 +328,7 @@ __device__ __forceinline__ void fk_approx<ppln::robots::FrankaSingle>(
     float *transforms,
     int tid
 ) {
-    fk_approx<ppln::robots::Panda>(q, sphere_positions, transforms, tid);
+    fk_approx<ppln::robots::PandaCollisionModel>(q, sphere_positions, transforms, tid);
 }
 
 template <>
@@ -337,7 +337,7 @@ __device__ __forceinline__ bool self_collision_check<ppln::robots::FrankaSingle>
     volatile int *joint_in_collision,
     int tid
 ) {
-    return self_collision_check<ppln::robots::Panda>(
+    return self_collision_check<ppln::robots::PandaCollisionModel>(
         sphere_positions, joint_in_collision, tid
     );
 }
@@ -349,7 +349,7 @@ __device__ __forceinline__ bool env_collision_check<ppln::robots::FrankaSingle>(
     Environment<float> *environment,
     int tid
 ) {
-    return env_collision_check<ppln::robots::Panda>(
+    return env_collision_check<ppln::robots::PandaCollisionModel>(
         sphere_positions, joint_in_collision, environment, tid
     );
 }
@@ -360,7 +360,7 @@ __device__ __forceinline__ bool self_collision_check_approx<ppln::robots::Franka
     volatile int *joint_in_collision,
     int tid
 ) {
-    return self_collision_check_approx<ppln::robots::Panda>(
+    return self_collision_check_approx<ppln::robots::PandaCollisionModel>(
         sphere_positions, joint_in_collision, tid
     );
 }
@@ -372,7 +372,7 @@ __device__ __forceinline__ bool env_collision_check_approx<ppln::robots::FrankaS
     Environment<float> *environment,
     int tid
 ) {
-    return env_collision_check_approx<ppln::robots::Panda>(
+    return env_collision_check_approx<ppln::robots::PandaCollisionModel>(
         sphere_positions, joint_in_collision, environment, tid
     );
 }
@@ -387,11 +387,11 @@ __device__ __noinline__ void fk<ppln::robots::Franka>(
     constexpr int sphere_stride =
         FRANKA_ARM_FINE_SPHERES * FRANKA_COLLISION_BATCH * 3;
     constexpr int transform_stride = FRANKA_COLLISION_BATCH * 16;
-    fk<ppln::robots::Panda>(q, sphere_positions, transforms, tid);
+    fk<ppln::robots::PandaCollisionModel>(q, sphere_positions, transforms, tid);
     franka_translate_arm_spheres<FRANKA_ARM_FINE_SPHERES>(
         sphere_positions, transforms, 0.0f, 0.2f, 0.6f, tid
     );
-    fk<ppln::robots::Panda>(
+    fk<ppln::robots::PandaCollisionModel>(
         q + 7,
         sphere_positions + sphere_stride,
         transforms + transform_stride,
@@ -414,11 +414,11 @@ __device__ __noinline__ void fk_approx<ppln::robots::Franka>(
     constexpr int sphere_stride =
         FRANKA_ARM_APPROX_SPHERES * FRANKA_COLLISION_BATCH * 3;
     constexpr int transform_stride = FRANKA_COLLISION_BATCH * 16;
-    fk_approx<ppln::robots::Panda>(q, sphere_positions, transforms, tid);
+    fk_approx<ppln::robots::PandaCollisionModel>(q, sphere_positions, transforms, tid);
     franka_translate_arm_spheres<FRANKA_ARM_APPROX_SPHERES>(
         sphere_positions, transforms, 0.0f, 0.2f, 0.6f, tid
     );
-    fk_approx<ppln::robots::Panda>(
+    fk_approx<ppln::robots::PandaCollisionModel>(
         q + 7,
         sphere_positions + sphere_stride,
         transforms + transform_stride,
@@ -440,10 +440,10 @@ __device__ __noinline__ bool env_collision_check<ppln::robots::Franka>(
 ) {
     constexpr int stride =
         FRANKA_ARM_FINE_SPHERES * FRANKA_COLLISION_BATCH * 3;
-    const bool left_ok = env_collision_check<ppln::robots::Panda>(
+    const bool left_ok = env_collision_check<ppln::robots::PandaCollisionModel>(
         sphere_positions, joint_in_collision, environment, tid
     );
-    const bool right_ok = env_collision_check<ppln::robots::Panda>(
+    const bool right_ok = env_collision_check<ppln::robots::PandaCollisionModel>(
         sphere_positions + stride, joint_in_collision, environment, tid
     );
     return left_ok && right_ok;
@@ -458,10 +458,10 @@ __device__ __noinline__ bool env_collision_check_approx<ppln::robots::Franka>(
 ) {
     constexpr int stride =
         FRANKA_ARM_APPROX_SPHERES * FRANKA_COLLISION_BATCH * 3;
-    const bool left_ok = env_collision_check_approx<ppln::robots::Panda>(
+    const bool left_ok = env_collision_check_approx<ppln::robots::PandaCollisionModel>(
         sphere_positions, joint_in_collision, environment, tid
     );
-    const bool right_ok = env_collision_check_approx<ppln::robots::Panda>(
+    const bool right_ok = env_collision_check_approx<ppln::robots::PandaCollisionModel>(
         sphere_positions + stride, joint_in_collision, environment, tid
     );
     return left_ok && right_ok;
@@ -475,10 +475,10 @@ __device__ __noinline__ bool self_collision_check<ppln::robots::Franka>(
 ) {
     constexpr int stride =
         FRANKA_ARM_FINE_SPHERES * FRANKA_COLLISION_BATCH * 3;
-    const bool left_ok = self_collision_check<ppln::robots::Panda>(
+    const bool left_ok = self_collision_check<ppln::robots::PandaCollisionModel>(
         sphere_positions, joint_in_collision, tid
     );
-    const bool right_ok = self_collision_check<ppln::robots::Panda>(
+    const bool right_ok = self_collision_check<ppln::robots::PandaCollisionModel>(
         sphere_positions + stride, joint_in_collision, tid
     );
     const bool cross_ok =
@@ -496,10 +496,10 @@ __device__ __noinline__ bool self_collision_check_approx<ppln::robots::Franka>(
 ) {
     constexpr int stride =
         FRANKA_ARM_APPROX_SPHERES * FRANKA_COLLISION_BATCH * 3;
-    const bool left_ok = self_collision_check_approx<ppln::robots::Panda>(
+    const bool left_ok = self_collision_check_approx<ppln::robots::PandaCollisionModel>(
         sphere_positions, joint_in_collision, tid
     );
-    const bool right_ok = self_collision_check_approx<ppln::robots::Panda>(
+    const bool right_ok = self_collision_check_approx<ppln::robots::PandaCollisionModel>(
         sphere_positions + stride, joint_in_collision, tid
     );
     const bool cross_ok =

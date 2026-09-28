@@ -777,7 +777,7 @@ void run_planning(
 }
 
 int main(int argc, char* argv[]) {
-    std::string robot_name = "panda";
+    std::string robot_name;
     std::string run_name;
     std::string problem_file_path;
     std::string save_json_path;
@@ -919,6 +919,18 @@ int main(int argc, char* argv[]) {
         return -1;
     }
 
+    const bool robot_supported =
+        robot_name == "franka_single" ||
+        robot_name == "franka" ||
+        robot_name == "ffw_sg2" ||
+        robot_name == "ffw_sg2_mobility" ||
+        robot_name == "g1" ||
+        robot_name == "igris_c";
+    if (!robot_supported) {
+        std::cerr << "Unsupported robot type: " << robot_name << "\n";
+        return 1;
+    }
+
     const std::string path = problem_file_path.empty()
         ? "scripts/" + robot_name + "_problems.json"
         : problem_file_path;
@@ -948,18 +960,10 @@ int main(int argc, char* argv[]) {
         settings.projection_max_iters = 60;
         settings.max_concon_nodes = 4;
     }
-    if (robot_name == "fetch") {
-        run_planning<robots::Fetch>(problems, settings, run_name, robot_name, runs, max_problems, print_path, visualize, plot, save_json_path, path);
-    } else if (robot_name == "panda") {
-        run_planning<robots::Panda>(problems, settings, run_name, robot_name, runs, max_problems, print_path, visualize, plot, save_json_path, path);
-    } else if (robot_name == "baxter") {
-        run_planning<robots::Baxter>(problems, settings, run_name, robot_name, runs, max_problems, print_path, visualize, plot, save_json_path, path);
-    } else if (robot_name == "ffw_sg2") {
+    if (robot_name == "ffw_sg2") {
         run_planning<robots::FfwSg2>(problems, settings, run_name, robot_name, runs, max_problems, print_path, visualize, plot, save_json_path, path);
     } else if (robot_name == "ffw_sg2_mobility") {
         run_planning<robots::FfwSg2Mobility>(problems, settings, run_name, robot_name, runs, max_problems, print_path, visualize, plot, save_json_path, path);
-    } else if (robot_name == "ffw_sg2_single") {
-        run_planning<robots::FfwSg2Single>(problems, settings, run_name, robot_name, runs, max_problems, print_path, visualize, plot, save_json_path, path);
     } else if (robot_name == "g1") {
         run_planning<robots::G1>(problems, settings, run_name, robot_name, runs, max_problems, print_path, visualize, plot, save_json_path, path);
     } else if (robot_name == "igris_c") {

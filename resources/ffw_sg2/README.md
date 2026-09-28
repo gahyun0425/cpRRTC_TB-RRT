@@ -17,9 +17,6 @@ collision models; Phase 3 adds the generated CUDA implementation to the planner.
 - Collision-model generator: `prepare_collision_models.py`
 - Cricket output validator/postprocessor: `postprocess_cricket_header.py`
 - Integrated CUDA collision implementation: `../../src/robots/ffw_sg2.cuh`
-- 8-DoF model generator: `prepare_single_arm_models.py`
-- 8-DoF Cricket postprocessor: `postprocess_cricket_single_header.py`
-- Integrated 8-DoF CUDA implementation: `../../src/robots/ffw_sg2_single.cuh`
 
 Regenerate the planning URDF from the repository root with:
 
@@ -58,43 +55,6 @@ upper = [ 0.0,
 The head, both grippers, and all wheel steering/drive joints are fixed at
 `q = 0`. This makes the planning model deterministic and prevents those joints
 from silently increasing the pRRTC state dimension.
-
-## Right-arm-only 8-DoF model
-
-The `ffw_sg2_single` configuration vector uses this exact order:
-
-```text
-[lift_joint,
- arm_r_joint1, arm_r_joint2, arm_r_joint3, arm_r_joint4,
- arm_r_joint5, arm_r_joint6, arm_r_joint7]
-```
-
-The seven left-arm joints are fixed at `q = 0`, but all 124 fine and 27
-approximate spheres are retained. The fixed left arm therefore remains a
-self-collision obstacle for the moving lift/right arm. The 19 world cuboids and
-projected `tray_lift` start/goal are also retained from the 15-DoF problem.
-
-Regenerate the 8-DoF planning/collision URDFs, problem file, and exact memory
-metadata with:
-
-```bash
-python3 resources/ffw_sg2/prepare_single_arm_models.py
-```
-
-Its Cricket inputs are `../ffw_sg2_single_main.json`,
-`../ffw_sg2_single_approx.json`, and `../ffw_sg2_single_struct.json`. After
-Cricket produces `ffw_sg2_single_fk.hh`, reproduce the integrated header with:
-
-```bash
-python3 resources/ffw_sg2/postprocess_cricket_single_header.py \
-  --input /path/to/cricket/ffw_sg2_single_fk.hh
-```
-
-At `batch_size = 16`, the 8-DoF model-dependent shared-memory total is 30,592
-bytes: 23,808 bytes for fine positions, 5,184 for approximate positions, 576
-for joint flags, and 1,024 for transforms. The reduced joint-flag stride (9)
-and one transform slot are generated from the reduced kinematic structure,
-rather than reusing the larger 15-DoF allocation.
 
 ## Self-collision policy
 
@@ -145,16 +105,15 @@ less than the former fixed buffers (38,608 bytes). Exact counts are written to
 
 ## Cricket generation configs
 
-The following files mirror Cricket's Panda/Baxter pRRTC resource layout:
+The following files configure Cricket code generation:
 
 - `../ffw_sg2_main.json`
 - `../ffw_sg2_approx.json`
 - `../ffw_sg2_struct.json`
 
-All three use `batch_size: 16`, the same value as Panda, Fetch, and Baxter and
-the required pRRTC edge granularity. The selected end-effector is the left
-gripper base; as with Baxter, this does not remove the other arm from the
-branched kinematic model.
+All three use `batch_size: 16`, matching the required pRRTC edge granularity.
+The selected end-effector is the left gripper base; this does not remove the
+other arm from the branched kinematic model.
 
 The CUDA code was generated from CoMMALab/Cricket's `gpu-cc-early-exit` branch
 at commit `98582c35d81c6ed0d8c4badb7fdf78327523524c`. The raw combined header has
@@ -172,8 +131,7 @@ two transform slots, and every hard-coded Cricket stride site before replacing
 the raw `20 * batch_ind` expressions with the FFW-SG2 stride of 16.
 
 The planner uses `RobotCollisionTraits.hh` to size all four model-dependent
-shared buffers at compile time. Panda and Fetch use one transform slot; Baxter
-and FFW-SG2 use two. FFW-SG2 allocates a 16-entry flag slice per configuration,
-while the existing generated robot headers retain their required 20-entry
-stride. `solve()` rejects a granularity other than the generated batch size so
-the CUDA indexing contract cannot silently diverge.
+shared buffers at compile time. FFW-SG2 uses two transform slots and allocates
+a 16-entry flag slice per configuration. `solve()` rejects a granularity other
+than the generated batch size so the CUDA indexing contract cannot silently
+diverge.

@@ -46,21 +46,6 @@ namespace AORRTC {
     static_assert(robots::CollisionTraits<robots::FfwSg2Mobility>::transform_slots== FFW_SG2_MOBILITY_TRANSFORM_SLOTS,
         "FFW-SG2 mobility transform slot count differs from the wrapper collision code"
     );
-    static_assert(robots::CollisionTraits<robots::FfwSg2Single>::batch_size== FFW_SG2_SINGLE_BATCH_SIZE,
-        "FFW-SG2 single batch size differs from the generated Cricket code"
-    );
-    static_assert(robots::CollisionTraits<robots::FfwSg2Single>::fine_sphere_count== FFW_SG2_SINGLE_SPHERE_COUNT,
-        "FFW-SG2 single fine sphere count differs from the generated Cricket code"
-    );
-    static_assert(robots::CollisionTraits<robots::FfwSg2Single>::approximate_sphere_count== FFW_SG2_SINGLE_APPROX_SPHERE_COUNT,
-        "FFW-SG2 single approximate sphere count differs from the generated Cricket code"
-    );
-    static_assert(robots::CollisionTraits<robots::FfwSg2Single>::joint_flag_stride== FFW_SG2_SINGLE_JOINT_FLAG_STRIDE,
-        "FFW-SG2 single joint flag stride differs from the generated Cricket code"
-    );
-    static_assert(robots::CollisionTraits<robots::FfwSg2Single>::transform_slots== FFW_SG2_SINGLE_TRANSFORM_SLOTS,
-        "FFW-SG2 single transform slot count differs from the generated Cricket code"
-    );
     static_assert(
         robots::CollisionTraits<robots::G1>::batch_size == collision::G1_BATCH_SIZE,
         "G1 batch size differs from the generated collision code"
@@ -257,19 +242,6 @@ namespace AORRTC {
             ? d_settings.lift_distance_weight
             : 1.0f;
     }
-
-
-    // Single-arm 모델도 0번 좌표가 lift_joint
-    template <>
-    __device__ __forceinline__ float
-    cprrtc_joint_distance_weight<robots::FfwSg2Single>(
-        int joint_index
-    ) {
-        return joint_index == 0
-            ? d_settings.lift_distance_weight
-            : 1.0f;
-    }
-
 
     template <typename Robot>
     __device__ __forceinline__ float cprrtc_sq_config_distance(
@@ -5503,14 +5475,10 @@ namespace AORRTC {
         return res;
     }
 
-    template AORRTCResult<ppln::robots::Panda> solve<ppln::robots::Panda>(std::array<float, 7>&, std::vector<std::array<float, 7>>&, ppln::collision::Environment<float>&, AORRTC_settings&);
     template AORRTCResult<ppln::robots::FrankaSingle> solve<ppln::robots::FrankaSingle>(std::array<float, 7>&, std::vector<std::array<float, 7>>&, ppln::collision::Environment<float>&, AORRTC_settings&);
     template AORRTCResult<ppln::robots::Franka> solve<ppln::robots::Franka>(std::array<float, 14>&, std::vector<std::array<float, 14>>&, ppln::collision::Environment<float>&, AORRTC_settings&);
-    template AORRTCResult<ppln::robots::Fetch> solve<ppln::robots::Fetch>(std::array<float, 8>&, std::vector<std::array<float, 8>>&, ppln::collision::Environment<float>&, AORRTC_settings&);
-    template AORRTCResult<ppln::robots::Baxter> solve<ppln::robots::Baxter>(std::array<float, 14>&, std::vector<std::array<float, 14>>&, ppln::collision::Environment<float>&, AORRTC_settings&);
     template AORRTCResult<ppln::robots::FfwSg2> solve<ppln::robots::FfwSg2>(std::array<float, 15>&, std::vector<std::array<float, 15>>&, ppln::collision::Environment<float>&, AORRTC_settings&);
     template AORRTCResult<ppln::robots::FfwSg2Mobility> solve<ppln::robots::FfwSg2Mobility>(std::array<float, 18>&, std::vector<std::array<float, 18>>&, ppln::collision::Environment<float>&, AORRTC_settings&);
-    template AORRTCResult<ppln::robots::FfwSg2Single> solve<ppln::robots::FfwSg2Single>(std::array<float, 8>&, std::vector<std::array<float, 8>>&, ppln::collision::Environment<float>&, AORRTC_settings&);
     template AORRTCResult<ppln::robots::G1> solve<ppln::robots::G1>(std::array<float, 35>&, std::vector<std::array<float, 35>>&, ppln::collision::Environment<float>&, AORRTC_settings&);
     template AORRTCResult<ppln::robots::IgrisC> solve<ppln::robots::IgrisC>(std::array<float, 35>&, std::vector<std::array<float, 35>>&, ppln::collision::Environment<float>&, AORRTC_settings&);
 

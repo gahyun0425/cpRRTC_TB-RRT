@@ -226,7 +226,7 @@ namespace ppln::collision {
     };
 
     template <>
-    __device__ void fk<ppln::robots::Panda>(
+    __device__ void fk<ppln::robots::PandaCollisionModel>(
         const float* q,
         volatile float* sphere_pos, // 59 spheres x 16 robots x 3 coordinates
         float *T, // 16 robots x 4x4 transform matrix
@@ -288,7 +288,7 @@ namespace ppln::collision {
 
     // 4 threads per discretized motion for self-collision check
     template <>
-    __device__ bool self_collision_check<ppln::robots::Panda>(volatile float* sphere_pos, volatile int* joint_in_collision, const int tid){
+    __device__ bool self_collision_check<ppln::robots::PandaCollisionModel>(volatile float* sphere_pos, volatile int* joint_in_collision, const int tid){
         const int thread_ind = tid % 4;
         const int batch_ind = tid / 4;
         bool has_collision = false;
@@ -323,7 +323,7 @@ namespace ppln::collision {
 
     // 4 threads per discretized motion for env collision check
     template <>
-    __device__ bool env_collision_check<ppln::robots::Panda>(volatile float* sphere_pos, volatile int* joint_in_collision, ppln::collision::Environment<float> *env, const int tid){
+    __device__ bool env_collision_check<ppln::robots::PandaCollisionModel>(volatile float* sphere_pos, volatile int* joint_in_collision, ppln::collision::Environment<float> *env, const int tid){
         const int thread_ind = tid % 4;
         const int batch_ind = tid / 4;
         bool has_collision=false;
@@ -477,7 +477,7 @@ __device__ __constant__ int panda_approx_self_cc_ranges[4][3] = {
 };
 
 template <>
-__device__ void fk_approx<ppln::robots::Panda>(
+__device__ void fk_approx<ppln::robots::PandaCollisionModel>(
     const float* q,
     volatile float* sphere_pos_approx, // 11 spheres x 16 robots x 3 coordinates (each column is a robot)
     float *T, // 16 robots x 4x4 transform matrix , column major
@@ -540,7 +540,7 @@ __device__ void fk_approx<ppln::robots::Panda>(
 
 // 4 threads per discretized motion for self-collision check
 template <>
-__device__ bool self_collision_check_approx<ppln::robots::Panda>(volatile float* sphere_pos_approx, volatile int* joint_in_collision, const int tid){
+__device__ bool self_collision_check_approx<ppln::robots::PandaCollisionModel>(volatile float* sphere_pos_approx, volatile int* joint_in_collision, const int tid){
     const int thread_ind = tid % 4;
     const int batch_ind = tid / 4;
 
@@ -571,7 +571,7 @@ __device__ bool self_collision_check_approx<ppln::robots::Panda>(volatile float*
 
 // 4 threads per discretized motion for env collision check
 template <>
-__device__ bool env_collision_check_approx<ppln::robots::Panda>(volatile float* sphere_pos_approx, volatile int* joint_in_collision, ppln::collision::Environment<float> *env, const int tid){
+__device__ bool env_collision_check_approx<ppln::robots::PandaCollisionModel>(volatile float* sphere_pos_approx, volatile int* joint_in_collision, ppln::collision::Environment<float> *env, const int tid){
     const int thread_ind = tid % 4;
     const int batch_ind = tid / 4;
     bool out = true;

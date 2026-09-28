@@ -24,15 +24,11 @@ exact identifiers on the command line; in particular, the dual-arm Franka is
 | Franka dual arm | `franka` | 14 | `scripts/franka_problems.json` | `demo` |
 | FFW-SG2 fixed-base dual arm | `ffw_sg2` | 15 | `scripts/ffw_sg2_problems.json` | `tray_lift` |
 | FFW-SG2 mobile dual arm | `ffw_sg2_mobility` | 18 | `scripts/ffw_sg2_mobility_problems.json` | `tray_lift` |
-| FFW-SG2 lift plus right arm | `ffw_sg2_single` | 8 | `scripts/ffw_sg2_single_problems.json` | `tray_lift` |
 | Unitree G1 | `g1` | 35 | `scripts/g1_problems.json` | `humanoid_shelf` |
 | IGRIS-C | `igris_c` | 35 | `scripts/igris_c_problems.json` | `igris_c_shelf_lift` |
-| Legacy Franka Panda MBM model | `panda` | 7 | `scripts/panda_problems.json` | MBM problem name |
-| Fetch | `fetch` | 8 | `scripts/fetch_problems.json` | MBM problem name |
-| Rethink Robotics Baxter | `baxter` | 14 | `scripts/baxter_problems.json` | MBM problem name |
 
 Forward-kinematics and collision-checking code is generated or imported per
-robot; the legacy MBM kernels were generated using
+robot. The FFW-SG2 kernels were generated using
 [Cricket](https://github.com/CoMMALab/cricket.git).
 
 The G1 collision model augments VAMP's 133 body spheres with 16 conservative
@@ -136,7 +132,7 @@ Both benchmark executables accept `--problem-file PATH`, `--save-json PATH`,
 
 - `--seed N` and `--plot` for repeated-run pRRTC timing ECDFs.
 - `--visualize` for `franka_single`, `franka`, `ffw_sg2`,
-  `ffw_sg2_mobility`, `ffw_sg2_single`, `g1`, and `igris_c`.
+  `ffw_sg2_mobility`, `g1`, and `igris_c`.
 - `--no-path-smoothing` with `--visualize` to replay the raw planner waypoint
   path without shortcutting, a spline, or TOPP-RA.
 - `--real` with `--visualize` for `ffw_sg2_mobility` and `igris_c` only.
@@ -375,7 +371,7 @@ python3 -m pip install -r requirements-visualization.txt
 ```
 
 `single_mbm --visualize` plans the selected problem and replays the returned
-start-to-goal path. It supports Franka single/dual, all three FFW-SG2 planner
+start-to-goal path. It supports Franka single/dual, both FFW-SG2 planner
 models, G1, and IGRIS-C:
 
 ```bash
@@ -383,10 +379,12 @@ models, G1, and IGRIS-C:
 ./build_patacon/single_mbm franka demo 1 --visualize
 ./build_patacon/single_mbm ffw_sg2 tray_lift 1 --visualize
 ./build_patacon/single_mbm ffw_sg2_mobility tray_lift 1 --visualize
-./build_patacon/single_mbm ffw_sg2_single tray_lift 1 --visualize
 ./build_patacon/single_mbm g1 humanoid_shelf 1 --visualize
 ./build_patacon/single_mbm igris_c igris_c_shelf_lift 1 --visualize
 ```
+
+Interactive viewers repeat the start-to-goal trajectory until their window is
+closed. MP4 export renders one traversal instead.
 
 For continuous G1 replanning with the PATACON planner, run:
 
@@ -491,9 +489,8 @@ also checked against joint limits. TOPP-RA runs only after a spline has passed
 revalidation. A spline or TOPP-RA failure aborts visualization instead of
 silently returning to the old cubic trajectory.
 
-`ffw_sg2_single` plans only the lift and seven right-arm joints while the left
-arm remains fixed at its zero pose. The fixed-base FFW visualizer loads
-`ffw_lift/ffw_sg2_lift.xml`; the mobile visualizer loads
+The fixed-base FFW visualizer loads `ffw_lift/ffw_sg2_lift.xml`; the mobile
+visualizer loads
 `ffw_lift/ffw_sg2_rack_upper_to_lower.xml`. Joint values are mapped to MuJoCo
 `qpos` entries by name.
 
@@ -749,9 +746,8 @@ PATACON-style self-contained HTML viewer with:
   --html-max-tree-nodes 0
 ```
 
-The same options support the 8-DoF lift-plus-right-arm model by replacing the
-robot name with `ffw_sg2_single`. Outputs are written under `traces/` unless
-`--save-json`, `--graphml`, or `--html` supplies an explicit path. A positive
+Outputs are written under `traces/` unless `--save-json`, `--graphml`, or
+`--html` supplies an explicit path. A positive
 `--html-max-tree-nodes` samples the HTML view while retaining the full tree in
 JSON and GraphML; zero embeds every tree node and can produce a large file.
 The exporter searches `PATACON_ROOT`, a sibling `patacon` checkout, and
@@ -765,7 +761,7 @@ pRRTC has the following parameters which can be modified in the benchmarking scr
 - <ins>**max_iters**</ins>: maximum number of planning iterations
 - <ins>**num_new_configs**</ins>: amount of new samples generated per iteration
 - <ins>**range**</ins>: maximum RRT-Connect extension range
-- <ins>**granularity**</ins>: number of discretized motions along an edge during collision checking. Note: this parameter must match the BATCH_SIZE parameter in robot's header file (ex. fetch.cuh) for correct results.
+- <ins>**granularity**</ins>: number of discretized motions along an edge during collision checking. Note: this parameter must match the BATCH_SIZE parameter in the robot's collision header (for example, `ffw_sg2.cuh`) for correct results.
 - <ins>**balance**</ins>: whether to enable tree balancing -- 0 for no balancing; 1 for distributed balancing where each iteration may generate samples for one or two trees; 2 for single-sided balancing where each iteration generate samples for one tree only
 - <ins>**tree_ratio**</ins>: the threshold for distinguishing which tree is smaller in size -- if balance set to 1, then set tree_ratio to 0.5; if balance set to 2, then set tree_ratio to 1
 - <ins>**dynamic_domain**</ins>: whether to enable [dynamic domain sampling](https://ieeexplore.ieee.org/abstract/document/1570709) -- 0 for false; 1 for true
@@ -800,7 +796,7 @@ pRRTC has the following parameters which can be modified in the benchmarking scr
 ```
 Make sure to reference the approximate urdf. Batch size should be equal to the number of discretized collision checks on each extension of pRRTC.
 
-6. Repeat step 5 and create a config file for the main fkcc generation. Ex. `resources/robot_main.json`. See the panda, fetch, and baxter config files for examples.
+6. Repeat step 5 and create a config file for the main fkcc generation. Ex. `resources/robot_main.json`. See the FFW-SG2 config files for examples.
 
 7. After building cricket run the script `gpu_fkcc_gen.sh robot`. This will put the generated code into a file `robot_fk.hh`.
 

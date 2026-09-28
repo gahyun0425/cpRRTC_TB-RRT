@@ -1321,7 +1321,6 @@ int run_planner(
             constexpr bool visualization_supported =
                 std::is_same_v<Robot, robots::FfwSg2> ||
                 std::is_same_v<Robot, robots::FfwSg2Mobility> ||
-                std::is_same_v<Robot, robots::FfwSg2Single> ||
                 std::is_same_v<Robot, robots::G1> ||
                 std::is_same_v<Robot, robots::IgrisC> ||
                 std::is_same_v<Robot, robots::FrankaSingle> ||
@@ -1580,12 +1579,6 @@ int run_planner(
                     attached_object_frame_offset
                 );
             }
-        } else if constexpr (std::is_same_v<Robot, robots::FfwSg2Single>) {
-            visualize_ffw_sg2_path(visualization_result, start, {
-                "lift_joint",
-                "arm_r_joint1", "arm_r_joint2", "arm_r_joint3", "arm_r_joint4",
-                "arm_r_joint5", "arm_r_joint6", "arm_r_joint7"
-            }, visualization_geometric_path);
         } else if constexpr (std::is_same_v<Robot, robots::G1>) {
             visualize_g1_path(
                 visualization_result,
@@ -1637,7 +1630,7 @@ int run_planner(
         } else {
             throw std::runtime_error(
                 "--visualize supports only ffw_sg2, ffw_sg2_mobility, "
-                "ffw_sg2_single, g1, igris_c, franka_single, and franka"
+                "g1, igris_c, franka_single, and franka"
             );
         }
     }
@@ -1765,8 +1758,8 @@ int run_g1_replan_server(
 }
 
 int main(int argc, char* argv[]) {
-    std::string robot_name = "panda";
-    std::string name = "cage";
+    std::string robot_name;
+    std::string name;
     int problem_idx = 1;
     bool visualize = false;
     bool path_smoothing = true;
@@ -1784,7 +1777,7 @@ int main(int argc, char* argv[]) {
     bool time_option_provided = false;
     float object_mass_kg = 0.0f;
     float support_margin_m = 0.0f;
-    float planner_range = 0.3f;
+    float planner_range = 0.4f;
     double time_limit_sec = 5.0;
     unsigned long long random_seed = 1ULL;
     int runs = 1;
@@ -2208,17 +2201,27 @@ int main(int argc, char* argv[]) {
             problem_idx
         );
     }
+    const bool robot_supported =
+        robot_name == "franka_single" ||
+        robot_name == "franka" ||
+        robot_name == "ffw_sg2" ||
+        robot_name == "ffw_sg2_mobility" ||
+        robot_name == "g1" ||
+        robot_name == "igris_c";
+    if (!robot_supported) {
+        std::cerr << "Unsupported robot type: " << robot_name << "\n";
+        return 1;
+    }
     if (visualize
         && robot_name != "ffw_sg2"
         && robot_name != "ffw_sg2_mobility"
-        && robot_name != "ffw_sg2_single"
         && robot_name != "g1"
         && robot_name != "igris_c"
         && robot_name != "franka_single"
         && robot_name != "franka") {
         std::cerr
             << "--visualize supports only ffw_sg2, ffw_sg2_mobility, "
-            << "ffw_sg2_single, g1, igris_c, franka_single, and franka\n";
+            << "g1, igris_c, franka_single, and franka\n";
         return 1;
     }
     const std::string path = problem_file_path.empty()
@@ -2351,23 +2354,11 @@ int main(int argc, char* argv[]) {
         if (g1_replanning.server) {
             return run_g1_replan_server(data, settings, g1_replanning);
         }
-        if (robot_name == "fetch") {
-            return run_planner<robots::Fetch>(data, env, settings, visualize, path_smoothing, real_dynamics, real_options, print_path, plot,
-                robot_name, name, problem_idx, save_json_path, trace_options, runs);
-        } else if (robot_name == "panda") {
-            return run_planner<robots::Panda>(data, env, settings, visualize, path_smoothing, real_dynamics, real_options, print_path, plot,
-                robot_name, name, problem_idx, save_json_path, trace_options, runs);
-        } else if (robot_name == "baxter") {
-            return run_planner<robots::Baxter>(data, env, settings, visualize, path_smoothing, real_dynamics, real_options, print_path, plot,
-                robot_name, name, problem_idx, save_json_path, trace_options, runs);
-        } else if (robot_name == "ffw_sg2") {
+        if (robot_name == "ffw_sg2") {
             return run_planner<robots::FfwSg2>(data, env, settings, visualize, path_smoothing, real_dynamics, real_options, print_path, plot,
                 robot_name, name, problem_idx, save_json_path, trace_options, runs);
         } else if (robot_name == "ffw_sg2_mobility") {
             return run_planner<robots::FfwSg2Mobility>(data, env, settings, visualize, path_smoothing, real_dynamics, real_options, print_path, plot,
-                robot_name, name, problem_idx, save_json_path, trace_options, runs);
-        } else if (robot_name == "ffw_sg2_single") {
-            return run_planner<robots::FfwSg2Single>(data, env, settings, visualize, path_smoothing, real_dynamics, real_options, print_path, plot,
                 robot_name, name, problem_idx, save_json_path, trace_options, runs);
         } else if (robot_name == "g1") {
             return run_planner<robots::G1>(data, env, settings, visualize, path_smoothing, real_dynamics, real_options, print_path, plot,

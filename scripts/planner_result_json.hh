@@ -43,14 +43,6 @@ inline std::vector<std::string> joint_names_for_robot(
             "arm_r_joint5", "arm_r_joint6", "arm_r_joint7",
         };
     }
-    if (robot_name == "ffw_sg2_single") {
-        return {
-            "lift_joint",
-            "arm_r_joint1", "arm_r_joint2", "arm_r_joint3", "arm_r_joint4",
-            "arm_r_joint5", "arm_r_joint6", "arm_r_joint7",
-        };
-    }
-
     std::vector<std::string> names;
     names.reserve(dimension);
     for (int index = 0; index < dimension; index++) {

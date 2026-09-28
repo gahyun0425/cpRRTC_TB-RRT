@@ -8,12 +8,9 @@
 #include "src/robots/panda.cuh"
 #include "src/robots/franka_collision.cuh"
 #include "src/robots/franka_constraint.cuh"
-#include "src/robots/fetch.cuh"
-#include "src/robots/baxter.cuh"
 #include "src/robots/ffw_sg2.cuh"
 #include "src/robots/ffw_sg2_attached_object_collision.cuh"
 #include "src/robots/ffw_sg2_mobility.cuh"
-#include "src/robots/ffw_sg2_single.cuh"
 #include "src/robots/ffw_sg2_constraint.cuh"
 #include "src/robots/ffw_sg2_mobility_constraint.cuh"
 #include "src/robots/ffw_sg2_mobility_com_constraint.cuh"
@@ -205,21 +202,6 @@ namespace pRRTC {
     );
     static_assert(robots::CollisionTraits<robots::FfwSg2Mobility>::transform_slots== FFW_SG2_MOBILITY_TRANSFORM_SLOTS,
         "FFW-SG2 mobility transform slot count differs from the wrapper collision code"
-    );
-    static_assert(robots::CollisionTraits<robots::FfwSg2Single>::batch_size== FFW_SG2_SINGLE_BATCH_SIZE,
-        "FFW-SG2 single batch size differs from the generated Cricket code"
-    );
-    static_assert(robots::CollisionTraits<robots::FfwSg2Single>::fine_sphere_count== FFW_SG2_SINGLE_SPHERE_COUNT,
-        "FFW-SG2 single fine sphere count differs from the generated Cricket code"
-    );
-    static_assert(robots::CollisionTraits<robots::FfwSg2Single>::approximate_sphere_count== FFW_SG2_SINGLE_APPROX_SPHERE_COUNT,
-        "FFW-SG2 single approximate sphere count differs from the generated Cricket code"
-    );
-    static_assert(robots::CollisionTraits<robots::FfwSg2Single>::joint_flag_stride== FFW_SG2_SINGLE_JOINT_FLAG_STRIDE,
-        "FFW-SG2 single joint flag stride differs from the generated Cricket code"
-    );
-    static_assert(robots::CollisionTraits<robots::FfwSg2Single>::transform_slots== FFW_SG2_SINGLE_TRANSFORM_SLOTS,
-        "FFW-SG2 single transform slot count differs from the generated Cricket code"
     );
     static_assert(
         robots::CollisionTraits<robots::G1>::batch_size == collision::G1_BATCH_SIZE,
@@ -443,19 +425,6 @@ namespace pRRTC {
             ? d_settings.lift_distance_weight
             : 1.0f;
     }
-
-
-    // Single-arm 모델도 0번 좌표가 lift_joint
-    template <>
-    __device__ __forceinline__ float
-    cprrtc_joint_distance_weight<robots::FfwSg2Single>(
-        int joint_index
-    ) {
-        return joint_index == 0
-            ? d_settings.lift_distance_weight
-            : 1.0f;
-    }
-
 
     template <typename Robot>
     __device__ __forceinline__ float cprrtc_sq_config_distance(
@@ -4852,10 +4821,7 @@ namespace pRRTC {
         for (int joint = 0; joint < Robot::dimension; ++joint) {
             float weight = 1.0f;
             if (use_planner_weights) {
-                if constexpr (
-                    std::is_same_v<Robot, robots::FfwSg2> ||
-                    std::is_same_v<Robot, robots::FfwSg2Single>
-                ) {
+                if constexpr (std::is_same_v<Robot, robots::FfwSg2>) {
                     if (joint == 0) {
                         weight = settings.lift_distance_weight;
                     }
@@ -6779,14 +6745,10 @@ namespace pRRTC {
     }
 
     //template PlannerResult<typename ppln::robots::Sphere> solve<ppln::robots::Sphere>(std::array<float, 3>&, std::vector<std::array<float, 3>>&, ppln::collision::Environment<float>&, pRRTC_settings&);
-    template PlannerResult<typename ppln::robots::Panda> solve<ppln::robots::Panda>(std::array<float, 7>&, std::vector<std::array<float, 7>>&, ppln::collision::Environment<float>&, pRRTC_settings&);
     template PlannerResult<typename ppln::robots::FrankaSingle> solve<ppln::robots::FrankaSingle>(std::array<float, 7>&, std::vector<std::array<float, 7>>&, ppln::collision::Environment<float>&, pRRTC_settings&);
     template PlannerResult<typename ppln::robots::Franka> solve<ppln::robots::Franka>(std::array<float, 14>&, std::vector<std::array<float, 14>>&, ppln::collision::Environment<float>&, pRRTC_settings&);
-    template PlannerResult<typename ppln::robots::Fetch> solve<ppln::robots::Fetch>(std::array<float, 8>&, std::vector<std::array<float, 8>>&, ppln::collision::Environment<float>&, pRRTC_settings&);
-    template PlannerResult<typename ppln::robots::Baxter> solve<ppln::robots::Baxter>(std::array<float, 14>&, std::vector<std::array<float, 14>>&, ppln::collision::Environment<float>&, pRRTC_settings&);
     template PlannerResult<typename ppln::robots::FfwSg2> solve<ppln::robots::FfwSg2>(std::array<float, 15>&, std::vector<std::array<float, 15>>&, ppln::collision::Environment<float>&, pRRTC_settings&);
     template PlannerResult<typename ppln::robots::FfwSg2Mobility> solve<ppln::robots::FfwSg2Mobility>(std::array<float, 18>&, std::vector<std::array<float, 18>>&, ppln::collision::Environment<float>&, pRRTC_settings&);
-    template PlannerResult<typename ppln::robots::FfwSg2Single> solve<ppln::robots::FfwSg2Single>(std::array<float, 8>&, std::vector<std::array<float, 8>>&, ppln::collision::Environment<float>&, pRRTC_settings&);
     template PlannerResult<typename ppln::robots::G1> solve<ppln::robots::G1>(std::array<float, 35>&, std::vector<std::array<float, 35>>&, ppln::collision::Environment<float>&, pRRTC_settings&);
     template PlannerResult<typename ppln::robots::IgrisC> solve<ppln::robots::IgrisC>(std::array<float, 35>&, std::vector<std::array<float, 35>>&, ppln::collision::Environment<float>&, pRRTC_settings&);
 
@@ -6795,7 +6757,6 @@ namespace pRRTC {
     template PathSimplificationResult<ppln::robots::Franka> simplify_path_for_visualization<ppln::robots::Franka>(const std::vector<std::array<float, 14>>&, ppln::collision::Environment<float>&, pRRTC_settings&);
     template PathSimplificationResult<ppln::robots::FfwSg2> simplify_path_for_visualization<ppln::robots::FfwSg2>(const std::vector<std::array<float, 15>>&, ppln::collision::Environment<float>&, pRRTC_settings&);
     template PathSimplificationResult<ppln::robots::FfwSg2Mobility> simplify_path_for_visualization<ppln::robots::FfwSg2Mobility>(const std::vector<std::array<float, 18>>&, ppln::collision::Environment<float>&, pRRTC_settings&);
-    template PathSimplificationResult<ppln::robots::FfwSg2Single> simplify_path_for_visualization<ppln::robots::FfwSg2Single>(const std::vector<std::array<float, 8>>&, ppln::collision::Environment<float>&, pRRTC_settings&);
     template PathSimplificationResult<ppln::robots::G1> simplify_path_for_visualization<ppln::robots::G1>(const std::vector<std::array<float, 35>>&, ppln::collision::Environment<float>&, pRRTC_settings&);
     template PathSimplificationResult<ppln::robots::IgrisC> simplify_path_for_visualization<ppln::robots::IgrisC>(const std::vector<std::array<float, 35>>&, ppln::collision::Environment<float>&, pRRTC_settings&);
 
@@ -6803,7 +6764,6 @@ namespace pRRTC {
     template PathValidationResult validate_path_for_visualization<ppln::robots::Franka>(const std::vector<std::array<float, 14>>&, ppln::collision::Environment<float>&, pRRTC_settings&, float);
     template PathValidationResult validate_path_for_visualization<ppln::robots::FfwSg2>(const std::vector<std::array<float, 15>>&, ppln::collision::Environment<float>&, pRRTC_settings&, float);
     template PathValidationResult validate_path_for_visualization<ppln::robots::FfwSg2Mobility>(const std::vector<std::array<float, 18>>&, ppln::collision::Environment<float>&, pRRTC_settings&, float);
-    template PathValidationResult validate_path_for_visualization<ppln::robots::FfwSg2Single>(const std::vector<std::array<float, 8>>&, ppln::collision::Environment<float>&, pRRTC_settings&, float);
     template PathValidationResult validate_path_for_visualization<ppln::robots::G1>(const std::vector<std::array<float, 35>>&, ppln::collision::Environment<float>&, pRRTC_settings&, float);
     template PathValidationResult validate_path_for_visualization<ppln::robots::IgrisC>(const std::vector<std::array<float, 35>>&, ppln::collision::Environment<float>&, pRRTC_settings&, float);
 

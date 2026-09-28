@@ -327,25 +327,29 @@ def replay(
         mujoco, model, data, joint_names, addresses, waypoints[0]
     )
     frame_period = 1.0 / fps
+    print("MuJoCo viewer: Franka start -> goal 경로를 반복 재생합니다.")
+    print("창을 닫으면 single_mbm 실행이 종료됩니다.")
     with mujoco.viewer.launch_passive(model, data) as viewer:
         configure_replay_camera(mujoco, viewer.cam, joint_names)
-        apply_attached_configuration(
-            mujoco, model, data, addresses, waypoints[0], attachment
-        )
-        viewer.sync()
-        for configuration in interpolated_frames(
-            waypoints, fps, speed, acceleration
-        ):
-            if not viewer.is_running():
-                return
+        while viewer.is_running():
             apply_attached_configuration(
-                mujoco, model, data, addresses, configuration, attachment
+                mujoco, model, data, addresses, waypoints[0], attachment
             )
             viewer.sync()
-            time.sleep(frame_period)
-        while viewer.is_running():
-            viewer.sync()
-            time.sleep(frame_period)
+            time.sleep(0.75)
+            deadline = time.perf_counter()
+            for configuration in interpolated_frames(
+                waypoints, fps, speed, acceleration
+            ):
+                if not viewer.is_running():
+                    return
+                apply_attached_configuration(
+                    mujoco, model, data, addresses, configuration, attachment
+                )
+                viewer.sync()
+                deadline += frame_period
+                time.sleep(max(0.0, deadline - time.perf_counter()))
+            time.sleep(1.0)
 
 
 def main() -> int:
