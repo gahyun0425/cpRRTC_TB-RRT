@@ -16,13 +16,28 @@ import xml.etree.ElementTree as ET
 
 import numpy as np
 
+from mujoco_video import (
+    DEFAULT_TRAJECTORY_ACCELERATION,
+    DEFAULT_TRAJECTORY_PLAYBACK_RATE,
+    DEFAULT_TRAJECTORY_SPEED,
+    GeometricPathWaypoints,
+    MultiViewVideoWriter,
+    add_video_arguments,
+    configure_camera,
+    configure_model_render_quality,
+    continuous_trajectory_frames,
+    validate_video_arguments,
+    video_view_azimuth,
+    video_view_elevation,
+)
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_MODEL = REPO_ROOT / "ffw_lift" / "ffw_sg2_rack_upper_to_lower.xml"
 DEFAULT_PAYLOAD_MASS_KG = 3.0
 DEFAULT_SUPPORT_MARGIN_M = 0.05
 DEFAULT_SETTLE_STEPS = 12
-REAL_DEFAULT_SPEED = 0.10
+REAL_DEFAULT_SPEED = 0.10 * DEFAULT_TRAJECTORY_PLAYBACK_RATE
 REAL_DEFAULT_SETTLE_STEPS = 240
 SPACE_KEY = 32
 REAL_WHEEL_RADIUS_M = 0.09
@@ -182,7 +197,17 @@ def parse_args() -> argparse.Namespace:
         "--speed",
         type=float,
         default=None,
-        help="Maximum configuration-coordinate change per second. Defaults to 0.7, or 0.10 with --real.",
+        help=(
+            "Maximum configuration-coordinate change per second. Defaults to "
+            f"{DEFAULT_TRAJECTORY_SPEED:g}, or {REAL_DEFAULT_SPEED:g} with "
+            "--real."
+        ),
+    )
+    parser.add_argument(
+        "--acceleration",
+        type=float,
+        default=DEFAULT_TRAJECTORY_ACCELERATION,
+        help="Maximum configuration-coordinate acceleration per second squared.",
     )
     parser.add_argument(
         "--input-mode",
@@ -286,13 +311,23 @@ def parse_args() -> argparse.Namespace:
         help="MuJoCo steps used to settle the initial real-mode grasp before validation or replay.",
     )
     parser.add_argument("--validate-only", action="store_true")
+    add_video_arguments(parser, "PRRTC_FFW_SG2_VIDEO")
     args = parser.parse_args()
     if args.speed is None:
-        args.speed = REAL_DEFAULT_SPEED if args.real else 0.7
+        args.speed = (
+            REAL_DEFAULT_SPEED if args.real else DEFAULT_TRAJECTORY_SPEED
+        )
     if args.settle_steps is None:
         args.settle_steps = REAL_DEFAULT_SETTLE_STEPS if args.real else DEFAULT_SETTLE_STEPS
-    if args.fps <= 0.0 or args.speed <= 0.0:
-        parser.error("--fps and --speed must be positive")
+    if (
+        not math.isfinite(args.fps)
+        or not math.isfinite(args.speed)
+        or not math.isfinite(args.acceleration)
+        or args.fps <= 0.0
+        or args.speed <= 0.0
+        or args.acceleration <= 0.0
+    ):
+        parser.error("--fps, --speed, and --acceleration must be positive")
     if args.settle_steps < 0:
         parser.error("--settle-steps must be greater than or equal to 0")
     if args.real_initial_settle_steps < 0:
@@ -314,6 +349,9 @@ def parse_args() -> argparse.Namespace:
             parser.error(f"{option} must be a finite value greater than 0")
     if args.real and args.input_mode != "ctrl":
         parser.error("--real requires --input-mode ctrl")
+    if args.video is not None and args.trajectory is None:
+        parser.error("--video requires --trajectory")
+    validate_video_arguments(parser, args)
     return args
 
 
@@ -344,7 +382,15 @@ def load_trajectory(path: Path) -> tuple[tuple[str, ...], list[list[float]], tup
         if not all(math.isfinite(value) for value in values):
             raise ValueError(f"waypoint {index} contains a non-finite value")
         normalized.append(values)
-    return joint_names, normalized, parse_attached_object_frame_offset(document)
+    return (
+        joint_names,
+        GeometricPathWaypoints(
+            normalized,
+            document.get("geometric_path"),
+            document.get("path_smoothing", True),
+        ),
+        parse_attached_object_frame_offset(document),
+    )
 
 
 def find_named_body(root: ET.Element, body_name: str) -> ET.Element:
@@ -1598,17 +1644,15 @@ def apply_configuration(
     mujoco.mj_forward(model, data)
 
 
-def interpolated_frames(waypoints: list[list[float]], fps: float, speed: float):
-    for start, goal in zip(waypoints, waypoints[1:]):
-        max_change = max(abs(goal[index] - start[index]) for index in range(len(start)))
-        frame_count = max(2, math.ceil(max_change / speed * fps))
-        for frame_index in range(frame_count):
-            ratio = (frame_index + 1) / frame_count
-            smooth_ratio = ratio * ratio * (3.0 - 2.0 * ratio)
-            yield [
-                start[index] + (goal[index] - start[index]) * smooth_ratio
-                for index in range(len(start))
-            ]
+def interpolated_frames(
+    waypoints: list[list[float]],
+    fps: float,
+    speed: float,
+    acceleration: float = DEFAULT_TRAJECTORY_ACCELERATION,
+):
+    yield from continuous_trajectory_frames(
+        waypoints, fps, speed, acceleration
+    )
 
 
 def decimate_sequence(values: list, max_count: int) -> list:
@@ -1627,12 +1671,15 @@ def sampled_trajectory_configurations(
     waypoints: list[list[float]],
     fps: float,
     speed: float,
+    acceleration: float,
     max_count: int,
 ) -> list[list[float]]:
     if not waypoints:
         return []
     configurations = [waypoints[0]]
-    configurations.extend(interpolated_frames(waypoints, fps, speed))
+    configurations.extend(
+        interpolated_frames(waypoints, fps, speed, acceleration)
+    )
     return decimate_sequence(configurations, max_count)
 
 
@@ -1700,18 +1747,17 @@ def draw_path_polyline(mujoco, scene, points: list[np.ndarray], rgba) -> None:
         )
 
 
-def draw_path_overlay(
+def draw_path_overlay_scene(
     mujoco,
-    viewer,
+    scene,
     base_points: list[np.ndarray],
     payload_points: list[np.ndarray],
     reference_payload_geoms: list[dict] | None = None,
+    clear: bool = True,
 ) -> None:
-    scene = viewer.user_scn
-    if scene is None:
-        return
-    scene.ngeom = 0
-    capacity = len(scene.geoms)
+    if clear:
+        scene.ngeom = 0
+    capacity = len(scene.geoms) - scene.ngeom
     if capacity <= 0:
         return
 
@@ -1771,6 +1817,25 @@ def draw_path_overlay(
             ghost_geom["rotation"],
             ghost_geom["rgba"],
         )
+
+
+def draw_path_overlay(
+    mujoco,
+    viewer,
+    base_points: list[np.ndarray],
+    payload_points: list[np.ndarray],
+    reference_payload_geoms: list[dict] | None = None,
+) -> None:
+    scene = viewer.user_scn
+    if scene is None:
+        return
+    draw_path_overlay_scene(
+        mujoco,
+        scene,
+        base_points,
+        payload_points,
+        reference_payload_geoms,
+    )
 
 
 def update_com_markers(
@@ -2119,7 +2184,9 @@ def validate_real_trajectory(
 
     record_sample(waypoints[0])
     previous_configuration = waypoints[0]
-    for configuration in interpolated_frames(waypoints, args.fps, args.speed):
+    for configuration in interpolated_frames(
+        waypoints, args.fps, args.speed, args.acceleration
+    ):
         xy_error, yaw_error = step_real_configuration(
             mujoco,
             model,
@@ -2572,6 +2639,7 @@ def main() -> int:
             waypoints,
             args.fps,
             args.speed,
+            args.acceleration,
             PATH_OVERLAY_MAX_POINTS,
         )
         if args.real:
@@ -2597,6 +2665,147 @@ def main() -> int:
                 path_payload_points.append(
                     np.asarray(state["payload_com"], dtype=float)
                 )
+
+    if args.video is not None:
+        configure_model_render_quality(model)
+        model.vis.global_.offwidth = max(
+            int(model.vis.global_.offwidth), args.video_width
+        )
+        model.vis.global_.offheight = max(
+            int(model.vis.global_.offheight), args.video_height
+        )
+        cameras = {}
+        for view in args.video_views:
+            camera = mujoco.MjvCamera()
+            configure_camera(
+                mujoco,
+                camera,
+                (0.48, 0.0, 0.9),
+                3.4,
+                video_view_azimuth(315.0, view),
+                video_view_elevation(-18.0, view),
+            )
+            cameras[view] = camera
+        renderer = mujoco.Renderer(
+            model,
+            height=args.video_height,
+            width=args.video_width,
+        )
+        output_path = args.video.expanduser().resolve()
+        start_frame_count = max(1, math.ceil(0.75 * args.fps))
+        end_frame_count = max(1, math.ceil(0.75 * args.fps))
+
+        def write_video_frame(
+            writer: MultiViewVideoWriter,
+            reference_configuration: list[float],
+        ) -> None:
+            com_state = compute_com_state(
+                model,
+                data,
+                robot_body_ids,
+                payload_body_ids,
+            )
+            update_com_markers(
+                mujoco,
+                model,
+                data,
+                com_state,
+                reference_total_com(reference_configuration),
+            )
+            mujoco.mj_forward(model, data)
+            reference_payload_geoms = reference_payload_ghost_geoms(
+                reference_configuration
+            )
+            for view, camera in cameras.items():
+                renderer.update_scene(data, camera=camera)
+                draw_path_overlay_scene(
+                    mujoco,
+                    renderer.scene,
+                    path_base_points,
+                    path_payload_points,
+                    reference_payload_geoms,
+                    clear=False,
+                )
+                writer.write(view, renderer.render())
+
+        reset_scene_to_start()
+        mode = "real dynamics" if args.real else args.input_mode
+        print(
+            f"rendering {len(args.video_views)} FFW-SG2 mobility MP4 "
+            f"view(s) at {args.fps:g} fps "
+            f"({args.video_width}x{args.video_height}, {mode} mode): "
+            f"{', '.join(args.video_views)}"
+        )
+        try:
+            with MultiViewVideoWriter(
+                output_path,
+                args.video_views,
+                args.video_width,
+                args.video_height,
+                args.fps,
+            ) as writer:
+                for _ in range(start_frame_count):
+                    write_video_frame(writer, waypoints[0])
+                previous_configuration = waypoints[0]
+                for configuration in interpolated_frames(
+                    waypoints, args.fps, args.speed, args.acceleration
+                ):
+                    if args.real:
+                        assert real_base is not None
+                        step_real_configuration(
+                            mujoco,
+                            model,
+                            data,
+                            qpos_addresses,
+                            ctrl_addresses,
+                            joint_names,
+                            configuration,
+                            real_base,
+                            real_base_tracking,
+                            args.input_mode,
+                            args.settle_steps,
+                            previous_configuration,
+                        )
+                        previous_configuration = configuration
+                        if not np.all(np.isfinite(data.qpos)):
+                            raise RuntimeError(
+                                "FFW-SG2 real-mode simulation became non-finite"
+                            )
+                    else:
+                        apply_configuration(
+                            mujoco,
+                            model,
+                            data,
+                            qpos_addresses,
+                            ctrl_addresses,
+                            joint_names,
+                            configuration,
+                            base_body,
+                            args.input_mode,
+                            args.settle_steps,
+                        )
+                        if args.attach_payload:
+                            assert payload_qposadr is not None
+                            place_payload_at_gripper_midpoint(
+                                mujoco,
+                                model,
+                                data,
+                                payload_qposadr,
+                                payload_offset,
+                            )
+                    write_video_frame(writer, configuration)
+                for _ in range(end_frame_count):
+                    write_video_frame(writer, waypoints[-1])
+                frame_count = writer.frame_count
+        finally:
+            renderer.close()
+        print(
+            "saved FFW-SG2 mobility MP4: "
+            + ", ".join(str(path) for path in writer.output_paths.values())
+            + f" ({frame_count} frames each, "
+            f"{frame_count / args.fps:.3f} s)"
+        )
+        return 0
 
     import mujoco.viewer
 
@@ -2629,7 +2838,7 @@ def main() -> int:
     ) as viewer:
         viewer.cam.lookat[:] = (0.48, 0.0, 0.9)
         viewer.cam.distance = 3.4
-        viewer.cam.azimuth = 140.0
+        viewer.cam.azimuth = 315.0
         viewer.cam.elevation = -18.0
         draw_path_overlay(
             mujoco,
@@ -2713,7 +2922,9 @@ def main() -> int:
             time.sleep(0.75)
             replay_interrupted = False
             previous_configuration = waypoints[0]
-            for configuration in interpolated_frames(waypoints, args.fps, args.speed):
+            for configuration in interpolated_frames(
+                waypoints, args.fps, args.speed, args.acceleration
+            ):
                 if not viewer.is_running():
                     return 0
                 if replay_request_id != handled_replay_request_id:

@@ -1,0 +1,649 @@
+{
+  "robot": "ffw_sg2_mobility",
+  "joints": [
+    "base_x",
+    "base_y",
+    "base_yaw",
+    "lift_joint",
+    "arm_l_joint1",
+    "arm_l_joint2",
+    "arm_l_joint3",
+    "arm_l_joint4",
+    "arm_l_joint5",
+    "arm_l_joint6",
+    "arm_l_joint7",
+    "arm_r_joint1",
+    "arm_r_joint2",
+    "arm_r_joint3",
+    "arm_r_joint4",
+    "arm_r_joint5",
+    "arm_r_joint6",
+    "arm_r_joint7"
+  ],
+  "problems": {
+    "tray_lift": [
+      {
+        "valid": true,
+        "sphere": [],
+        "cylinder": [],
+        "box": [
+          {
+            "name": "gondola_base",
+            "position": [
+              0.825,
+              0.0,
+              0.1
+            ],
+            "orientation_euler_xyz": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "half_extents": [
+              0.235,
+              0.465,
+              0.1
+            ]
+          },
+          {
+            "name": "gondola_back_panel",
+            "position": [
+              1.065,
+              0.0,
+              1.035
+            ],
+            "orientation_euler_xyz": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "half_extents": [
+              0.015,
+              0.465,
+              0.835
+            ]
+          },
+          {
+            "name": "gondola_shelf_2",
+            "position": [
+              0.885,
+              0.0,
+              0.9
+            ],
+            "orientation_euler_xyz": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "half_extents": [
+              0.165,
+              0.45,
+              0.04
+            ]
+          },
+          {
+            "name": "gondola_shelf_3",
+            "position": [
+              0.885,
+              0.0,
+              1.35
+            ],
+            "orientation_euler_xyz": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "half_extents": [
+              0.165,
+              0.45,
+              0.04
+            ]
+          },
+          {
+            "name": "gondola_shelf_4",
+            "position": [
+              0.885,
+              0.0,
+              1.8
+            ],
+            "orientation_euler_xyz": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "half_extents": [
+              0.165,
+              0.45,
+              0.04
+            ]
+          },
+          {
+            "name": "gondola_left_upright",
+            "position": [
+              1.065,
+              0.465,
+              0.935
+            ],
+            "orientation_euler_xyz": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "half_extents": [
+              0.025,
+              0.025,
+              0.935
+            ]
+          },
+          {
+            "name": "gondola_right_upright",
+            "position": [
+              1.065,
+              -0.465,
+              0.935
+            ],
+            "orientation_euler_xyz": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "half_extents": [
+              0.025,
+              0.025,
+              0.935
+            ]
+          },
+          {
+            "name": "gondola_ypos_base",
+            "position": [
+              0.825,
+              0.93,
+              0.1
+            ],
+            "orientation_euler_xyz": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "half_extents": [
+              0.235,
+              0.465,
+              0.1
+            ]
+          },
+          {
+            "name": "gondola_ypos_back_panel",
+            "position": [
+              1.065,
+              0.93,
+              1.035
+            ],
+            "orientation_euler_xyz": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "half_extents": [
+              0.015,
+              0.465,
+              0.835
+            ]
+          },
+          {
+            "name": "gondola_ypos_shelf_2",
+            "position": [
+              0.885,
+              0.93,
+              0.9
+            ],
+            "orientation_euler_xyz": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "half_extents": [
+              0.165,
+              0.45,
+              0.04
+            ]
+          },
+          {
+            "name": "gondola_ypos_shelf_3",
+            "position": [
+              0.885,
+              0.93,
+              1.35
+            ],
+            "orientation_euler_xyz": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "half_extents": [
+              0.165,
+              0.45,
+              0.04
+            ]
+          },
+          {
+            "name": "gondola_ypos_shelf_4",
+            "position": [
+              0.885,
+              0.93,
+              1.8
+            ],
+            "orientation_euler_xyz": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "half_extents": [
+              0.165,
+              0.45,
+              0.04
+            ]
+          },
+          {
+            "name": "gondola_ypos_left_upright",
+            "position": [
+              1.065,
+              1.395,
+              0.935
+            ],
+            "orientation_euler_xyz": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "half_extents": [
+              0.025,
+              0.025,
+              0.935
+            ]
+          },
+          {
+            "name": "gondola_ypos_right_upright",
+            "position": [
+              1.065,
+              0.465,
+              0.935
+            ],
+            "orientation_euler_xyz": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "half_extents": [
+              0.025,
+              0.025,
+              0.935
+            ]
+          },
+          {
+            "name": "gondola_yneg_base",
+            "position": [
+              0.825,
+              -0.93,
+              0.1
+            ],
+            "orientation_euler_xyz": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "half_extents": [
+              0.235,
+              0.465,
+              0.1
+            ]
+          },
+          {
+            "name": "gondola_yneg_back_panel",
+            "position": [
+              1.065,
+              -0.93,
+              1.035
+            ],
+            "orientation_euler_xyz": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "half_extents": [
+              0.015,
+              0.465,
+              0.835
+            ]
+          },
+          {
+            "name": "gondola_yneg_shelf_2",
+            "position": [
+              0.885,
+              -0.93,
+              0.9
+            ],
+            "orientation_euler_xyz": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "half_extents": [
+              0.165,
+              0.45,
+              0.04
+            ]
+          },
+          {
+            "name": "gondola_yneg_shelf_3",
+            "position": [
+              0.885,
+              -0.93,
+              1.35
+            ],
+            "orientation_euler_xyz": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "half_extents": [
+              0.165,
+              0.45,
+              0.04
+            ]
+          },
+          {
+            "name": "gondola_yneg_shelf_4",
+            "position": [
+              0.885,
+              -0.93,
+              1.8
+            ],
+            "orientation_euler_xyz": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "half_extents": [
+              0.165,
+              0.45,
+              0.04
+            ]
+          },
+          {
+            "name": "gondola_yneg_left_upright",
+            "position": [
+              1.065,
+              -0.465,
+              0.935
+            ],
+            "orientation_euler_xyz": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "half_extents": [
+              0.025,
+              0.025,
+              0.935
+            ]
+          },
+          {
+            "name": "gondola_yneg_right_upright",
+            "position": [
+              1.065,
+              -1.395,
+              0.935
+            ],
+            "orientation_euler_xyz": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "half_extents": [
+              0.025,
+              0.025,
+              0.935
+            ]
+          },
+          {
+            "name": "gondola_shelf_2_lip",
+            "position": [
+              0.72,
+              0.0,
+              0.945
+            ],
+            "orientation_euler_xyz": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "half_extents": [
+              0.018,
+              0.45,
+              0.02
+            ]
+          },
+          {
+            "name": "gondola_shelf_3_lip",
+            "position": [
+              0.72,
+              0.0,
+              1.395
+            ],
+            "orientation_euler_xyz": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "half_extents": [
+              0.018,
+              0.45,
+              0.02
+            ]
+          },
+          {
+            "name": "gondola_shelf_4_lip",
+            "position": [
+              0.72,
+              0.0,
+              1.845
+            ],
+            "orientation_euler_xyz": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "half_extents": [
+              0.018,
+              0.45,
+              0.02
+            ]
+          },
+          {
+            "name": "gondola_ypos_shelf_2_lip",
+            "position": [
+              0.72,
+              0.93,
+              0.945
+            ],
+            "orientation_euler_xyz": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "half_extents": [
+              0.018,
+              0.45,
+              0.02
+            ]
+          },
+          {
+            "name": "gondola_ypos_shelf_3_lip",
+            "position": [
+              0.72,
+              0.93,
+              1.395
+            ],
+            "orientation_euler_xyz": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "half_extents": [
+              0.018,
+              0.45,
+              0.02
+            ]
+          },
+          {
+            "name": "gondola_ypos_shelf_4_lip",
+            "position": [
+              0.72,
+              0.93,
+              1.845
+            ],
+            "orientation_euler_xyz": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "half_extents": [
+              0.018,
+              0.45,
+              0.02
+            ]
+          },
+          {
+            "name": "gondola_yneg_shelf_2_lip",
+            "position": [
+              0.72,
+              -0.93,
+              0.945
+            ],
+            "orientation_euler_xyz": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "half_extents": [
+              0.018,
+              0.45,
+              0.02
+            ]
+          },
+          {
+            "name": "gondola_yneg_shelf_3_lip",
+            "position": [
+              0.72,
+              -0.93,
+              1.395
+            ],
+            "orientation_euler_xyz": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "half_extents": [
+              0.018,
+              0.45,
+              0.02
+            ]
+          },
+          {
+            "name": "gondola_yneg_shelf_4_lip",
+            "position": [
+              0.72,
+              -0.93,
+              1.845
+            ],
+            "orientation_euler_xyz": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "half_extents": [
+              0.018,
+              0.45,
+              0.02
+            ]
+          }
+        ],
+        "attached_object_collision": {
+          "enabled": true,
+          "world_offset": [
+            0.1,
+            0.0,
+            0.0
+          ],
+          "box_sphere_grid": {
+            "half_extents": [
+              0.12,
+              0.11,
+              0.06
+            ],
+            "counts": [
+              7,
+              7,
+              5
+            ],
+            "radius_padding": 0.001
+          },
+          "contact_links": [
+            "gripper_l_rh_p12_rn_base",
+            "gripper_l_rh_p12_rn_r1",
+            "gripper_l_rh_p12_rn_r2",
+            "gripper_l_rh_p12_rn_l1",
+            "gripper_l_rh_p12_rn_l2",
+            "gripper_r_rh_p12_rn_base",
+            "gripper_r_rh_p12_rn_r1",
+            "gripper_r_rh_p12_rn_r2",
+            "gripper_r_rh_p12_rn_l1",
+            "gripper_r_rh_p12_rn_l2"
+          ]
+        },
+        "start": [
+          0.1379731576,
+          -0.0000443767,
+          -0.0000038338,
+          -0.4743872807,
+          -2.2778459454,
+          0.4888288003,
+          -0.9378398925,
+          -1.4336195782,
+          2.3942522174,
+          -0.6957659455,
+          1.574388201,
+          -2.2720017869,
+          -0.4842356501,
+          0.9278137471,
+          -1.4316888947,
+          -2.3815118893,
+          -0.6904448949,
+          -1.5803501303
+        ],
+        "goals": [
+          [
+            0.2216775436,
+            0.0000065705,
+            0.0000005453,
+            -0.0006293707,
+            0.3475636952,
+            0.1611348196,
+            -0.2185649542,
+            -2.1435037336,
+            1.5905332093,
+            -0.2692994063,
+            0.2047087292,
+            0.2111302841,
+            -0.4984200131,
+            0.5232254879,
+            -2.1571388567,
+            -1.7720419357,
+            -0.6824714644,
+            -0.1675959649
+          ]
+        ]
+      }
+    ]
+  }
+}

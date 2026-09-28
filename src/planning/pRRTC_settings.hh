@@ -1,6 +1,8 @@
 #pragma once
 
 #include "G1ConstraintParameters.hh"
+#include "IgrisCConstraintParameters.hh"
+#include "FrankaConstraintParameters.hh"
 
 constexpr int FFW_SG2_ATTACHED_OBJECT_MAX_SPHERES = 256;
 constexpr int FFW_SG2_ATTACHED_OBJECT_MAX_IGNORED_ROBOT_SPHERES = 96;
@@ -28,7 +30,9 @@ struct pRRTC_settings {
     int max_iters = 1000000;
     int num_new_configs = 512;
     int granularity = 16;
-    float range = 0.5;
+    float range = 0.3;
+    // Base seed for the per-block CURAND and shuffled Halton states.
+    unsigned long long random_seed = 1ULL;
     
     // lift_joint 이동 거리 가중치
     float lift_distance_weight = 1.0f;
@@ -43,6 +47,8 @@ struct pRRTC_settings {
 
     bool dynamic_domain = true;
     bool trace_trees = false;
+    // Opt-in device counters for diagnosing TB-RRT expansion behavior.
+    bool collect_diagnostics = false;
 
     // cpRRTC projection
     bool rigid_orientation = false;
@@ -63,6 +69,9 @@ struct pRRTC_settings {
     // Tangent-Bundle / ConCon EXTEND
     float em_threshold = 0.1f;
     int max_concon_nodes = 4;
+    // Section 3.5.1 of TB-RRT: keep random EXTEND samples in the
+    // forward half-space of each non-root tangent space.
+    bool prevent_ts_backtracking = false;
 
     // CONNECT 동안 허용할 최대 Tangent-Space / ConCon 반복 수
     int max_connect_concon_chunks = 16;
@@ -78,4 +87,11 @@ struct pRRTC_settings {
     float connect_reached_tolerance = 1.0e-3f;
 
     ppln::constraints::G1ConstraintParameters g1_constraints{};
+    ppln::constraints::IgrisCConstraintParameters igris_c_constraints{};
+    ppln::constraints::FrankaConstraintParameters franka_constraints{};
+
+    // single_mbm.cpp is compiled with Clang while its CUDA translation unit
+    // is hosted by GCC. End the base class on its 8-byte alignment boundary
+    // so Clang cannot reuse tail padding for AORRTC_settings' derived fields.
+    unsigned long long abi_layout_guard = 0ULL;
 };

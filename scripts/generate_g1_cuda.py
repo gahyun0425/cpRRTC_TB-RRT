@@ -8,6 +8,32 @@ import re
 from pathlib import Path
 
 
+G1_BASE_SPHERE_COUNT = 133
+
+# Conservative sphere cover of the visual rubber-hand mesh in the
+# left_rubber_hand frame.  The right hand is the Y-mirrored copy.  The cover
+# was fitted to a 3 mm filled voxelization of the Unitree hand mesh; each
+# radius includes the voxel half-diagonal plus a 2 mm safety margin.
+G1_HAND_COLLISION_SPHERES = (
+    (0.12226864, -0.03011716, 0.01868166, 0.02931885),
+    (0.09663538, -0.00758845, 0.02718773, 0.02799455),
+    (0.05331516, 0.00350596, -0.00436968, 0.02470695),
+    (0.05910708, -0.00107804, -0.02724501, 0.02478403),
+    (0.10652422, -0.00932616, -0.00106243, 0.02615127),
+    (0.01030900, -0.00082258, 0.01180645, 0.02779738),
+    (0.06198332, 0.00022062, 0.01865049, 0.02628334),
+    (0.03230769, 0.00719398, 0.00238796, 0.02594034),
+    (0.07663987, -0.01592605, 0.05459807, 0.02387999),
+    (0.11677683, -0.02764390, -0.02561341, 0.02850870),
+    (0.05344048, -0.00345635, 0.04005556, 0.02382529),
+    (0.03220964, -0.00078795, 0.02467711, 0.02598777),
+    (0.01101009, 0.00126941, -0.01060248, 0.02726159),
+    (0.07808721, -0.00260465, -0.00295349, 0.02451706),
+    (0.03363579, 0.00064050, -0.02265777, 0.02588009),
+    (0.09328908, -0.00691221, -0.03138116, 0.02586787),
+)
+
+
 def function_body(source: str, signature: str) -> str:
     signature_index = source.index(signature)
     body_start = source.index("{", signature_index)
@@ -31,12 +57,14 @@ def scalar_sphere_fk(source: str) -> tuple[str, list[float]]:
         body,
         count=1,
     )
-    body = body[:body.index("for (auto i = 0U; i < 133;")].rstrip()
+    body = body[:body.index(
+        f"for (auto i = 0U; i < {G1_BASE_SPHERE_COUNT};"
+    )].rstrip()
     body = re.sub(r"\bcos\(", "cosf(", body)
     body = re.sub(r"\bsin\(", "sinf(", body)
     body = re.sub(r"^ {12}", "    ", body, flags=re.MULTILINE)
 
-    radii: list[float | None] = [None] * 133
+    radii: list[float | None] = [None] * G1_BASE_SPHERE_COUNT
     for sphere_index, value in re.findall(
         r"y\[(\d+)\]\s*=\s*([-+0-9.eE]+);", body
     ):
@@ -258,9 +286,17 @@ def self_collision_pairs(source: str) -> list[tuple[int, int]]:
 def generate(source: str) -> str:
     fk_body, radii = scalar_sphere_fk(source)
     pairs = self_collision_pairs(source)
+    hand_radii = [sphere[3] for sphere in G1_HAND_COLLISION_SPHERES]
+    all_radii = radii + hand_radii + hand_radii
     radius_rows = "\n".join(
-        "    " + ", ".join(f"{value:.15g}f" for value in radii[index:index + 8]) + ","
-        for index in range(0, len(radii), 8)
+        "    " + ", ".join(
+            f"{value:.15g}f" for value in all_radii[index:index + 8]
+        ) + ","
+        for index in range(0, len(all_radii), 8)
+    )
+    hand_sphere_rows = "\n".join(
+        "    {" + ", ".join(f"{value:.8f}f" for value in sphere) + "},"
+        for sphere in G1_HAND_COLLISION_SPHERES
     )
     pair_rows = "\n".join(
         "    " + ", ".join(f"{{{a}, {b}}}" for a, b in pairs[index:index + 12]) + ","
@@ -277,7 +313,10 @@ def generate(source: str) -> str:
 namespace ppln::collision {{
 
 constexpr int G1_DIM = 35;
-constexpr int G1_SPHERE_COUNT = 133;
+constexpr int G1_BASE_SPHERE_COUNT = {G1_BASE_SPHERE_COUNT};
+constexpr int G1_HAND_SPHERES_PER_HAND = {len(G1_HAND_COLLISION_SPHERES)};
+constexpr int G1_HAND_SPHERE_COUNT = 2 * G1_HAND_SPHERES_PER_HAND;
+constexpr int G1_SPHERE_COUNT = G1_BASE_SPHERE_COUNT + G1_HAND_SPHERE_COUNT;
 constexpr int G1_BATCH_SIZE = 16;
 constexpr int G1_APPROX_SPHERE_COUNT = 1;
 constexpr int G1_JOINT_FLAG_STRIDE = 1;
@@ -287,6 +326,47 @@ constexpr int G1_SELF_COLLISION_PAIR_COUNT = {len(pairs)};
 __device__ __constant__ float g1_sphere_radii[G1_SPHERE_COUNT] = {{
 {radius_rows}
 }};
+
+// Local [x, y, z, radius] in the left rubber-hand frame.  The right-hand
+// centers use the same table with Y negated.
+__device__ __constant__ float
+g1_hand_collision_spheres[G1_HAND_SPHERES_PER_HAND][4] = {{
+{hand_sphere_rows}
+}};
+
+// g1_kinematics.cuh is included later in each CUDA translation unit.
+__device__ __noinline__ void g1_end_effector_fk(
+    const float *x,
+    float *output
+);
+
+__device__ __forceinline__ void g1_append_hand_sphere_fk(
+    const float *q,
+    float *sphere_values
+) {{
+    float transforms[48];
+    g1_end_effector_fk(q, transforms);
+    for (int hand = 0; hand < 2; ++hand) {{
+        const float *transform = transforms + hand * 12;
+        for (int sphere = 0; sphere < G1_HAND_SPHERES_PER_HAND; ++sphere) {{
+            const float local_x = g1_hand_collision_spheres[sphere][0];
+            const float local_y = hand == 0
+                ? g1_hand_collision_spheres[sphere][1]
+                : -g1_hand_collision_spheres[sphere][1];
+            const float local_z = g1_hand_collision_spheres[sphere][2];
+            const int output_sphere = G1_BASE_SPHERE_COUNT +
+                hand * G1_HAND_SPHERES_PER_HAND + sphere;
+            float *output = sphere_values + output_sphere * 4;
+            output[0] = transform[0] + transform[3] * local_x +
+                transform[6] * local_y + transform[9] * local_z;
+            output[1] = transform[1] + transform[4] * local_x +
+                transform[7] * local_y + transform[10] * local_z;
+            output[2] = transform[2] + transform[5] * local_x +
+                transform[8] * local_y + transform[11] * local_z;
+            output[3] = g1_hand_collision_spheres[sphere][3];
+        }}
+    }}
+}}
 
 // Global read-only device memory is used because the complete pair table is
 // too large to share CUDA constant memory with the other generated robots.
@@ -301,6 +381,7 @@ __device__ __noinline__ void g1_sphere_fk_values(
 ) {{
     float v[32];
 {fk_body}
+    g1_append_hand_sphere_fk(x, y);
 }}
 
 __device__ __forceinline__ void g1_sphere_fk(

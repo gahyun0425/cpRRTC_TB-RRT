@@ -16,6 +16,8 @@ namespace ffw_sg2_attached_object_collision {
 
 using json = nlohmann::json;
 
+constexpr int kFfwSg2FixedFineSphereCount = 124;
+constexpr int kFfwSg2FixedApproxSphereCount = 27;
 constexpr int kFfwSg2MobilityFineSphereCount = 125;
 constexpr int kFfwSg2MobilityApproxSphereCount = 28;
 
@@ -29,31 +31,31 @@ struct LinkSphereRange {
 inline constexpr LinkSphereRange kLinkSphereRanges[] = {
     {"lift_link", 0, 8, 0},
     {"arm_base_link", 9, 14, 1},
-    {"head_link2", 15, 22, 26},
-    {"arm_l_link1", 23, 32, 2},
-    {"arm_l_link2", 33, 42, 3},
-    {"arm_l_link3", 43, 52, 4},
-    {"arm_l_link4", 53, 62, 5},
-    {"arm_l_link5", 63, 72, 6},
-    {"arm_l_link6", 73, 77, 7},
-    {"arm_l_link7", 78, 84, 8},
-    {"arm_r_link1", 85, 87, 14},
-    {"arm_r_link2", 88, 90, 15},
-    {"arm_r_link3", 91, 93, 16},
-    {"arm_r_link4", 94, 97, 17},
-    {"arm_r_link5", 98, 99, 18},
-    {"arm_r_link6", 100, 104, 19},
-    {"arm_r_link7", 105, 111, 20},
-    {"gripper_l_rh_p12_rn_base", 112, 113, 9},
-    {"gripper_l_rh_p12_rn_r1", 114, 114, 10},
-    {"gripper_l_rh_p12_rn_r2", 115, 115, 11},
-    {"gripper_l_rh_p12_rn_l1", 116, 116, 12},
-    {"gripper_l_rh_p12_rn_l2", 117, 117, 13},
-    {"gripper_r_rh_p12_rn_base", 118, 119, 21},
-    {"gripper_r_rh_p12_rn_r1", 120, 120, 22},
-    {"gripper_r_rh_p12_rn_r2", 121, 121, 23},
-    {"gripper_r_rh_p12_rn_l1", 122, 122, 24},
-    {"gripper_r_rh_p12_rn_l2", 123, 123, 25},
+    {"head_link2", 116, 123, 26},
+    {"arm_l_link1", 15, 24, 2},
+    {"arm_l_link2", 25, 34, 3},
+    {"arm_l_link3", 35, 44, 4},
+    {"arm_l_link4", 45, 54, 5},
+    {"arm_l_link5", 55, 64, 6},
+    {"arm_l_link6", 65, 69, 7},
+    {"arm_l_link7", 70, 76, 8},
+    {"arm_r_link1", 83, 85, 14},
+    {"arm_r_link2", 86, 88, 15},
+    {"arm_r_link3", 89, 91, 16},
+    {"arm_r_link4", 92, 95, 17},
+    {"arm_r_link5", 96, 97, 18},
+    {"arm_r_link6", 98, 102, 19},
+    {"arm_r_link7", 103, 109, 20},
+    {"gripper_l_rh_p12_rn_base", 77, 78, 9},
+    {"gripper_l_rh_p12_rn_r1", 79, 79, 10},
+    {"gripper_l_rh_p12_rn_r2", 80, 80, 11},
+    {"gripper_l_rh_p12_rn_l1", 81, 81, 12},
+    {"gripper_l_rh_p12_rn_l2", 82, 82, 13},
+    {"gripper_r_rh_p12_rn_base", 110, 111, 21},
+    {"gripper_r_rh_p12_rn_r1", 112, 112, 22},
+    {"gripper_r_rh_p12_rn_r2", 113, 113, 23},
+    {"gripper_r_rh_p12_rn_l1", 114, 114, 24},
+    {"gripper_r_rh_p12_rn_l2", 115, 115, 25},
     {"base_link", 124, 124, 27},
     {"ffw_sg2_mobility_base", 124, 124, 27},
 };
@@ -171,9 +173,10 @@ inline void append_sphere(
 
 inline void add_ignored_fine_sphere(
     FfwSg2AttachedObjectCollisionSpec &spec,
-    int sphere
+    int sphere,
+    int robot_sphere_count
 ) {
-    if (sphere < 0 || sphere >= kFfwSg2MobilityFineSphereCount) {
+    if (sphere < 0 || sphere >= robot_sphere_count) {
         throw std::invalid_argument(
             "ignored fine robot sphere index is out of range"
         );
@@ -189,9 +192,10 @@ inline void add_ignored_fine_sphere(
 
 inline void add_ignored_approx_sphere(
     FfwSg2AttachedObjectCollisionSpec &spec,
-    int sphere
+    int sphere,
+    int robot_sphere_count
 ) {
-    if (sphere < 0 || sphere >= kFfwSg2MobilityApproxSphereCount) {
+    if (sphere < 0 || sphere >= robot_sphere_count) {
         throw std::invalid_argument(
             "ignored approximate robot sphere index is out of range"
         );
@@ -216,34 +220,53 @@ inline const LinkSphereRange *find_link_range(const std::string &link_name) {
 
 inline void add_contact_link(
     FfwSg2AttachedObjectCollisionSpec &spec,
-    const std::string &link_name
+    const std::string &link_name,
+    int fine_sphere_count,
+    int approximate_sphere_count
 ) {
     const LinkSphereRange *range = find_link_range(link_name);
     if (range == nullptr) {
         throw std::invalid_argument(
-            "unknown ffw_sg2_mobility contact link: " + link_name
+            "unknown FFW-SG2 contact link: " + link_name
         );
     }
     for (int sphere = range->fine_begin; sphere <= range->fine_end; sphere++) {
-        add_ignored_fine_sphere(spec, sphere);
+        add_ignored_fine_sphere(spec, sphere, fine_sphere_count);
     }
-    add_ignored_approx_sphere(spec, range->approx_index);
+    add_ignored_approx_sphere(
+        spec,
+        range->approx_index,
+        approximate_sphere_count
+    );
 }
 
 inline void add_default_contact_links(
-    FfwSg2AttachedObjectCollisionSpec &spec
+    FfwSg2AttachedObjectCollisionSpec &spec,
+    int fine_sphere_count,
+    int approximate_sphere_count
 ) {
     for (const char *link_name : kDefaultContactLinks) {
-        add_contact_link(spec, link_name);
+        add_contact_link(
+            spec,
+            link_name,
+            fine_sphere_count,
+            approximate_sphere_count
+        );
     }
 }
 
 inline void parse_contact_links(
     const json &object,
-    FfwSg2AttachedObjectCollisionSpec &spec
+    FfwSg2AttachedObjectCollisionSpec &spec,
+    int fine_sphere_count,
+    int approximate_sphere_count
 ) {
     if (!object.contains("contact_links")) {
-        add_default_contact_links(spec);
+        add_default_contact_links(
+            spec,
+            fine_sphere_count,
+            approximate_sphere_count
+        );
         return;
     }
 
@@ -255,13 +278,20 @@ inline void parse_contact_links(
         if (!entry.is_string()) {
             throw std::invalid_argument("contact_links entries must be strings");
         }
-        add_contact_link(spec, entry.get<std::string>());
+        add_contact_link(
+            spec,
+            entry.get<std::string>(),
+            fine_sphere_count,
+            approximate_sphere_count
+        );
     }
 }
 
 inline void parse_manual_ignored_spheres(
     const json &object,
-    FfwSg2AttachedObjectCollisionSpec &spec
+    FfwSg2AttachedObjectCollisionSpec &spec,
+    int fine_sphere_count,
+    int approximate_sphere_count
 ) {
     for (const char *key : {"ignored_robot_spheres", "ignore_robot_spheres"}) {
         if (!object.contains(key)) {
@@ -277,7 +307,11 @@ inline void parse_manual_ignored_spheres(
                     std::string(key) + " entries must be integers"
                 );
             }
-            add_ignored_fine_sphere(spec, entry.get<int>());
+            add_ignored_fine_sphere(
+                spec,
+                entry.get<int>(),
+                fine_sphere_count
+            );
         }
     }
 
@@ -298,7 +332,11 @@ inline void parse_manual_ignored_spheres(
                     std::string(key) + " entries must be integers"
                 );
             }
-            add_ignored_approx_sphere(spec, entry.get<int>());
+            add_ignored_approx_sphere(
+                spec,
+                entry.get<int>(),
+                approximate_sphere_count
+            );
         }
     }
 }
@@ -442,7 +480,9 @@ inline void parse_box_sphere_grid(
 
 inline void apply_from_problem(
     const json &problem,
-    pRRTC_settings &settings
+    pRRTC_settings &settings,
+    int fine_sphere_count = kFfwSg2MobilityFineSphereCount,
+    int approximate_sphere_count = kFfwSg2MobilityApproxSphereCount
 ) {
     auto &spec = settings.ffw_sg2_attached_object_collision;
     spec = {};
@@ -505,8 +545,18 @@ inline void apply_from_problem(
         );
     }
 
-    parse_contact_links(object, spec);
-    parse_manual_ignored_spheres(object, spec);
+    parse_contact_links(
+        object,
+        spec,
+        fine_sphere_count,
+        approximate_sphere_count
+    );
+    parse_manual_ignored_spheres(
+        object,
+        spec,
+        fine_sphere_count,
+        approximate_sphere_count
+    );
 }
 
 } // namespace ffw_sg2_attached_object_collision

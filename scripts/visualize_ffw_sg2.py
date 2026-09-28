@@ -11,6 +11,20 @@ from pathlib import Path
 import sys
 import time
 
+from mujoco_video import (
+    DEFAULT_TRAJECTORY_ACCELERATION,
+    DEFAULT_TRAJECTORY_SPEED,
+    GeometricPathWaypoints,
+    MultiViewVideoWriter,
+    add_video_arguments,
+    configure_camera,
+    configure_model_render_quality,
+    continuous_trajectory_frames,
+    validate_video_arguments,
+    video_view_azimuth,
+    video_view_elevation,
+)
+
 
 DUAL_ARM_PLANNING_JOINTS = (
     "lift_joint",
@@ -47,6 +61,9 @@ GRIPPER_JOINT_NAMES = tuple(
     for index in range(1, 5)
 )
 ATTACHED_OBJECT_FRAME_OFFSET = (0.1, 0.0, 0.0)
+ACTUATOR_NAME_BY_JOINT = {
+    "lift_joint": "actuator_lift_joint",
+}
 SINGLE_ARM_PLANNING_JOINTS = (
     "lift_joint",
     "arm_r_joint1",
@@ -63,6 +80,10 @@ SUPPORTED_JOINT_ORDERS = {
     MOBILITY_PLANNING_JOINTS,
     SINGLE_ARM_PLANNING_JOINTS,
 }
+TRAY_SHELF_MATERIAL_NAME = "M_hinge_blue"
+TRAY_SHELF_RGBA = (1.0, 1.0, 1.0, 1.0)
+TRAY_ROOM_GEOM_NAMES = ("floor", "wall_left", "wall_front")
+FRANKA_FLOOR_RGBA = (0.48, 0.48, 0.48, 1.0)
 
 
 def parse_args() -> argparse.Namespace:
@@ -73,17 +94,46 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--speed",
         type=float,
-        default=0.7,
+        default=DEFAULT_TRAJECTORY_SPEED,
         help="Maximum configuration-coordinate change per second.",
+    )
+    parser.add_argument(
+        "--acceleration",
+        type=float,
+        default=DEFAULT_TRAJECTORY_ACCELERATION,
+        help="Maximum configuration-coordinate acceleration per second squared.",
+    )
+    parser.add_argument(
+        "--input-mode",
+        choices=("qpos", "ctrl"),
+        default="qpos",
+        help="Replay with direct qpos assignment or MuJoCo position-actuator targets.",
+    )
+    parser.add_argument(
+        "--settle-steps",
+        type=int,
+        default=12,
+        help="MuJoCo steps advanced after each ctrl target update.",
     )
     parser.add_argument(
         "--validate-only",
         action="store_true",
         help="Load and validate without opening a viewer window.",
     )
+    add_video_arguments(parser, "PRRTC_FFW_SG2_VIDEO")
     args = parser.parse_args()
-    if args.fps <= 0.0 or args.speed <= 0.0:
-        parser.error("--fps and --speed must be positive")
+    if (
+        not math.isfinite(args.fps)
+        or not math.isfinite(args.speed)
+        or not math.isfinite(args.acceleration)
+        or args.fps <= 0.0
+        or args.speed <= 0.0
+        or args.acceleration <= 0.0
+    ):
+        parser.error("--fps, --speed, and --acceleration must be positive")
+    if args.settle_steps < 0:
+        parser.error("--settle-steps must be greater than or equal to 0")
+    validate_video_arguments(parser, args)
     return args
 
 
@@ -129,7 +179,54 @@ def load_trajectory(
         for index in range(len(joint_names))
     ) > 1.0e-5:
         raise ValueError("trajectory was not converted to start-to-goal order")
-    return joint_names, normalized, parse_attached_object_frame_offset(document)
+    return (
+        joint_names,
+        GeometricPathWaypoints(
+            normalized,
+            document.get("geometric_path"),
+            document.get("path_smoothing", True),
+        ),
+        parse_attached_object_frame_offset(document),
+    )
+
+
+def apply_visual_style(mujoco, model, joint_names: tuple[str, ...]) -> None:
+    """Apply scene colors that are specific to the dual-arm tray visualizer."""
+    if joint_names != DUAL_ARM_PLANNING_JOINTS:
+        return
+
+    for geom_name in TRAY_ROOM_GEOM_NAMES:
+        geom_id = mujoco.mj_name2id(
+            model,
+            mujoco.mjtObj.mjOBJ_GEOM,
+            geom_name,
+        )
+        if geom_id < 0:
+            raise ValueError(f"MuJoCo model is missing tray room geom: {geom_name}")
+        model.geom_matid[geom_id] = -1
+        model.geom_rgba[geom_id] = FRANKA_FLOOR_RGBA
+
+    material_id = mujoco.mj_name2id(
+        model,
+        mujoco.mjtObj.mjOBJ_MATERIAL,
+        TRAY_SHELF_MATERIAL_NAME,
+    )
+    if material_id < 0:
+        raise ValueError(
+            f"MuJoCo model is missing tray shelf material: "
+            f"{TRAY_SHELF_MATERIAL_NAME}"
+        )
+
+    shelf_geom_ids = [
+        geom_id
+        for geom_id in range(model.ngeom)
+        if int(model.geom_matid[geom_id]) == material_id
+    ]
+    if not shelf_geom_ids:
+        raise ValueError("MuJoCo model has no tray shelf visual geoms")
+    for geom_id in shelf_geom_ids:
+        model.geom_matid[geom_id] = -1
+        model.geom_rgba[geom_id] = TRAY_SHELF_RGBA
 
 
 def resolve_qpos_addresses(mujoco, model, joint_names) -> list[int | None]:
@@ -149,6 +246,23 @@ def resolve_qpos_addresses(mujoco, model, joint_names) -> list[int | None]:
         if joint_type not in scalar_types:
             raise ValueError(f"planning joint is not scalar: {name}")
         addresses.append(int(model.jnt_qposadr[joint_id]))
+    return addresses
+
+
+def resolve_ctrl_addresses(mujoco, model, joint_names) -> list[int]:
+    addresses: list[int] = []
+    for joint_name in joint_names:
+        if joint_name in MOBILITY_BASE_JOINTS:
+            raise ValueError("ctrl replay does not support virtual mobility-base joints")
+        actuator_name = ACTUATOR_NAME_BY_JOINT.get(joint_name, joint_name)
+        actuator_id = mujoco.mj_name2id(
+            model,
+            mujoco.mjtObj.mjOBJ_ACTUATOR,
+            actuator_name,
+        )
+        if actuator_id < 0:
+            raise ValueError(f"MuJoCo model is missing actuator: {actuator_name}")
+        addresses.append(int(actuator_id))
     return addresses
 
 
@@ -385,16 +499,27 @@ def apply_configuration(
     model,
     data,
     joint_names,
-    addresses,
+    qpos_addresses,
+    ctrl_addresses,
     configuration,
     base_body,
     object_qposadr,
     attached_object_frame_offset,
+    input_mode,
+    settle_steps,
+    seed_qpos=False,
 ) -> None:
-    for address, value in zip(addresses, configuration):
-        if address is None:
+    for index, (qpos_address, value) in enumerate(
+        zip(qpos_addresses, configuration)
+    ):
+        if qpos_address is None:
             continue
-        data.qpos[address] = value
+        if input_mode == "ctrl":
+            data.ctrl[ctrl_addresses[index]] = value
+            if seed_qpos:
+                data.qpos[qpos_address] = value
+        else:
+            data.qpos[qpos_address] = value
     if base_body is not None:
         body_id, origin = base_body
         base_x = configuration[joint_names.index("base_x")]
@@ -412,9 +537,15 @@ def apply_configuration(
             0.0,
             math.sin(half_yaw),
         )
-    data.qvel[:] = 0.0
     close_grippers(mujoco, model, data)
-    mujoco.mj_forward(model, data)
+    if input_mode == "ctrl" and not seed_qpos:
+        for _ in range(settle_steps):
+            mujoco.mj_step(model, data)
+        if settle_steps == 0:
+            mujoco.mj_forward(model, data)
+    else:
+        data.qvel[:] = 0.0
+        mujoco.mj_forward(model, data)
     if object_qposadr is not None:
         place_object_at_gripper_pose(
             mujoco,
@@ -425,17 +556,153 @@ def apply_configuration(
         )
 
 
-def interpolated_frames(waypoints, fps: float, speed: float):
-    for start, goal in zip(waypoints, waypoints[1:]):
-        max_change = max(abs(goal[i] - start[i]) for i in range(len(start)))
-        frame_count = max(2, math.ceil(max_change / speed * fps))
-        for frame_index in range(frame_count):
-            ratio = (frame_index + 1) / frame_count
-            smooth_ratio = ratio * ratio * (3.0 - 2.0 * ratio)
-            yield [
-                start[i] + (goal[i] - start[i]) * smooth_ratio
-                for i in range(len(start))
-            ]
+def interpolated_frames(
+    waypoints,
+    fps: float,
+    speed: float,
+    acceleration: float = DEFAULT_TRAJECTORY_ACCELERATION,
+):
+    yield from continuous_trajectory_frames(
+        waypoints, fps, speed, acceleration
+    )
+
+
+def configure_replay_camera(
+    mujoco, camera, joint_names, view: str = "front"
+) -> None:
+    if tuple(joint_names) == MOBILITY_PLANNING_JOINTS:
+        configure_camera(
+            mujoco,
+            camera,
+            (0.48, 0.0, 0.9),
+            3.4,
+            video_view_azimuth(315.0, view),
+            video_view_elevation(-18.0, view),
+        )
+    else:
+        configure_camera(
+            mujoco,
+            camera,
+            (0.3, 0.0, 1.0),
+            3.0,
+            video_view_azimuth(45.0, view),
+            video_view_elevation(-15.0, view),
+        )
+
+
+def save_video(
+    model_path: Path,
+    joint_names,
+    waypoints,
+    attached_object_frame_offset,
+    fps: float,
+    speed: float,
+    input_mode: str,
+    settle_steps: int,
+    output_path: Path,
+    width: int,
+    height: int,
+    views: tuple[str, ...],
+    acceleration: float = DEFAULT_TRAJECTORY_ACCELERATION,
+) -> None:
+    try:
+        import mujoco
+    except ImportError as error:
+        raise RuntimeError(
+            "MuJoCo is required for MP4 rendering: python3 -m pip install mujoco"
+        ) from error
+
+    model = mujoco.MjModel.from_xml_path(str(model_path))
+    apply_visual_style(mujoco, model, joint_names)
+    configure_model_render_quality(model)
+    model.vis.global_.offwidth = max(int(model.vis.global_.offwidth), width)
+    model.vis.global_.offheight = max(int(model.vis.global_.offheight), height)
+    data = mujoco.MjData(model)
+    qpos_addresses = resolve_qpos_addresses(mujoco, model, joint_names)
+    ctrl_addresses = (
+        resolve_ctrl_addresses(mujoco, model, joint_names)
+        if input_mode == "ctrl"
+        else []
+    )
+    base_body = resolve_mobility_base_body(mujoco, model, joint_names)
+    object_qposadr = resolve_object_freejoint(mujoco, model, joint_names)
+    validate_joint_limits(mujoco, model, joint_names, waypoints)
+    if joint_names == SINGLE_ARM_PLANNING_JOINTS:
+        left_arm_addresses = resolve_qpos_addresses(
+            mujoco, model, LEFT_ARM_JOINTS
+        )
+        for address in left_arm_addresses:
+            data.qpos[address] = 0.0
+    apply_configuration(
+        mujoco,
+        model,
+        data,
+        joint_names,
+        qpos_addresses,
+        ctrl_addresses,
+        waypoints[0],
+        base_body,
+        object_qposadr,
+        attached_object_frame_offset,
+        input_mode,
+        settle_steps,
+        seed_qpos=input_mode == "ctrl",
+    )
+
+    cameras = {}
+    for view in views:
+        camera = mujoco.MjvCamera()
+        configure_replay_camera(mujoco, camera, joint_names, view)
+        cameras[view] = camera
+    renderer = mujoco.Renderer(model, height=height, width=width)
+    output_path = output_path.expanduser().resolve()
+    start_frame_count = max(1, math.ceil(0.75 * fps))
+    end_frame_count = max(1, math.ceil(1.0 * fps))
+
+    def write_frame(writer: MultiViewVideoWriter) -> None:
+        for view, camera in cameras.items():
+            renderer.update_scene(data, camera=camera)
+            writer.write(view, renderer.render())
+
+    print(
+        f"rendering {len(views)} FFW-SG2 MP4 view(s) at {fps:g} fps "
+        f"({width}x{height}, {input_mode} mode): {', '.join(views)}"
+    )
+    try:
+        with MultiViewVideoWriter(
+            output_path, views, width, height, fps
+        ) as writer:
+            for _ in range(start_frame_count):
+                write_frame(writer)
+            for configuration in interpolated_frames(
+                waypoints, fps, speed, acceleration
+            ):
+                apply_configuration(
+                    mujoco,
+                    model,
+                    data,
+                    joint_names,
+                    qpos_addresses,
+                    ctrl_addresses,
+                    configuration,
+                    base_body,
+                    object_qposadr,
+                    attached_object_frame_offset,
+                    input_mode,
+                    settle_steps,
+                )
+                write_frame(writer)
+            for _ in range(end_frame_count):
+                write_frame(writer)
+            frame_count = writer.frame_count
+    finally:
+        renderer.close()
+
+    print(
+        "saved FFW-SG2 MP4: "
+        + ", ".join(str(path) for path in writer.output_paths.values())
+        + f" ({frame_count} frames each, {frame_count / fps:.3f} s)"
+    )
 
 
 def replay(
@@ -445,6 +712,9 @@ def replay(
     attached_object_frame_offset,
     fps: float,
     speed: float,
+    input_mode: str,
+    settle_steps: int,
+    acceleration: float = DEFAULT_TRAJECTORY_ACCELERATION,
 ) -> None:
     try:
         import mujoco
@@ -455,8 +725,14 @@ def replay(
         ) from error
 
     model = mujoco.MjModel.from_xml_path(str(model_path))
+    apply_visual_style(mujoco, model, joint_names)
     data = mujoco.MjData(model)
-    addresses = resolve_qpos_addresses(mujoco, model, joint_names)
+    qpos_addresses = resolve_qpos_addresses(mujoco, model, joint_names)
+    ctrl_addresses = (
+        resolve_ctrl_addresses(mujoco, model, joint_names)
+        if input_mode == "ctrl"
+        else []
+    )
     base_body = resolve_mobility_base_body(mujoco, model, joint_names)
     object_qposadr = resolve_object_freejoint(mujoco, model, joint_names)
     validate_joint_limits(mujoco, model, joint_names, waypoints)
@@ -469,20 +745,21 @@ def replay(
         model,
         data,
         joint_names,
-        addresses,
+        qpos_addresses,
+        ctrl_addresses,
         waypoints[0],
         base_body,
         object_qposadr,
         attached_object_frame_offset,
+        input_mode,
+        settle_steps,
+        seed_qpos=input_mode == "ctrl",
     )
 
     print("MuJoCo viewer: start -> goal 경로를 반복 재생합니다.")
     print("창을 닫으면 single_mbm 실행이 종료됩니다.")
     with mujoco.viewer.launch_passive(model, data) as viewer:
-        viewer.cam.lookat[:] = (0.45, 0.0, 0.9)
-        viewer.cam.distance = 3.2
-        viewer.cam.azimuth = 135.0
-        viewer.cam.elevation = -20.0
+        configure_replay_camera(mujoco, viewer.cam, joint_names)
         viewer.sync()
 
         frame_period = 1.0 / fps
@@ -492,16 +769,22 @@ def replay(
                 model,
                 data,
                 joint_names,
-                addresses,
+                qpos_addresses,
+                ctrl_addresses,
                 waypoints[0],
                 base_body,
                 object_qposadr,
                 attached_object_frame_offset,
+                input_mode,
+                settle_steps,
+                seed_qpos=input_mode == "ctrl",
             )
             viewer.sync()
             time.sleep(0.75)
             deadline = time.perf_counter()
-            for configuration in interpolated_frames(waypoints, fps, speed):
+            for configuration in interpolated_frames(
+                waypoints, fps, speed, acceleration
+            ):
                 if not viewer.is_running():
                     return
                 apply_configuration(
@@ -509,11 +792,14 @@ def replay(
                     model,
                     data,
                     joint_names,
-                    addresses,
+                    qpos_addresses,
+                    ctrl_addresses,
                     configuration,
                     base_body,
                     object_qposadr,
                     attached_object_frame_offset,
+                    input_mode,
+                    settle_steps,
                 )
                 viewer.sync()
                 deadline += frame_period
@@ -540,8 +826,14 @@ def main() -> int:
         import mujoco
 
         model = mujoco.MjModel.from_xml_path(str(model_path))
+        apply_visual_style(mujoco, model, joint_names)
         data = mujoco.MjData(model)
-        addresses = resolve_qpos_addresses(mujoco, model, joint_names)
+        qpos_addresses = resolve_qpos_addresses(mujoco, model, joint_names)
+        ctrl_addresses = (
+            resolve_ctrl_addresses(mujoco, model, joint_names)
+            if args.input_mode == "ctrl"
+            else []
+        )
         base_body = resolve_mobility_base_body(mujoco, model, joint_names)
         object_qposadr = resolve_object_freejoint(mujoco, model, joint_names)
         validate_joint_limits(mujoco, model, joint_names, waypoints)
@@ -550,15 +842,37 @@ def main() -> int:
             model,
             data,
             joint_names,
-            addresses,
+            qpos_addresses,
+            ctrl_addresses,
             waypoints[0],
             base_body,
             object_qposadr,
             attached_object_frame_offset,
+            args.input_mode,
+            args.settle_steps,
+            seed_qpos=args.input_mode == "ctrl",
         )
         print(
             f"validated {len(waypoints)} waypoints, {len(joint_names)} joints, "
             f"model nq={model.nq}"
+        )
+        return 0
+
+    if args.video is not None:
+        save_video(
+            model_path,
+            joint_names,
+            waypoints,
+            attached_object_frame_offset,
+            args.fps,
+            args.speed,
+            args.input_mode,
+            args.settle_steps,
+            args.video,
+            args.video_width,
+            args.video_height,
+            args.video_views,
+            args.acceleration,
         )
         return 0
 
@@ -569,6 +883,9 @@ def main() -> int:
         attached_object_frame_offset,
         args.fps,
         args.speed,
+        args.input_mode,
+        args.settle_steps,
+        args.acceleration,
     )
     return 0
 

@@ -1,0 +1,1109 @@
+<?xml version='1.0' encoding='utf-8'?>
+<robot name="igris_c_v2_planning">
+  <link name="base_link" />
+  <link name="pelvis">
+    <inertial>
+      <mass value="8.124" />
+      <origin xyz="-0.04960 0.0 -0.05163" />
+      <inertia ixx="0.04342" ixy="0.00001" ixz="0.00325" iyy="0.05156" iyz="0.00000" izz="0.04212" />
+    </inertial>
+    <collision>
+      <geometry>
+        <mesh filename="../../igris_c_description_public/meshes/igris_c_v2/pelvis_upper_front.stl" scale="0.01 0.01 0.01" />
+      </geometry>
+    </collision>
+    <collision>
+      <geometry>
+        <mesh filename="../../igris_c_description_public/meshes/igris_c_v2/pelvis_upper_back.stl" scale="0.01 0.01 0.01" />
+      </geometry>
+    </collision>
+    <collision>
+      <geometry>
+        <mesh filename="../../igris_c_description_public/meshes/igris_c_v2/pelvis_lower.stl" scale="0.01 0.01 0.01" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="waist_follower">
+    <inertial>
+      <mass value="0.136" />
+      <origin xyz="0.00000 0.00000 -0.00829" />
+      <inertia ixx="0.00005" ixy="0.00000" ixz="0.00000" iyy="0.00011" iyz="0.00000" izz="0.00007" />
+    </inertial>
+    <collision>
+      <origin rpy="0 0 0" xyz="0 0 0.04" />
+      <geometry>
+        <mesh filename="../../igris_c_description_public/meshes/igris_c_v2/waist_follower.stl" scale="0.01 0.01 0.01" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="waist_frame">
+    <inertial>
+      <mass value="0.208" />
+      <origin xyz="0.02597 0.00000 -0.00927" />
+      <inertia ixx="0.00031" ixy="0.00000" ixz="0.00003" iyy="0.00031" iyz="0.00000" izz="0.00058" />
+    </inertial>
+    <collision>
+      <origin rpy="0 0 0" xyz="-0.05 0 0.026" />
+      <geometry>
+        <mesh filename="../../igris_c_description_public/meshes/igris_c_v2/waist_frame.stl" scale="0.01 0.01 0.01" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="torso">
+    <inertial>
+      <mass value="12.974" />
+      <origin xyz="0.00175 0.00112 0.15154" />
+      <inertia ixx="0.15110" ixy="-0.00136" ixz="0.00843" iyy="0.12880" iyz="-0.00089" izz="0.08070" />
+    </inertial>
+    <collision>
+      <geometry>
+        <mesh filename="../../igris_c_description_public/meshes/igris_c_v2/torso.stl" scale="0.01 0.01 0.01" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="l_hip_frame">
+    <inertial>
+      <mass value="1.894" />
+      <origin xyz="0.00973 -0.00102 0.00002" />
+      <inertia ixx="0.00261" ixy="-0.00001" ixz="0.00000" iyy="0.00267" iyz="0.00000" izz="0.00258" />
+    </inertial>
+    <collision>
+      <geometry>
+        <mesh filename="../../igris_c_description_public/meshes/igris_c_v2/l_hip_frame.stl" scale="0.01 0.01 0.01" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="l_hip_bracket">
+    <inertial>
+      <mass value="0.573" />
+      <origin xyz="-0.01497 0.00570 -0.03564" />
+      <inertia ixx="0.00103" ixy="-0.00006" ixz="0.00012" iyy="0.00226" iyz="0.00006" izz="0.00206" />
+    </inertial>
+    <collision>
+      <geometry>
+        <mesh filename="../../igris_c_description_public/meshes/igris_c_v2/l_hip_bracket.stl" scale="0.01 0.01 0.01" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="l_upper_leg">
+    <inertial>
+      <mass value="4.813" />
+      <origin xyz="-0.01286 -0.00388 -0.10563" />
+      <inertia ixx="0.03161" ixy="-0.00007" ixz="-0.00101" iyy="0.03396" iyz="-0.00084" izz="0.01135" />
+    </inertial>
+    <collision>
+      <geometry>
+        <mesh filename="../../igris_c_description_public/meshes/igris_c_v2/l_upper_leg.stl" scale="0.01 0.01 0.01" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="l_lower_leg">
+    <inertial>
+      <mass value="3.212" />
+      <origin xyz="0.01044 0.00096 -0.12320" />
+      <inertia ixx="0.02686" ixy="0.00000" ixz="-0.00201" iyy="0.02845" iyz="-0.00048" izz="0.00520" />
+    </inertial>
+    <collision>
+      <geometry>
+        <mesh filename="../../igris_c_description_public/meshes/igris_c_v2/l_lower_leg.stl" scale="0.01 0.01 0.01" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="l_ankle_frame">
+    <inertial>
+      <mass value="0.084" />
+      <origin xyz="0.00000 0.00000 0.00000" />
+      <inertia ixx="0.00003" ixy="0.00000" ixz="0.00000" iyy="0.00002" iyz="0.00000" izz="0.00003" />
+    </inertial>
+    <collision>
+      <geometry>
+        <mesh filename="../../igris_c_description_public/meshes/igris_c_v2/l_ankle_frame.stl" scale="0.01 0.01 0.01" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="l_foot_original">
+    <inertial>
+      <mass value="0.579" />
+      <origin xyz="0.02167 0.00000 -0.05193" />
+      <inertia ixx="0.00045" ixy="0.00000" ixz="0.00024" iyy="0.00166" iyz="0.00000" izz="0.00158" />
+    </inertial>
+    <collision>
+      <geometry>
+        <mesh filename="../../igris_c_description_public/meshes/igris_c_v2/l_foot_original.stl" scale="0.01 0.01 0.01" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="r_hip_frame">
+    <inertial>
+      <mass value="1.894" />
+      <origin xyz="0.00973 0.00102 0.00002" />
+      <inertia ixx="0.00261" ixy="0.00001" ixz="0.00000" iyy="0.00267" iyz="0.00000" izz="0.00258" />
+    </inertial>
+    <collision>
+      <geometry>
+        <mesh filename="../../igris_c_description_public/meshes/igris_c_v2/r_hip_frame.stl" scale="0.01 0.01 0.01" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="r_hip_bracket">
+    <inertial>
+      <mass value="0.573" />
+      <origin xyz="-0.01497 -0.00570 -0.03564" />
+      <inertia ixx="0.00103" ixy="0.00006" ixz="0.00012" iyy="0.00226" iyz="-0.00006" izz="0.00206" />
+    </inertial>
+    <collision>
+      <geometry>
+        <mesh filename="../../igris_c_description_public/meshes/igris_c_v2/r_hip_bracket.stl" scale="0.01 0.01 0.01" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="r_upper_leg">
+    <inertial>
+      <mass value="4.813" />
+      <origin xyz="-0.01286 0.00388 -0.10563" />
+      <inertia ixx="0.03161" ixy="0.00007" ixz="-0.00101" iyy="0.03396" iyz="0.00084" izz="0.01135" />
+    </inertial>
+    <collision>
+      <geometry>
+        <mesh filename="../../igris_c_description_public/meshes/igris_c_v2/r_upper_leg.stl" scale="0.01 0.01 0.01" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="r_lower_leg">
+    <inertial>
+      <mass value="3.212" />
+      <origin xyz="0.01044 -0.00096 -0.12320" />
+      <inertia ixx="0.02686" ixy="-0.00000" ixz="-0.00201" iyy="0.02845" iyz="0.00048" izz="0.00520" />
+    </inertial>
+    <collision>
+      <geometry>
+        <mesh filename="../../igris_c_description_public/meshes/igris_c_v2/r_lower_leg.stl" scale="0.01 0.01 0.01" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="r_ankle_frame">
+    <inertial>
+      <mass value="0.084" />
+      <origin xyz="0.00000 0.00000 0.00000" />
+      <inertia ixx="0.00003" ixy="0.00000" ixz="0.00000" iyy="0.00002" iyz="0.00000" izz="0.00003" />
+    </inertial>
+    <collision>
+      <geometry>
+        <mesh filename="../../igris_c_description_public/meshes/igris_c_v2/r_ankle_frame.stl" scale="0.01 0.01 0.01" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="r_foot_original">
+    <inertial>
+      <mass value="0.579" />
+      <origin xyz="0.02167 0.00000 -0.05193" />
+      <inertia ixx="0.00045" ixy="0.00000" ixz="0.00024" iyy="0.00166" iyz="0.00000" izz="0.00158" />
+    </inertial>
+    <collision>
+      <geometry>
+        <mesh filename="../../igris_c_description_public/meshes/igris_c_v2/r_foot_original.stl" scale="0.01 0.01 0.01" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="l_shoulder_frame">
+    <inertial>
+      <mass value="1.105" />
+      <origin xyz="-0.00458 0.00011 0.04499" />
+      <inertia ixx="0.00181" ixy="-0.00000" ixz="-0.00008" iyy="0.00180" iyz="-0.00000" izz="0.00101" />
+    </inertial>
+    <collision>
+      <geometry>
+        <mesh filename="../../igris_c_description_public/meshes/igris_c_v2/l_shoulder_frame.stl" scale="0.01 0.01 0.01" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="l_shoulder_bracket">
+    <inertial>
+      <mass value="0.253" />
+      <origin xyz="0.01754 0.02514 0.00000" />
+      <inertia ixx="0.00006" ixy="0.00003" ixz="0.00000" iyy="0.00034" iyz="0.00000" izz="0.00035" />
+    </inertial>
+    <collision>
+      <geometry>
+        <mesh filename="../../igris_c_description_public/meshes/igris_c_v2/l_shoulder_bracket.stl" scale="0.01 0.01 0.01" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="l_upper_arm">
+    <inertial>
+      <mass value="2.144" />
+      <origin xyz="-0.00169 -0.00639 -0.10638" />
+      <inertia ixx="0.00966" ixy="-0.00001" ixz="-0.00010" iyy="0.00981" iyz="-0.00034" izz="0.00217" />
+    </inertial>
+    <collision>
+      <geometry>
+        <mesh filename="../../igris_c_description_public/meshes/igris_c_v2/l_upper_arm.stl" scale="0.01 0.01 0.01" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="l_elbow_bracket">
+    <inertial>
+      <mass value="0.137" />
+      <origin xyz="0.00544 0.00380 -0.03838" />
+      <inertia ixx="0.00008" ixy="-0.00000" ixz="-0.00001" iyy="0.00010" iyz="-0.00001" izz="0.00004" />
+    </inertial>
+    <collision>
+      <geometry>
+        <mesh filename="../../igris_c_description_public/meshes/igris_c_v2/l_elbow_bracket.stl" scale="0.01 0.01 0.01" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="l_forearm">
+    <inertial>
+      <mass value="2.428" />
+      <origin xyz="0.01024 -0.00369 -0.11953" />
+      <inertia ixx="0.00919" ixy="0.00002" ixz="-0.00063" iyy="0.00944" iyz="-0.00017" izz="0.00179" />
+    </inertial>
+    <collision>
+      <geometry>
+        <mesh filename="../../igris_c_description_public/meshes/igris_c_v2/l_forearm.stl" scale="0.01 0.01 0.01" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="l_wrist_rod">
+    <inertial>
+      <mass value="0.012" />
+      <origin xyz="0.00000 0.00604 0.00031" />
+      <inertia ixx="0.00001" ixy="0.00000" ixz="0.00000" iyy="0.00001" iyz="0.00000" izz="0.00001" />
+    </inertial>
+    <collision>
+      <geometry>
+        <mesh filename="../../igris_c_description_public/meshes/igris_c_v2/l_wrist_rod.stl" scale="0.01 0.01 0.01" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="l_wrist_connector">
+    <inertial>
+      <mass value="0.032" />
+      <origin xyz="0 0.01203 -0.02699" />
+      <inertia ixx="0.00001" ixy="0.00000" ixz="0.00000" iyy="0.00001" iyz="0.00000" izz="0.00001" />
+    </inertial>
+    <collision>
+      <geometry>
+        <mesh filename="../../igris_c_description_public/meshes/igris_c_v2/l_wrist_connector.stl" scale="0.01 0.01 0.01" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="l_palm">
+    <inertial>
+      <mass value="0.200" />
+      <origin xyz="0.00910 0.00371 0.07839" />
+      <inertia ixx="0.00081" ixy="-0.00004" ixz="0.00012" iyy="0.00117" iyz="0.00005" izz="0.00042" />
+    </inertial>
+    <collision>
+      <geometry>
+        <mesh filename="../../igris_c_description_public/meshes/igris_c_end_effector/hand/l_palm.stl" scale="0.01 0.01 0.01" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="l_thumb_proximal">
+    <inertial>
+      <mass value="0.01" />
+      <origin xyz="0 0 0" />
+      <inertia ixx="1e-05" ixy="0" ixz="0" iyy="1e-05" iyz="0" izz="1e-05" />
+    </inertial>
+    <collision>
+      <geometry>
+        <mesh filename="../../igris_c_description_public/meshes/igris_c_end_effector/hand/l_thumb_proximal.stl" scale="0.01 0.01 0.01" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="l_thumb_middle">
+    <inertial>
+      <mass value="0.008" />
+      <origin xyz="0 0 0" />
+      <inertia ixx="8e-06" ixy="0" ixz="0" iyy="8e-06" iyz="0" izz="8e-06" />
+    </inertial>
+    <collision>
+      <geometry>
+        <mesh filename="../../igris_c_description_public/meshes/igris_c_end_effector/hand/l_thumb_middle.stl" scale="0.01 0.01 0.01" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="l_thumb_distal">
+    <inertial>
+      <mass value="0.006" />
+      <origin xyz="0 0 0" />
+      <inertia ixx="6e-06" ixy="0" ixz="0" iyy="6e-06" iyz="0" izz="6e-06" />
+    </inertial>
+    <collision>
+      <geometry>
+        <mesh filename="../../igris_c_description_public/meshes/igris_c_end_effector/hand/l_thumb_distal.stl" scale="0.01 0.01 0.01" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="l_index_middle">
+    <inertial>
+      <mass value="0.008" />
+      <origin xyz="0 0 0" />
+      <inertia ixx="8e-06" ixy="0" ixz="0" iyy="8e-06" iyz="0" izz="8e-06" />
+    </inertial>
+    <collision>
+      <geometry>
+        <mesh filename="../../igris_c_description_public/meshes/igris_c_end_effector/hand/finger_middle.stl" scale="0.01 0.01 0.01" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="l_index_distal">
+    <inertial>
+      <mass value="0.006" />
+      <origin xyz="0 0 0" />
+      <inertia ixx="6e-06" ixy="0" ixz="0" iyy="6e-06" iyz="0" izz="6e-06" />
+    </inertial>
+    <collision>
+      <geometry>
+        <mesh filename="../../igris_c_description_public/meshes/igris_c_end_effector/hand/finger_distal.stl" scale="0.01 0.01 0.01" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="l_middle_middle">
+    <inertial>
+      <mass value="0.008" />
+      <origin xyz="0 0 0" />
+      <inertia ixx="8e-06" ixy="0" ixz="0" iyy="8e-06" iyz="0" izz="8e-06" />
+    </inertial>
+    <collision>
+      <geometry>
+        <mesh filename="../../igris_c_description_public/meshes/igris_c_end_effector/hand/finger_middle.stl" scale="0.01 0.01 0.01" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="l_middle_distal">
+    <inertial>
+      <mass value="0.006" />
+      <origin xyz="0 0 0" />
+      <inertia ixx="6e-06" ixy="0" ixz="0" iyy="6e-06" iyz="0" izz="6e-06" />
+    </inertial>
+    <collision>
+      <geometry>
+        <mesh filename="../../igris_c_description_public/meshes/igris_c_end_effector/hand/finger_distal.stl" scale="0.01 0.01 0.01" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="l_ring_middle">
+    <inertial>
+      <mass value="0.008" />
+      <origin xyz="0 0 0" />
+      <inertia ixx="8e-06" ixy="0" ixz="0" iyy="8e-06" iyz="0" izz="8e-06" />
+    </inertial>
+    <collision>
+      <geometry>
+        <mesh filename="../../igris_c_description_public/meshes/igris_c_end_effector/hand/finger_middle.stl" scale="0.01 0.01 0.01" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="l_ring_distal">
+    <inertial>
+      <mass value="0.006" />
+      <origin xyz="0 0 0" />
+      <inertia ixx="6e-06" ixy="0" ixz="0" iyy="6e-06" iyz="0" izz="6e-06" />
+    </inertial>
+    <collision>
+      <geometry>
+        <mesh filename="../../igris_c_description_public/meshes/igris_c_end_effector/hand/finger_distal.stl" scale="0.01 0.01 0.01" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="l_little_middle">
+    <inertial>
+      <mass value="0.008" />
+      <origin xyz="0 0 0" />
+      <inertia ixx="8e-06" ixy="0" ixz="0" iyy="8e-06" iyz="0" izz="8e-06" />
+    </inertial>
+    <collision>
+      <geometry>
+        <mesh filename="../../igris_c_description_public/meshes/igris_c_end_effector/hand/finger_middle.stl" scale="0.01 0.01 0.01" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="l_little_distal">
+    <inertial>
+      <mass value="0.006" />
+      <origin xyz="0 0 0" />
+      <inertia ixx="6e-06" ixy="0" ixz="0" iyy="6e-06" iyz="0" izz="6e-06" />
+    </inertial>
+    <collision>
+      <geometry>
+        <mesh filename="../../igris_c_description_public/meshes/igris_c_end_effector/hand/finger_distal.stl" scale="0.01 0.01 0.01" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="r_shoulder_frame">
+    <inertial>
+      <mass value="1.105" />
+      <origin xyz="-0.00458 -0.00011 0.04499" />
+      <inertia ixx="0.00181" ixy="0.00000" ixz="-0.00008" iyy="0.00180" iyz="0.00000" izz="0.00101" />
+    </inertial>
+    <collision>
+      <geometry>
+        <mesh filename="../../igris_c_description_public/meshes/igris_c_v2/r_shoulder_frame.stl" scale="0.01 0.01 0.01" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="r_shoulder_bracket">
+    <inertial>
+      <mass value="0.253" />
+      <origin xyz="0.01754 -0.02514 0.00000" />
+      <inertia ixx="0.00006" ixy="-0.00003" ixz="0.00000" iyy="0.00034" iyz="-0.00000" izz="0.00035" />
+    </inertial>
+    <collision>
+      <geometry>
+        <mesh filename="../../igris_c_description_public/meshes/igris_c_v2/r_shoulder_bracket.stl" scale="0.01 0.01 0.01" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="r_upper_arm">
+    <inertial>
+      <mass value="2.144" />
+      <origin xyz="-0.00169 0.00639 -0.10638" />
+      <inertia ixx="0.00966" ixy="0.00001" ixz="-0.00010" iyy="0.00981" iyz="0.00034" izz="0.00217" />
+    </inertial>
+    <collision>
+      <geometry>
+        <mesh filename="../../igris_c_description_public/meshes/igris_c_v2/r_upper_arm.stl" scale="0.01 0.01 0.01" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="r_elbow_bracket">
+    <inertial>
+      <mass value="0.137" />
+      <origin xyz="0.00544 -0.00380 -0.03838" />
+      <inertia ixx="0.00008" ixy="0.00000" ixz="-0.00001" iyy="0.00010" iyz="0.00001" izz="0.00004" />
+    </inertial>
+    <collision>
+      <geometry>
+        <mesh filename="../../igris_c_description_public/meshes/igris_c_v2/r_elbow_bracket.stl" scale="0.01 0.01 0.01" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="r_forearm">
+    <inertial>
+      <mass value="2.428" />
+      <origin xyz="0.01024 0.00369 -0.11953" />
+      <inertia ixx="0.00919" ixy="-0.00002" ixz="-0.00063" iyy="0.00944" iyz="0.00017" izz="0.00179" />
+    </inertial>
+    <collision>
+      <geometry>
+        <mesh filename="../../igris_c_description_public/meshes/igris_c_v2/r_forearm.stl" scale="0.01 0.01 0.01" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="r_wrist_rod">
+    <inertial>
+      <mass value="0.012" />
+      <origin xyz="0.00000 -0.00604 0.00031" />
+      <inertia ixx="0.00001" ixy="0.00000" ixz="0.00000" iyy="0.00001" iyz="0.00000" izz="0.00001" />
+    </inertial>
+    <collision>
+      <geometry>
+        <mesh filename="../../igris_c_description_public/meshes/igris_c_v2/r_wrist_rod.stl" scale="0.01 0.01 0.01" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="r_wrist_connector">
+    <inertial>
+      <mass value="0.032" />
+      <origin xyz="0 -0.01203 -0.02699" />
+      <inertia ixx="0.00001" ixy="0.00000" ixz="0.00000" iyy="0.00001" iyz="0.00000" izz="0.00001" />
+    </inertial>
+    <collision>
+      <geometry>
+        <mesh filename="../../igris_c_description_public/meshes/igris_c_v2/r_wrist_connector.stl" scale="0.01 0.01 0.01" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="r_palm">
+    <inertial>
+      <mass value="0.200" />
+      <origin xyz="0.00910 -0.00371 0.07839" />
+      <inertia ixx="0.00081" ixy="0.00004" ixz="0.00012" iyy="0.00117" iyz="-0.00005" izz="0.00042" />
+    </inertial>
+    <collision>
+      <geometry>
+        <mesh filename="../../igris_c_description_public/meshes/igris_c_end_effector/hand/r_palm.stl" scale="0.01 0.01 0.01" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="r_thumb_proximal">
+    <inertial>
+      <mass value="0.01" />
+      <origin xyz="0 0 0" />
+      <inertia ixx="1e-05" ixy="0" ixz="0" iyy="1e-05" iyz="0" izz="1e-05" />
+    </inertial>
+    <collision>
+      <geometry>
+        <mesh filename="../../igris_c_description_public/meshes/igris_c_end_effector/hand/r_thumb_proximal.stl" scale="0.01 0.01 0.01" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="r_thumb_middle">
+    <inertial>
+      <mass value="0.008" />
+      <origin xyz="0 0 0" />
+      <inertia ixx="8e-06" ixy="0" ixz="0" iyy="8e-06" iyz="0" izz="8e-06" />
+    </inertial>
+    <collision>
+      <geometry>
+        <mesh filename="../../igris_c_description_public/meshes/igris_c_end_effector/hand/r_thumb_middle.stl" scale="0.01 0.01 0.01" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="r_thumb_distal">
+    <inertial>
+      <mass value="0.006" />
+      <origin xyz="0 0 0" />
+      <inertia ixx="6e-06" ixy="0" ixz="0" iyy="6e-06" iyz="0" izz="6e-06" />
+    </inertial>
+    <collision>
+      <geometry>
+        <mesh filename="../../igris_c_description_public/meshes/igris_c_end_effector/hand/r_thumb_distal.stl" scale="0.01 0.01 0.01" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="r_index_middle">
+    <inertial>
+      <mass value="0.008" />
+      <origin xyz="0 0 0" />
+      <inertia ixx="8e-06" ixy="0" ixz="0" iyy="8e-06" iyz="0" izz="8e-06" />
+    </inertial>
+    <collision>
+      <geometry>
+        <mesh filename="../../igris_c_description_public/meshes/igris_c_end_effector/hand/finger_middle.stl" scale="0.01 0.01 0.01" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="r_index_distal">
+    <inertial>
+      <mass value="0.006" />
+      <origin xyz="0 0 0" />
+      <inertia ixx="6e-06" ixy="0" ixz="0" iyy="6e-06" iyz="0" izz="6e-06" />
+    </inertial>
+    <collision>
+      <geometry>
+        <mesh filename="../../igris_c_description_public/meshes/igris_c_end_effector/hand/finger_distal.stl" scale="0.01 0.01 0.01" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="r_middle_middle">
+    <inertial>
+      <mass value="0.008" />
+      <origin xyz="0 0 0" />
+      <inertia ixx="8e-06" ixy="0" ixz="0" iyy="8e-06" iyz="0" izz="8e-06" />
+    </inertial>
+    <collision>
+      <geometry>
+        <mesh filename="../../igris_c_description_public/meshes/igris_c_end_effector/hand/finger_middle.stl" scale="0.01 0.01 0.01" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="r_middle_distal">
+    <inertial>
+      <mass value="0.006" />
+      <origin xyz="0 0 0" />
+      <inertia ixx="6e-06" ixy="0" ixz="0" iyy="6e-06" iyz="0" izz="6e-06" />
+    </inertial>
+    <collision>
+      <geometry>
+        <mesh filename="../../igris_c_description_public/meshes/igris_c_end_effector/hand/finger_distal.stl" scale="0.01 0.01 0.01" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="r_ring_middle">
+    <inertial>
+      <mass value="0.008" />
+      <origin xyz="0 0 0" />
+      <inertia ixx="8e-06" ixy="0" ixz="0" iyy="8e-06" iyz="0" izz="8e-06" />
+    </inertial>
+    <collision>
+      <geometry>
+        <mesh filename="../../igris_c_description_public/meshes/igris_c_end_effector/hand/finger_middle.stl" scale="0.01 0.01 0.01" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="r_ring_distal">
+    <inertial>
+      <mass value="0.006" />
+      <origin xyz="0 0 0" />
+      <inertia ixx="6e-06" ixy="0" ixz="0" iyy="6e-06" iyz="0" izz="6e-06" />
+    </inertial>
+    <collision>
+      <geometry>
+        <mesh filename="../../igris_c_description_public/meshes/igris_c_end_effector/hand/finger_distal.stl" scale="0.01 0.01 0.01" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="r_little_middle">
+    <inertial>
+      <mass value="0.008" />
+      <origin xyz="0 0 0" />
+      <inertia ixx="8e-06" ixy="0" ixz="0" iyy="8e-06" iyz="0" izz="8e-06" />
+    </inertial>
+    <collision>
+      <geometry>
+        <mesh filename="../../igris_c_description_public/meshes/igris_c_end_effector/hand/finger_middle.stl" scale="0.01 0.01 0.01" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="r_little_distal">
+    <inertial>
+      <mass value="0.006" />
+      <origin xyz="0 0 0" />
+      <inertia ixx="6e-06" ixy="0" ixz="0" iyy="6e-06" iyz="0" izz="6e-06" />
+    </inertial>
+    <collision>
+      <geometry>
+        <mesh filename="../../igris_c_description_public/meshes/igris_c_end_effector/hand/finger_distal.stl" scale="0.01 0.01 0.01" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="neck">
+    <inertial>
+      <mass value="0.310" />
+      <origin xyz="-0.00005 -0.00130 -0.00264" />
+      <inertia ixx="0.00017" ixy="0.00000" ixz="0.00000" iyy="0.00010" iyz="0.00001" izz="0.00016" />
+    </inertial>
+    <collision>
+      <geometry>
+        <mesh filename="../../igris_c_description_public/meshes/igris_c_v2/neck.stl" scale="0.01 0.01 0.01" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="head">
+    <inertial>
+      <mass value="1.468" />
+      <origin xyz="0.02850 0.00290 0.12862" />
+      <inertia ixx="0.00574" ixy="-0.00008" ixz="0.00025" iyy="0.00727" iyz="0.00013" izz="0.00503" />
+    </inertial>
+    <collision>
+      <geometry>
+        <mesh filename="../../igris_c_description_public/meshes/igris_c_v2/head.stl" scale="0.01 0.01 0.01" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="world" />
+  <link name="floating_x" />
+  <link name="floating_y" />
+  <link name="floating_z" />
+  <link name="floating_roll" />
+  <link name="floating_pitch" />
+  <link name="floating_yaw" />
+  <link name="l_sole" />
+  <link name="r_sole" />
+  <link name="l_grasp" />
+  <link name="r_grasp" />
+  <link name="attached_payload_collision">
+    <collision name="attached_payload_box">
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <box size="0.21 0.34 0.25" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="world_to_x" type="prismatic">
+    <parent link="world" />
+    <child link="floating_x" />
+    <axis xyz="1 0 0" />
+    <limit lower="-2" upper="2" effort="0" velocity="0" />
+  </joint>
+  <joint name="x_to_y" type="prismatic">
+    <parent link="floating_x" />
+    <child link="floating_y" />
+    <axis xyz="0 1 0" />
+    <limit lower="-2" upper="2" effort="0" velocity="0" />
+  </joint>
+  <joint name="y_to_z" type="prismatic">
+    <parent link="floating_y" />
+    <child link="floating_z" />
+    <axis xyz="0 0 1" />
+    <limit lower="-2" upper="2" effort="0" velocity="0" />
+  </joint>
+  <joint name="z_to_roll" type="revolute">
+    <parent link="floating_z" />
+    <child link="floating_roll" />
+    <axis xyz="1 0 0" />
+    <limit lower="-3.14159265358979" upper="3.14159265358979" effort="0" velocity="0" />
+  </joint>
+  <joint name="roll_to_pitch" type="revolute">
+    <parent link="floating_roll" />
+    <child link="floating_pitch" />
+    <axis xyz="0 1 0" />
+    <limit lower="-3.14159265358979" upper="3.14159265358979" effort="0" velocity="0" />
+  </joint>
+  <joint name="pitch_to_yaw" type="revolute">
+    <parent link="floating_pitch" />
+    <child link="floating_yaw" />
+    <axis xyz="0 0 1" />
+    <limit lower="-3.14159265358979" upper="3.14159265358979" effort="0" velocity="0" />
+  </joint>
+  <joint name="l_hip_pitch" type="revolute">
+    <parent link="pelvis" />
+    <child link="l_hip_frame" />
+    <origin rpy="0 0 0" xyz="-0.0115 0.0897 -0.14" />
+    <axis xyz="0 1 0" />
+    <limit effort="1000" lower="-2.059488517" upper="0.523598776" velocity="100.0" />
+  </joint>
+  <joint name="l_hip_roll" type="revolute">
+    <parent link="l_hip_frame" />
+    <child link="l_hip_bracket" />
+    <origin rpy="0 0 0" xyz="0 0 0" />
+    <axis xyz="1 0 0" />
+    <limit effort="1000" lower="-0.331612558" upper="2.35619449" velocity="100.0" />
+  </joint>
+  <joint name="l_hip_yaw" type="revolute">
+    <parent link="l_hip_bracket" />
+    <child link="l_upper_leg" />
+    <origin rpy="0 0 0" xyz="0.002 0 -0.076" />
+    <axis xyz="0 0 1" />
+    <limit effort="1000" lower="-1.570796327" upper="1.570796327" velocity="100.0" />
+  </joint>
+  <joint name="l_knee_pitch" type="revolute">
+    <parent link="l_upper_leg" />
+    <child link="l_lower_leg" />
+    <origin rpy="0 0 0" xyz="-0.055 0 -0.263" />
+    <axis xyz="0 1 0" />
+    <limit effort="1000" lower="0" upper="2.28638132" velocity="100.0" />
+  </joint>
+  <joint name="l_ankle_pitch" type="revolute">
+    <parent link="l_lower_leg" />
+    <child link="l_ankle_frame" />
+    <origin rpy="0 0 0" xyz="0.005 0 -0.34" />
+    <axis xyz="0 1 0" />
+    <limit effort="1000" lower="-0.698131701" upper="0.698131701" velocity="100.0" />
+  </joint>
+  <joint name="l_ankle_roll" type="revolute">
+    <parent link="l_ankle_frame" />
+    <child link="l_foot_original" />
+    <origin rpy="0 0 0" xyz="0 0 0" />
+    <axis xyz="1 0 0" />
+    <limit effort="1000" lower="-0.34906585" upper="0.34906585" velocity="100.0" />
+  </joint>
+  <joint name="r_hip_pitch" type="revolute">
+    <parent link="pelvis" />
+    <child link="r_hip_frame" />
+    <origin rpy="0 0 0" xyz="-0.0115 -0.0897 -0.14" />
+    <axis xyz="0 1 0" />
+    <limit effort="1000" lower="-2.059488517" upper="0.523598776" velocity="100.0" />
+  </joint>
+  <joint name="r_hip_roll" type="revolute">
+    <parent link="r_hip_frame" />
+    <child link="r_hip_bracket" />
+    <origin rpy="0 0 0" xyz="0 0 0" />
+    <axis xyz="1 0 0" />
+    <limit effort="1000" lower="-2.35619449" upper="0.331612558" velocity="100.0" />
+  </joint>
+  <joint name="r_hip_yaw" type="revolute">
+    <parent link="r_hip_bracket" />
+    <child link="r_upper_leg" />
+    <origin rpy="0 0 0" xyz="0.002 0 -0.076" />
+    <axis xyz="0 0 1" />
+    <limit effort="1000" lower="-1.570796327" upper="1.570796327" velocity="100.0" />
+  </joint>
+  <joint name="r_knee_pitch" type="revolute">
+    <parent link="r_upper_leg" />
+    <child link="r_lower_leg" />
+    <origin rpy="0 0 0" xyz="-0.055 0 -0.263" />
+    <axis xyz="0 1 0" />
+    <limit effort="1000" lower="0" upper="2.28638132" velocity="100.0" />
+  </joint>
+  <joint name="r_ankle_pitch" type="revolute">
+    <parent link="r_lower_leg" />
+    <child link="r_ankle_frame" />
+    <origin rpy="0 0 0" xyz="0.005 0 -0.34" />
+    <axis xyz="0 1 0" />
+    <limit effort="1000" lower="-0.698131701" upper="0.698131701" velocity="100.0" />
+  </joint>
+  <joint name="r_ankle_roll" type="revolute">
+    <parent link="r_ankle_frame" />
+    <child link="r_foot_original" />
+    <origin rpy="0 0 0" xyz="0 0 0" />
+    <axis xyz="1 0 0" />
+    <limit effort="1000" lower="-0.34906585" upper="0.34906585" velocity="100.0" />
+  </joint>
+  <joint name="waist_pitch" type="revolute">
+    <parent link="pelvis" />
+    <child link="waist_follower" />
+    <origin rpy="0 0 0" xyz="0 0 0" />
+    <axis xyz="0 -1 0" />
+    <limit effort="1000" lower="-0.872664626" upper="0.287979327" velocity="100.0" />
+  </joint>
+  <joint name="waist_roll" type="revolute">
+    <parent link="waist_follower" />
+    <child link="waist_frame" />
+    <origin rpy="0 0 0" xyz="0 0 0.04" />
+    <axis xyz="-1 0 0" />
+    <limit effort="1000" lower="-0.314159265" upper="0.314159265" velocity="100.0" />
+  </joint>
+  <joint name="waist_yaw" type="revolute">
+    <parent link="waist_frame" />
+    <child link="torso" />
+    <origin rpy="0 0 0" xyz="-0.05 0 0.026" />
+    <axis xyz="0 0 -1" />
+    <limit effort="1000" lower="-1.570796327" upper="1.570796327" velocity="100.0" />
+  </joint>
+  <joint name="l_shoulder_pitch" type="revolute">
+    <parent link="torso" />
+    <child link="l_shoulder_frame" />
+    <origin rpy="0 0 0" xyz="0 0.171 0.266" />
+    <axis xyz="0 1 0" />
+    <limit effort="1000" lower="-3.141592654" upper="1.047197551" velocity="100.0" />
+  </joint>
+  <joint name="l_shoulder_roll" type="revolute">
+    <parent link="l_shoulder_frame" />
+    <child link="l_shoulder_bracket" />
+    <origin rpy="0 0 0" xyz="0 0 0" />
+    <axis xyz="1 0 0" />
+    <limit effort="1000" lower="-0.174532925" upper="3.141592654" velocity="100.0" />
+  </joint>
+  <joint name="l_shoulder_yaw" type="revolute">
+    <parent link="l_shoulder_bracket" />
+    <child link="l_upper_arm" />
+    <origin rpy="0 0 0" xyz="0 0 0" />
+    <axis xyz="0 0 1" />
+    <limit effort="1000" lower="-1.570796327" upper="1.570796327" velocity="100.0" />
+  </joint>
+  <joint name="l_elbow_pitch" type="revolute">
+    <parent link="l_upper_arm" />
+    <child link="l_elbow_bracket" />
+    <origin rpy="0 0 0" xyz="0.01 0 -0.197" />
+    <axis xyz="0 1 0" />
+    <limit effort="1000" lower="-2.094395102" upper="0" velocity="100.0" />
+  </joint>
+  <joint name="l_wrist_yaw" type="revolute">
+    <parent link="l_elbow_bracket" />
+    <child link="l_forearm" />
+    <origin rpy="0 0 0" xyz="-0.01 0 -0.05" />
+    <axis xyz="0 0 1" />
+    <limit effort="1000" lower="-1.570796327" upper="1.570796327" velocity="100.0" />
+  </joint>
+  <joint name="l_wrist_roll" type="revolute">
+    <parent link="l_forearm" />
+    <child link="l_wrist_rod" />
+    <origin rpy="0 0 0" xyz="0 -0.005 -0.2395" />
+    <axis xyz="1 0 0" />
+    <limit effort="1000" lower="-1.221730476" upper="0.872664626" velocity="100.0" />
+  </joint>
+  <joint name="l_wrist_pitch" type="revolute">
+    <parent link="l_wrist_rod" />
+    <child link="l_wrist_connector" />
+    <origin rpy="0 0 0" xyz="0 0 0" />
+    <axis xyz="0 1 0" />
+    <limit effort="1000" lower="-0.698131701" upper="0.698131701" velocity="100.0" />
+  </joint>
+  <joint name="r_shoulder_pitch" type="revolute">
+    <parent link="torso" />
+    <child link="r_shoulder_frame" />
+    <origin rpy="0 0 0" xyz="0 -0.171 0.266" />
+    <axis xyz="0 1 0" />
+    <limit effort="1000" lower="-3.141592654" upper="1.047197551" velocity="100.0" />
+  </joint>
+  <joint name="r_shoulder_roll" type="revolute">
+    <parent link="r_shoulder_frame" />
+    <child link="r_shoulder_bracket" />
+    <origin rpy="0 0 0" xyz="0 0 0" />
+    <axis xyz="1 0 0" />
+    <limit effort="1000" lower="-3.141592654" upper="0.174532925" velocity="100.0" />
+  </joint>
+  <joint name="r_shoulder_yaw" type="revolute">
+    <parent link="r_shoulder_bracket" />
+    <child link="r_upper_arm" />
+    <origin rpy="0 0 0" xyz="0 0 0" />
+    <axis xyz="0 0 1" />
+    <limit effort="1000" lower="-1.570796327" upper="1.570796327" velocity="100.0" />
+  </joint>
+  <joint name="r_elbow_pitch" type="revolute">
+    <parent link="r_upper_arm" />
+    <child link="r_elbow_bracket" />
+    <origin rpy="0 0 0" xyz="0.01 0 -0.197" />
+    <axis xyz="0 1 0" />
+    <limit effort="1000" lower="-2.094395102" upper="0" velocity="100.0" />
+  </joint>
+  <joint name="r_wrist_yaw" type="revolute">
+    <parent link="r_elbow_bracket" />
+    <child link="r_forearm" />
+    <origin rpy="0 0 0" xyz="-0.01 0 -0.05" />
+    <axis xyz="0 0 1" />
+    <limit effort="1000" lower="-1.570796327" upper="1.570796327" velocity="100.0" />
+  </joint>
+  <joint name="r_wrist_roll" type="revolute">
+    <parent link="r_forearm" />
+    <child link="r_wrist_rod" />
+    <origin rpy="0 0 0" xyz="0 0.005 -0.2395" />
+    <axis xyz="1 0 0" />
+    <limit effort="1000" lower="-0.872664626" upper="1.221730476" velocity="100.0" />
+  </joint>
+  <joint name="r_wrist_pitch" type="revolute">
+    <parent link="r_wrist_rod" />
+    <child link="r_wrist_connector" />
+    <origin rpy="0 0 0" xyz="0 0 0" />
+    <axis xyz="0 1 0" />
+    <limit effort="1000" lower="-0.698131701" upper="0.698131701" velocity="100.0" />
+  </joint>
+  <joint name="base_joint" type="fixed">
+    <parent link="base_link" />
+    <child link="pelvis" />
+  </joint>
+  <joint name="l_hand" type="fixed">
+    <parent link="l_wrist_connector" />
+    <child link="l_palm" />
+    <origin rpy="3.14 0 0" xyz="0 0.0109 -0.024" />
+  </joint>
+  <joint name="l_0_joint_thumb_proximal" type="fixed">
+    <parent link="l_palm" />
+    <child link="l_thumb_proximal" />
+    <origin rpy="-0.0695353796250506 0.0527694774969359 0.648164162057912" xyz="0.026 0.0132 0.0299" />
+  </joint>
+  <joint name="l_1_joint_thumb_middle" type="fixed">
+    <parent link="l_thumb_proximal" />
+    <child link="l_thumb_middle" />
+    <origin rpy="-0.671731311 -0 -1.570796752" xyz="0.0230 0.0036 0.015" />
+  </joint>
+  <joint name="l_2_joint_thumb_distal" type="fixed">
+    <parent link="l_thumb_middle" />
+    <child link="l_thumb_distal" />
+    <origin rpy="0.45 -0 0" xyz="0 -0.001 0.04" />
+  </joint>
+  <joint name="l_3_joint_index_middle" type="fixed">
+    <parent link="l_palm" />
+    <child link="l_index_middle" />
+    <origin rpy="0.55 -0 -3.14159265317959" xyz="0.0305 -0.002 0.101" />
+  </joint>
+  <joint name="l_4_joint_index_distal" type="fixed">
+    <parent link="l_index_middle" />
+    <child link="l_index_distal" />
+    <origin rpy="0.35 -0 0" xyz="0 -0.001 0.04" />
+  </joint>
+  <joint name="l_5_joint_middle_middle" type="fixed">
+    <parent link="l_palm" />
+    <child link="l_middle_middle" />
+    <origin rpy="0.55 -0 -3.14159265317959" xyz="0.0085 -0.002 0.101" />
+  </joint>
+  <joint name="l_6_joint_middle_distal" type="fixed">
+    <parent link="l_middle_middle" />
+    <child link="l_middle_distal" />
+    <origin rpy="0.35 -0 0" xyz="0 -0.001 0.04" />
+  </joint>
+  <joint name="l_7_joint_ring_middle" type="fixed">
+    <parent link="l_palm" />
+    <child link="l_ring_middle" />
+    <origin rpy="0.55 -0 -3.14159265317959" xyz="-0.0135 -0.002 0.101" />
+  </joint>
+  <joint name="l_8_joint_ring_distal" type="fixed">
+    <parent link="l_ring_middle" />
+    <child link="l_ring_distal" />
+    <origin rpy="0.35 -0 0" xyz="0 -0.001 0.04" />
+  </joint>
+  <joint name="l_9_joint_little_middle" type="fixed">
+    <parent link="l_palm" />
+    <child link="l_little_middle" />
+    <origin rpy="0.55 -0 -3.14159265317959" xyz="-0.0355 -0.002 0.101" />
+  </joint>
+  <joint name="l_10_joint_little_distal" type="fixed">
+    <parent link="l_little_middle" />
+    <child link="l_little_distal" />
+    <origin rpy="0.35 -0 0" xyz="0 -0.001 0.04" />
+  </joint>
+  <joint name="r_hand" type="fixed">
+    <parent link="r_wrist_connector" />
+    <child link="r_palm" />
+    <origin rpy="3.14 0 0" xyz="0 -0.0109 -0.024" />
+  </joint>
+  <joint name="r_0_joint_thumb_proximal" type="fixed">
+    <parent link="r_palm" />
+    <child link="r_thumb_proximal" />
+    <origin rpy="0.0695353796250506 0.0527694774969359 -0.648164162057912" xyz="0.026 -0.0132 0.0299" />
+  </joint>
+  <joint name="r_1_joint_thumb_middle" type="fixed">
+    <parent link="r_thumb_proximal" />
+    <child link="r_thumb_middle" />
+    <origin rpy="-0.671731311 -0 -1.570796752" xyz="0.0230 -0.0036 0.015" />
+  </joint>
+  <joint name="r_2_joint_thumb_distal" type="fixed">
+    <parent link="r_thumb_middle" />
+    <child link="r_thumb_distal" />
+    <origin rpy="0.45 -0 0" xyz="0 -0.001 0.04" />
+  </joint>
+  <joint name="r_3_joint_index_middle" type="fixed">
+    <parent link="r_palm" />
+    <child link="r_index_middle" />
+    <origin rpy="0.55 -0 0" xyz="0.0305 0.002 0.101" />
+  </joint>
+  <joint name="r_4_joint_index_distal" type="fixed">
+    <parent link="r_index_middle" />
+    <child link="r_index_distal" />
+    <origin rpy="0.35 -0 0" xyz="0 -0.001 0.04" />
+  </joint>
+  <joint name="r_5_joint_middle_middle" type="fixed">
+    <parent link="r_palm" />
+    <child link="r_middle_middle" />
+    <origin rpy="0.55 -0 0" xyz="0.0085 0.002 0.101" />
+  </joint>
+  <joint name="r_6_joint_middle_distal" type="fixed">
+    <parent link="r_middle_middle" />
+    <child link="r_middle_distal" />
+    <origin rpy="0.35 -0 0" xyz="0 -0.001 0.04" />
+  </joint>
+  <joint name="r_7_joint_ring_middle" type="fixed">
+    <parent link="r_palm" />
+    <child link="r_ring_middle" />
+    <origin rpy="0.55 -0 0" xyz="-0.0135 0.002 0.101" />
+  </joint>
+  <joint name="r_8_joint_ring_distal" type="fixed">
+    <parent link="r_ring_middle" />
+    <child link="r_ring_distal" />
+    <origin rpy="0.35 -0 0" xyz="0 -0.001 0.04" />
+  </joint>
+  <joint name="r_9_joint_little_middle" type="fixed">
+    <parent link="r_palm" />
+    <child link="r_little_middle" />
+    <origin rpy="0.55 -0 0" xyz="-0.0355 0.002 0.101" />
+  </joint>
+  <joint name="r_10_joint_little_distal" type="fixed">
+    <parent link="r_little_middle" />
+    <child link="r_little_distal" />
+    <origin rpy="0.35 -0 0" xyz="0 -0.001 0.04" />
+  </joint>
+  <joint name="neck_yaw" type="fixed">
+    <parent link="torso" />
+    <child link="neck" />
+    <origin rpy="0 0 0" xyz="0 0 0.357" />
+  </joint>
+  <joint name="neck_pitch" type="fixed">
+    <parent link="neck" />
+    <child link="head" />
+    <origin rpy="0 0 0" xyz="0 0 0" />
+  </joint>
+  <joint name="floating_base_mount" type="fixed">
+    <parent link="floating_yaw" />
+    <child link="base_link" />
+  </joint>
+  <joint name="l_sole_fixed" type="fixed">
+    <parent link="l_foot_original" />
+    <child link="l_sole" />
+    <origin xyz="0.048 0 -0.071" rpy="0 0 0" />
+  </joint>
+  <joint name="r_sole_fixed" type="fixed">
+    <parent link="r_foot_original" />
+    <child link="r_sole" />
+    <origin xyz="0.048 0 -0.071" rpy="0 0 0" />
+  </joint>
+  <joint name="l_grasp_fixed" type="fixed">
+    <parent link="l_wrist_connector" />
+    <child link="l_grasp" />
+    <origin xyz="-0.025025641714385472 0 -0.124" rpy="0 0 0" />
+  </joint>
+  <joint name="r_grasp_fixed" type="fixed">
+    <parent link="r_wrist_connector" />
+    <child link="r_grasp" />
+    <origin xyz="-0.025025641714385472 0 -0.124" rpy="0 0 0" />
+  </joint>
+  <joint name="attached_payload_collision_fixed" type="fixed">
+    <parent link="l_grasp" />
+    <child link="attached_payload_collision" />
+    <origin xyz="0 -0.17 0" rpy="0 0 0" />
+  </joint>
+</robot>

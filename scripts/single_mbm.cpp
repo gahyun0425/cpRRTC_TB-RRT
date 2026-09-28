@@ -1,6 +1,7 @@
 #include <nlohmann/json.hpp>
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <cmath>
 #include <fstream>
 #include <iostream>
@@ -15,6 +16,7 @@
 #include <utility>
 #include <vector>
 #include <iomanip>
+#include <limits>
 
 #include <cuda_runtime.h>
 
@@ -25,6 +27,8 @@
 #include "src/planning/pRRTC_settings.hh"
 #include "scripts/ffw_sg2_attached_object_collision.hh"
 #include "scripts/g1_problem.hh"
+#include "scripts/igris_c_problem.hh"
+#include "scripts/franka_problem.hh"
 #include "scripts/planner_result_json.hh"
 
 using json = nlohmann::json;
@@ -67,7 +71,16 @@ struct RealDynamicsOptions {
     }
 };
 
-constexpr float FFW_SG2_DEFAULT_SUPPORT_MARGIN_M = 0.05f;
+struct G1ReplanningOptions {
+    bool enabled = false;
+    bool server = false;
+    double time_limit_sec = 5.0;
+    std::string planner_executable;
+};
+
+constexpr float FFW_SG2_DEFAULT_OBJECT_MASS_KG = 25.0f;
+constexpr float FFW_SG2_DEFAULT_SUPPORT_MARGIN_M = 0.07f;
+
 
 
 std::string shell_quote(const std::string &value) {
@@ -83,106 +96,173 @@ std::string shell_quote(const std::string &value) {
     return output;
 }
 
-template <typename Robot>
-void plot_aorrtc_cost_history(
-    const AORRTCResult<Robot> &result,
+std::string filename_component(std::string value) {
+    for (char &character : value) {
+        const auto byte = static_cast<unsigned char>(character);
+        if (!std::isalnum(byte) && character != '-' && character != '_') {
+            character = '_';
+        }
+    }
+    return value;
+}
+
+void plot_prrtc_run_ecdf(
+    const json &runs,
     const std::string &robot_name,
     const std::string &problem_name,
     int problem_index,
-    int run_index
+    int run_count
 ) {
-    // AORRTC가 solution을 하나도 찾지 못한 경우
-    if (result.solution_history.empty()) {
-        std::cout
-            << "AORRTC plot skipped: no solution history.\n";
+    if (runs.empty()) {
+        std::cout << "pRRTC ECDF plot skipped: no run history.\n";
         return;
     }
 
-    // 임시 CSV 파일 이름을 겹치지 않게 생성
-    const auto timestamp =
-        std::chrono::steady_clock::now()
-            .time_since_epoch()
-            .count();
-
-    const auto csv_path =
-        std::filesystem::temp_directory_path()
+    const auto timestamp = std::chrono::steady_clock::now()
+        .time_since_epoch().count();
+    const auto input_path = std::filesystem::temp_directory_path()
+        / ("prrtc_run_ecdf_" + std::to_string(timestamp) + ".json");
+    const auto output_path = std::filesystem::absolute(
+        std::filesystem::path("logs")
         / (
-            "aorrtc_cost_history_"
-            + std::to_string(timestamp)
-            + ".csv"
-        );
+            "prrtc_" + filename_component(robot_name)
+            + "_" + filename_component(problem_name)
+            + "_" + std::to_string(problem_index)
+            + "_" + std::to_string(run_count) + "runs_ecdf.png"
+        )
+    );
+    std::filesystem::create_directories(output_path.parent_path());
 
-    // CSV 파일 생성
-    std::ofstream csv(csv_path);
-
-    if (!csv) {
+    std::ofstream input(input_path);
+    if (!input) {
         throw std::runtime_error(
-            "failed to create temporary AORRTC plot CSV"
+            "failed to create temporary pRRTC ECDF JSON"
         );
     }
+    input << json{
+        {"format", "pRRTC_run_ecdf_v1"},
+        {"planner", "pRRTC"},
+        {"robot", robot_name},
+        {"problem_name", problem_name},
+        {"problem_idx", problem_index},
+        {"runs", run_count},
+        {"results", runs},
+    }.dump(2) << '\n';
+    input.close();
 
-    csv << "time_sec,cost\n";
-    csv << std::setprecision(12);
-
-    for (const auto &update : result.solution_history) {
-        const double time_sec =
-            static_cast<double>(update.found_ns) / 1.0e9;
-
-        csv
-            << time_sec
-            << ","
-            << update.cost
-            << "\n";
-    }
-
-    csv.close();
-
-    // Python plotting script의 절대 경로
-    const auto script_path =
-        std::filesystem::absolute(
-            "scripts/plot_aorrtc.py"
-        );
-
+    const auto script_path = std::filesystem::absolute(
+        "scripts/plot_prrtc_ecdf.py"
+    );
     const std::string title =
-        "AORRTC Cost Convergence - "
-        + robot_name
-        + " / "
-        + problem_name
-        + " #"
-        + std::to_string(problem_index)
-        + " / run "
-        + std::to_string(run_index);
-
-    // python3 scripts/plot_aorrtc.py <csv> --title "..."
+        "pRRTC - " + robot_name + " / " + problem_name
+        + " #" + std::to_string(problem_index);
     const std::string command =
         "python3 "
         + shell_quote(script_path.string())
         + " "
-        + shell_quote(csv_path.string())
+        + shell_quote(input_path.string())
+        + " --output "
+        + shell_quote(output_path.string())
         + " --title "
         + shell_quote(title);
 
-    std::cout
-        << "plotting AORRTC cost history...\n";
-
+    std::cout << "plotting pRRTC run-time ECDF...\n";
     std::cout.flush();
     std::cerr.flush();
-
-    const int status =
-        std::system(command.c_str());
-
-    // Python이 끝났으면 임시 CSV 삭제
+    const int status = std::system(command.c_str());
     std::error_code remove_error;
-    std::filesystem::remove(
-        csv_path,
-        remove_error
+    std::filesystem::remove(input_path, remove_error);
+
+    if (status != 0) {
+        throw std::runtime_error(
+            "pRRTC ECDF plotting script exited with an error"
+        );
+    }
+    std::cout << "prrtc_ecdf_plot: " << output_path.string() << "\n";
+}
+
+void plot_aorrtc_convergence(
+    const json &runs,
+    const std::string &robot_name,
+    const std::string &problem_name,
+    int problem_index,
+    int run_count
+) {
+    if (runs.empty()) {
+        std::cout << "AORRTC plot skipped: no run history.\n";
+        return;
+    }
+    const bool any_solved = std::any_of(
+        runs.begin(),
+        runs.end(),
+        [](const json &run) {
+            return run.value("solved", false);
+        }
     );
+    if (!any_solved) {
+        std::cout << "AORRTC plot skipped: no solved runs.\n";
+        return;
+    }
+
+    const auto timestamp = std::chrono::steady_clock::now()
+        .time_since_epoch().count();
+    const auto input_path = std::filesystem::temp_directory_path()
+        / ("aorrtc_convergence_" + std::to_string(timestamp) + ".json");
+    const auto output_path = std::filesystem::absolute(
+        std::filesystem::path("logs")
+        / (
+            "aorrtc_" + filename_component(robot_name)
+            + "_" + filename_component(problem_name)
+            + "_" + std::to_string(problem_index)
+            + "_" + std::to_string(run_count) + "runs.png"
+        )
+    );
+    std::filesystem::create_directories(output_path.parent_path());
+
+    std::ofstream input(input_path);
+    if (!input) {
+        throw std::runtime_error(
+            "failed to create temporary AORRTC plot JSON"
+        );
+    }
+    input << json{
+        {"format", "AORRTC_plot_runs_v1"},
+        {"planner", "AORRTC"},
+        {"robot", robot_name},
+        {"problem_name", problem_name},
+        {"problem_idx", problem_index},
+        {"runs", run_count},
+        {"results", runs},
+    }.dump(2) << '\n';
+    input.close();
+
+    const auto script_path = std::filesystem::absolute(
+        "scripts/plot_aorrtc.py"
+    );
+    const std::string title = "G1 whole body";
+    const std::string command =
+        "python3 "
+        + shell_quote(script_path.string())
+        + " "
+        + shell_quote(input_path.string())
+        + " --output "
+        + shell_quote(output_path.string())
+        + " --title "
+        + shell_quote(title);
+
+    std::cout << "plotting AORRTC convergence...\n";
+    std::cout.flush();
+    std::cerr.flush();
+    const int status = std::system(command.c_str());
+    std::error_code remove_error;
+    std::filesystem::remove(input_path, remove_error);
 
     if (status != 0) {
         throw std::runtime_error(
             "AORRTC plotting script exited with an error"
         );
     }
+    std::cout << "aorrtc_plot: " << output_path.string() << "\n";
 }
 
 
@@ -337,11 +417,161 @@ std::size_t measure_planner_warmup_ns() {
 
 
 template <typename Robot>
+json build_validated_quintic_hermite_geometry(
+    const std::vector<typename Robot::Configuration> &path,
+    const typename Robot::Configuration &start,
+    Environment<float> &environment,
+    pRRTC_settings &settings
+) {
+    if (path.size() < 2) {
+        throw std::runtime_error(
+            "quintic Hermite interpolation requires at least two waypoints"
+        );
+    }
+    auto squared_distance = [](const auto &left, const auto &right) {
+        double squared = 0.0;
+        for (std::size_t index = 0; index < left.size(); ++index) {
+            const double difference =
+                static_cast<double>(left[index]) - right[index];
+            squared += difference * difference;
+        }
+        return squared;
+    };
+
+    json start_to_goal_waypoints = json::array();
+    const bool forward = squared_distance(path.front(), start) <=
+        squared_distance(path.back(), start);
+    if (forward) {
+        for (const auto &configuration : path) {
+            start_to_goal_waypoints.push_back(configuration);
+        }
+    } else {
+        for (auto iterator = path.rbegin(); iterator != path.rend(); ++iterator) {
+            start_to_goal_waypoints.push_back(*iterator);
+        }
+    }
+
+    const auto timestamp = std::chrono::steady_clock::now()
+        .time_since_epoch().count();
+    const auto temporary_directory = std::filesystem::temp_directory_path();
+    const auto input_path = temporary_directory /
+        ("prrtc_quintic_input_" + std::to_string(timestamp) + ".json");
+    const auto output_path = temporary_directory /
+        ("prrtc_quintic_output_" + std::to_string(timestamp) + ".json");
+    {
+        std::ofstream input(input_path);
+        if (!input) {
+            throw std::runtime_error(
+                "failed to create temporary quintic Hermite input"
+            );
+        }
+        input << json{{"waypoints", start_to_goal_waypoints}}.dump() << '\n';
+    }
+
+    const auto script_path = std::filesystem::absolute(
+        "scripts/trajectory_pipeline.py"
+    );
+    const std::array<double, 10> derivative_scales = {
+        1.0, 0.5, 0.25, 0.1, 0.05, 0.01, 0.001,
+        0.0001, 0.00001, 0.000001
+    };
+    PathValidationResult last_validation;
+    bool generated_candidate = false;
+    for (double derivative_scale : derivative_scales) {
+        const std::string command =
+            "python3 " + shell_quote(script_path.string()) +
+            " --input " + shell_quote(input_path.string()) +
+            " --output " + shell_quote(output_path.string()) +
+            " --derivative-scale " + std::to_string(derivative_scale) +
+            " --validation-samples-per-segment " +
+            std::to_string(settings.granularity);
+        std::cout.flush();
+        std::cerr.flush();
+        const int status = std::system(command.c_str());
+        if (status != 0) {
+            std::error_code remove_error;
+            std::filesystem::remove(input_path, remove_error);
+            std::filesystem::remove(output_path, remove_error);
+            throw std::runtime_error(
+                "quintic Hermite interpolation script exited with an error"
+            );
+        }
+
+        json output;
+        {
+            std::ifstream stream(output_path);
+            if (!stream) {
+                throw std::runtime_error(
+                    "quintic Hermite interpolation did not produce output"
+                );
+            }
+            stream >> output;
+        }
+        generated_candidate = true;
+        const auto validation_samples = output.at("validation_samples")
+            .template get<std::vector<typename Robot::Configuration>>();
+        last_validation = pRRTC::validate_path_for_visualization<Robot>(
+            validation_samples,
+            environment,
+            settings,
+            2.0f * settings.projection_task_tolerance
+        );
+        if (last_validation.valid) {
+            json geometry = std::move(output.at("geometric_path"));
+            geometry["cuda_revalidated"] = true;
+            geometry["validation_sample_count"] = validation_samples.size();
+            geometry["validation_checked_edges"] =
+                last_validation.checked_edges;
+            geometry["validation_maximum_projection_delta"] =
+                last_validation.maximum_projection_delta;
+            geometry["validation_projection_tolerance"] =
+                2.0f * settings.projection_task_tolerance;
+            geometry["nominal_spline_collision_revalidated"] = true;
+            std::error_code remove_error;
+            std::filesystem::remove(input_path, remove_error);
+            std::filesystem::remove(output_path, remove_error);
+            std::cout
+                << "visualization_quintic_hermite: degree=5 basis=bernstein"
+                << " derivative_scale=" << derivative_scale
+                << " validation_samples=" << validation_samples.size()
+                << " validation_edges=" << last_validation.checked_edges
+                << " max_projection_delta="
+                << last_validation.maximum_projection_delta
+                << " projection_tolerance="
+                << 2.0f * settings.projection_task_tolerance
+                << "\n";
+            return geometry;
+        }
+        std::cout
+            << "visualization_quintic_hermite_retry: derivative_scale="
+            << derivative_scale
+            << " failed_edge=" << last_validation.failed_edge
+            << " max_projection_delta="
+            << last_validation.maximum_projection_delta
+            << "\n";
+    }
+
+    std::error_code remove_error;
+    std::filesystem::remove(input_path, remove_error);
+    std::filesystem::remove(output_path, remove_error);
+    if (!generated_candidate) {
+        throw std::runtime_error("failed to generate a quintic Hermite spline");
+    }
+    throw std::runtime_error(
+        "quintic Hermite spline failed full CUDA revalidation at edge " +
+        std::to_string(last_validation.failed_edge)
+    );
+}
+
+
+template <typename Robot>
 void visualize_ffw_sg2_path(
     const PlannerResult<Robot> &result,
     const typename Robot::Configuration &start,
     const std::vector<std::string> &joint_names,
-    std::array<float, 3> attached_object_frame_offset = {0.1f, 0.0f, 0.0f}
+    const json &geometric_path,
+    std::array<float, 3> attached_object_frame_offset = {0.1f, 0.0f, 0.0f},
+    bool use_ctrl = false
 ) {
     if (result.path.size() < 2) {
         throw std::runtime_error("cannot visualize an unsolved or empty path");
@@ -360,6 +590,10 @@ void visualize_ffw_sg2_path(
     trajectory["joint_names"] = joint_names;
     trajectory["waypoints"] = json::array();
     trajectory["start"] = start;
+    trajectory["path_smoothing"] = !geometric_path.is_null();
+    if (!geometric_path.is_null()) {
+        trajectory["geometric_path"] = geometric_path;
+    }
     trajectory["attached_object_frame_offset"] = {
         attached_object_frame_offset[0],
         attached_object_frame_offset[1],
@@ -405,7 +639,8 @@ void visualize_ffw_sg2_path(
     const std::string command =
         "python3 \"" + visualizer_path.string() + "\""
         + " --model \"" + model_path.string() + "\""
-        + " --trajectory \"" + trajectory_path.string() + "\"";
+        + " --trajectory \"" + trajectory_path.string() + "\""
+        + (use_ctrl ? " --input-mode ctrl" : " --input-mode qpos");
 
     std::cout.flush();
     std::cerr.flush();
@@ -418,6 +653,80 @@ void visualize_ffw_sg2_path(
 }
 
 template <typename Robot>
+void visualize_franka_path(
+    const PlannerResult<Robot> &result,
+    const typename Robot::Configuration &start,
+    const std::vector<std::string> &joint_names,
+    const json &geometric_path
+) {
+    if (result.path.size() < 2) {
+        throw std::runtime_error("cannot visualize an unsolved Franka path");
+    }
+    auto squared_distance = [](const auto &left, const auto &right) {
+        float squared = 0.0f;
+        for (std::size_t index = 0; index < left.size(); ++index) {
+            const float difference = left[index] - right[index];
+            squared += difference * difference;
+        }
+        return squared;
+    };
+    json trajectory;
+    trajectory["joint_names"] = joint_names;
+    trajectory["start"] = start;
+    trajectory["waypoints"] = json::array();
+    trajectory["path_smoothing"] = !geometric_path.is_null();
+    if (!geometric_path.is_null()) {
+        trajectory["geometric_path"] = geometric_path;
+    }
+    const bool forward = squared_distance(result.path.front(), start) <=
+        squared_distance(result.path.back(), start);
+    if (forward) {
+        for (const auto &configuration : result.path) {
+            trajectory["waypoints"].push_back(configuration);
+        }
+    } else {
+        for (auto iterator = result.path.rbegin();
+             iterator != result.path.rend(); ++iterator) {
+            trajectory["waypoints"].push_back(*iterator);
+        }
+    }
+    const auto timestamp = std::chrono::steady_clock::now()
+        .time_since_epoch().count();
+    const auto trajectory_path = std::filesystem::temp_directory_path() /
+        ("prrtc_" + std::string(Robot::name) + "_trajectory_" +
+         std::to_string(timestamp) + ".json");
+    {
+        std::ofstream output(trajectory_path);
+        if (!output) {
+            throw std::runtime_error(
+                "failed to create temporary Franka trajectory"
+            );
+        }
+        output << trajectory.dump(2) << '\n';
+    }
+    const auto visualizer = std::filesystem::absolute(
+        "scripts/visualize_franka.py"
+    );
+    const auto model = std::filesystem::absolute(
+        std::is_same_v<Robot, robots::FrankaSingle>
+            ? "resources/franka/franka_sim/franka_single.xml"
+            : "resources/franka/franka_sim/franka_panda.xml"
+    );
+    const std::string command =
+        "python3 " + shell_quote(visualizer.string()) +
+        " --model " + shell_quote(model.string()) +
+        " --trajectory " + shell_quote(trajectory_path.string());
+    std::cout.flush();
+    std::cerr.flush();
+    const int status = std::system(command.c_str());
+    std::error_code remove_error;
+    std::filesystem::remove(trajectory_path, remove_error);
+    if (status != 0) {
+        throw std::runtime_error("Franka MuJoCo visualizer exited with an error");
+    }
+}
+
+template <typename Robot>
 void visualize_ffw_sg2_rack_real_path(
     const PlannerResult<Robot> &result,
     const typename Robot::Configuration &start,
@@ -425,7 +734,8 @@ void visualize_ffw_sg2_rack_real_path(
     std::array<float, 3> attached_object_frame_offset,
     float object_mass_kg,
     float support_margin_m,
-    const RealDynamicsOptions &real_options
+    const RealDynamicsOptions &real_options,
+    const json &geometric_path
 ) {
     if (result.path.size() < 2) {
         throw std::runtime_error("cannot visualize an unsolved or empty path");
@@ -444,6 +754,10 @@ void visualize_ffw_sg2_rack_real_path(
     trajectory["joint_names"] = joint_names;
     trajectory["waypoints"] = json::array();
     trajectory["start"] = start;
+    trajectory["path_smoothing"] = !geometric_path.is_null();
+    if (!geometric_path.is_null()) {
+        trajectory["geometric_path"] = geometric_path;
+    }
     trajectory["attached_object_frame_offset"] = {
         attached_object_frame_offset[0],
         attached_object_frame_offset[1],
@@ -548,7 +862,11 @@ void visualize_ffw_sg2_rack_real_path(
 void visualize_g1_path(
     const PlannerResult<robots::G1> &result,
     const robots::G1::Configuration &start,
-    const json &problem
+    const json &problem,
+    const json &geometric_path,
+    const G1ReplanningOptions &replanning,
+    const AORRTC_settings &settings,
+    double planning_time_sec
 ) {
     if (result.path.size() < 2) {
         throw std::runtime_error("cannot visualize an unsolved or empty G1 path");
@@ -566,11 +884,61 @@ void visualize_g1_path(
     json trajectory;
     trajectory["start"] = start;
     trajectory["waypoints"] = json::array();
+    trajectory["planning_time_sec"] = planning_time_sec;
+    trajectory["path_smoothing"] = !geometric_path.is_null();
+    if (!geometric_path.is_null()) {
+        trajectory["geometric_path"] = geometric_path;
+    }
     trajectory["environment"] = {
         {"sphere", problem.value("sphere", json::array())},
         {"cylinder", problem.value("cylinder", json::array())},
         {"box", problem.value("box", json::array())}
     };
+    const auto &constraints = problem.at("constraints");
+    trajectory["constraints"] = constraints;
+    const auto &goals = g1_goals_from_problem(
+        problem,
+        settings.rigid_orientation
+    );
+    if (!goals.is_array() || goals.empty()) {
+        throw std::runtime_error("G1 visualization problem has no goal");
+    }
+    trajectory["goal"] = goals.at(0);
+    trajectory["replanning"] = {
+        {"enabled", replanning.enabled},
+        {"planner_executable", replanning.planner_executable},
+        {"base_seed", settings.random_seed},
+        {"aorrtc", settings.aorrtc},
+        {
+            "time_limit_sec",
+            settings.aorrtc
+                ? settings.time_limit_sec
+                : replanning.time_limit_sec
+        },
+        {"projection_smoothness", settings.projection_smoothness},
+        {"rigid_orientation", settings.rigid_orientation},
+        {"mouse_obstacle_radius_m", 0.040},
+        {"mouse_obstacle_collision_radius_m", 0.040},
+        {"mouse_obstacle_initial_position", {0.400, 0.200, 0.800}}
+    };
+    const auto &center_of_mass = constraints.at("com");
+    if (center_of_mass.contains("payload")) {
+        trajectory["payload"] = center_of_mass.at("payload");
+
+        // The bimanual translation is the right-hand frame origin expressed
+        // in the left-hand frame.  The VAMP/MuJoCo rubber-hand endpoint is at
+        // [0.0415, 0.003, 0] in the left wrist-yaw body.
+        const auto &target = constraints.at("bimanual").at("target");
+        const auto midpoint_offset = trajectory["payload"].value(
+            "hand_midpoint_offset",
+            std::vector<double>{0.0, 0.0, 0.0}
+        );
+        trajectory["payload"]["left_hand_center_offset"] = {
+            0.0415 + 0.5 * target.at(4).get<double>() + midpoint_offset.at(0),
+            0.003 + 0.5 * target.at(5).get<double>() + midpoint_offset.at(1),
+            0.5 * target.at(6).get<double>() + midpoint_offset.at(2)
+        };
+    }
 
     const bool path_is_start_to_goal =
         squared_distance(result.path.front(), start)
@@ -598,11 +966,16 @@ void visualize_g1_path(
     }
 
     const auto visualizer_path = std::filesystem::absolute(
-        "scripts/visualize_g1.py"
+        replanning.enabled
+            ? "scripts/visualize_g1_replanning.py"
+            : "scripts/visualize_g1.py"
     );
-    const std::string command =
+    std::string command =
         "python3 " + shell_quote(visualizer_path.string())
         + " --trajectory " + shell_quote(trajectory_path.string());
+    if (replanning.enabled) {
+        command += " --replanning --control-mode ctrl";
+    }
 
     std::cout.flush();
     std::cerr.flush();
@@ -615,12 +988,118 @@ void visualize_g1_path(
 }
 
 
+void visualize_igris_c_path(
+    const PlannerResult<robots::IgrisC> &result,
+    const robots::IgrisC::Configuration &start,
+    const json &problem,
+    bool real_dynamics,
+    float object_mass_kg,
+    const RealDynamicsOptions &real_options,
+    const json &geometric_path
+) {
+    if (result.path.size() < 2) {
+        throw std::runtime_error(
+            "cannot visualize an unsolved or empty IGRIS-C path"
+        );
+    }
+
+    auto squared_distance = [](const auto &a, const auto &b) {
+        float distance = 0.0f;
+        for (std::size_t index = 0; index < a.size(); ++index) {
+            const float difference = a[index] - b[index];
+            distance += difference * difference;
+        }
+        return distance;
+    };
+
+    json trajectory;
+    trajectory["start"] = start;
+    trajectory["waypoints"] = json::array();
+    trajectory["path_smoothing"] = !geometric_path.is_null();
+    if (!geometric_path.is_null()) {
+        trajectory["geometric_path"] = geometric_path;
+    }
+    trajectory["environment"] = {
+        {"sphere", problem.value("sphere", json::array())},
+        {"cylinder", problem.value("cylinder", json::array())},
+        {"box", problem.value("box", json::array())}
+    };
+    trajectory["task"] = problem.value("task", json::object());
+    trajectory["constraints"] = problem.value(
+        "constraints",
+        json::object()
+    );
+
+    const bool path_is_start_to_goal =
+        squared_distance(result.path.front(), start)
+        <= squared_distance(result.path.back(), start);
+    if (path_is_start_to_goal) {
+        for (const auto &configuration : result.path) {
+            trajectory["waypoints"].push_back(configuration);
+        }
+    } else {
+        for (
+            auto iterator = result.path.rbegin();
+            iterator != result.path.rend();
+            ++iterator
+        ) {
+            trajectory["waypoints"].push_back(*iterator);
+        }
+    }
+
+    const auto timestamp = std::chrono::steady_clock::now()
+        .time_since_epoch().count();
+    const auto trajectory_path = std::filesystem::temp_directory_path()
+        / ("prrtc_igris_c_trajectory_" + std::to_string(timestamp) + ".json");
+    {
+        std::ofstream trajectory_file(trajectory_path);
+        if (!trajectory_file) {
+            throw std::runtime_error(
+                "failed to create temporary IGRIS-C trajectory"
+            );
+        }
+        trajectory_file << trajectory.dump(2) << '\n';
+    }
+
+    const auto visualizer_path = std::filesystem::absolute(
+        "scripts/visualize_igris_c.py"
+    );
+    std::string command =
+        "python3 " + shell_quote(visualizer_path.string())
+        + " --trajectory " + shell_quote(trajectory_path.string());
+    if (real_dynamics) {
+        command += " --real --object-mass " + std::to_string(object_mass_kg);
+        if (real_options.settle_steps >= 0) {
+            command += " --settle-steps "
+                + std::to_string(real_options.settle_steps);
+        }
+        if (real_options.initial_settle_steps >= 0) {
+            command += " --real-initial-settle-steps "
+                + std::to_string(real_options.initial_settle_steps);
+        }
+        if (real_options.speed > 0.0) {
+            command += " --speed " + std::to_string(real_options.speed);
+        }
+    }
+
+    std::cout.flush();
+    std::cerr.flush();
+    const int status = std::system(command.c_str());
+    std::error_code remove_error;
+    std::filesystem::remove(trajectory_path, remove_error);
+    if (status != 0) {
+        throw std::runtime_error("IGRIS-C MuJoCo visualizer exited with an error");
+    }
+}
+
+
 template <typename Robot>
 int run_planner(
     json &data,
     Environment<float> &env,
     AORRTC_settings &settings,
     bool visualize,
+    bool path_smoothing,
     bool real_dynamics,
     const RealDynamicsOptions &real_options,
     bool print_path,
@@ -630,10 +1109,20 @@ int run_planner(
     int problem_index,
     const std::string &save_json_path,
     const TraceExportOptions &trace_options,
-    int runs
+    int runs,
+    const G1ReplanningOptions &g1_replanning = G1ReplanningOptions{},
+    bool perform_warmup = true,
+    json *result_payload_out = nullptr
 ) {
     using Configuration = typename Robot::Configuration;
-    if constexpr (std::is_same_v<Robot, robots::FfwSg2Mobility>) {
+    if constexpr (std::is_same_v<Robot, robots::FfwSg2>) {
+        ffw_sg2_attached_object_collision::apply_from_problem(
+            data,
+            settings,
+            ffw_sg2_attached_object_collision::kFfwSg2FixedFineSphereCount,
+            ffw_sg2_attached_object_collision::kFfwSg2FixedApproxSphereCount
+        );
+    } else if constexpr (std::is_same_v<Robot, robots::FfwSg2Mobility>) {
         ffw_sg2_attached_object_collision::apply_from_problem(
             data,
             settings
@@ -642,26 +1131,67 @@ int run_planner(
         settings.ffw_sg2_attached_object_collision = {};
         if (data.contains("attached_object_collision")) {
             throw std::invalid_argument(
-                "attached_object_collision is supported only for ffw_sg2_mobility"
+                "attached_object_collision is supported only for ffw_sg2 and ffw_sg2_mobility"
             );
         }
     }
 
     Configuration start = data["start"];
     std::vector<Configuration> goals = data["goals"];
+    if constexpr (std::is_same_v<Robot, robots::G1>) {
+        start = g1_start_from_problem(data, settings.rigid_orientation);
+        goals = g1_goals_from_problem(data, settings.rigid_orientation)
+            .template get<std::vector<Configuration>>();
+        if (g1_replanning.enabled) {
+            if (!pRRTC::project_g1_configuration(start, settings)) {
+                throw std::runtime_error(
+                    "G1 replanning start constraint projection failed"
+                );
+            }
+            for (auto &goal : goals) {
+                if (!pRRTC::project_g1_configuration(goal, settings)) {
+                    throw std::runtime_error(
+                        "G1 replanning goal constraint projection failed"
+                    );
+                }
+            }
+            data["start"] = start;
+            data["goals"] = goals;
+            data["rigid_orientation_endpoints"]["start"] = start;
+            data["rigid_orientation_endpoints"]["goals"] = goals;
+        }
+    }
+    if constexpr (
+        std::is_same_v<Robot, robots::FrankaSingle> ||
+        std::is_same_v<Robot, robots::Franka>
+    ) {
+        settings.franka_constraints =
+            franka_constraint_parameters_from_start<Robot>(start);
+    }
     json saved_results = json::array();
     int solved_count = 0;
     std::vector<double> times_sec;
     std::vector<int> path_lengths;
     std::vector<float> costs;
+    json prrtc_plot_runs = json::array();
+    json aorrtc_plot_runs = json::array();
     PlannerResult<Robot> visualization_result;
+    json visualization_geometric_path;
+    double visualization_planning_time_sec = 0.0;
+    const unsigned long long base_seed = settings.random_seed;
 
     for (int run_index = 1; run_index <= runs; run_index++) {
+        settings.random_seed = base_seed
+            + static_cast<unsigned long long>(run_index - 1);
         if (runs > 1) {
             std::cout << "run: " << run_index << "\n";
         }
+        std::cout << "seed: " << settings.random_seed << "\n";
 
-        const std::size_t warmup_ns = measure_planner_warmup_ns();
+        std::size_t warmup_ns = 0;
+        if (run_index == 1 && perform_warmup) {
+            warmup_ns = measure_planner_warmup_ns();
+        }
         AORRTCResult<Robot> result;
         if (settings.aorrtc) {
             result = AORRTC::solve<Robot>(start, goals, env, settings);
@@ -669,6 +1199,7 @@ int run_planner(
             static_cast<PlannerResult<Robot> &>(result) =
                 pRRTC::solve<Robot>(start, goals, env, settings);
         }
+
         if (print_path) {
             for (auto& cfg : result.path) {
                 print_cfg<Robot>(cfg);
@@ -700,10 +1231,17 @@ int run_planner(
             times_sec.push_back(planning_sec);
         }
         std::cout << "cost: " << result.cost << "\n";
-        if (runs > 1) {
+        if (runs > 1 && run_index == 1) {
             std::cout << "warmup_s: " << warmup_sec << "\n";
         }
         std::cout << "planning_s: " << planning_sec << "\n";
+        if (settings.collect_diagnostics) {
+            std::cout << "diagnostics: "
+                      << planner_result_json::diagnostics_to_json(
+                             result.diagnostics
+                         ).dump()
+                      << "\n";
+        }
         // std::cout << "time (us): " << result.kernel_ns/1000.0f << "\n";
         // std::cout << "time (s): " << static_cast<double>(result.kernel_ns) / 1.0e9 << "\n";
         if (settings.aorrtc) {
@@ -720,7 +1258,7 @@ int run_planner(
                       << "\n";
         }
 
-        if (!save_json_path.empty()) {
+        if (!save_json_path.empty() || result_payload_out != nullptr) {
             auto payload = planner_result_json::result_to_json<Robot>(
                 result,
                 settings,
@@ -736,20 +1274,143 @@ int run_planner(
             saved_results.push_back(payload);
         }
 
-        if (plot&& settings.aorrtc && run_index == runs) {
-
-            plot_aorrtc_cost_history(
-                result,
-                robot_name,
-                problem_name,
-                problem_index,
-                run_index
-            );
+        if (plot && settings.aorrtc) {
+            json solution_history = json::array();
+            for (const auto &update : result.solution_history) {
+                solution_history.push_back({
+                    {
+                        "found_sec",
+                        static_cast<double>(update.found_ns) / 1.0e9
+                    },
+                    {"cost", update.cost},
+                });
+            }
+            aorrtc_plot_runs.push_back({
+                {"run_idx", run_index},
+                {"solved", result.solved},
+                {"cost", result.cost},
+                {"planning_sec", planning_sec},
+                {"initial_cost", result.initial_cost},
+                {
+                    "initial_solution_sec",
+                    static_cast<double>(result.initial_solution_ns) / 1.0e9
+                },
+                {
+                    "best_solution_sec",
+                    static_cast<double>(result.best_solution_ns) / 1.0e9
+                },
+                {"solution_updates", result.solution_updates},
+                {
+                    "solution_history_overflow",
+                    result.solution_history_overflow
+                },
+                {"solution_history", solution_history},
+            });
+        } else if (plot) {
+            prrtc_plot_runs.push_back({
+                {"run_idx", run_index},
+                {"seed", settings.random_seed},
+                {"solved", result.solved},
+                {"planning_sec", planning_sec},
+                {"kernel_ns", result.kernel_ns},
+            });
         }
 
         if (visualize && run_index == runs) {
+            visualization_planning_time_sec = planning_sec;
+            constexpr bool visualization_supported =
+                std::is_same_v<Robot, robots::FfwSg2> ||
+                std::is_same_v<Robot, robots::FfwSg2Mobility> ||
+                std::is_same_v<Robot, robots::FfwSg2Single> ||
+                std::is_same_v<Robot, robots::G1> ||
+                std::is_same_v<Robot, robots::IgrisC> ||
+                std::is_same_v<Robot, robots::FrankaSingle> ||
+                std::is_same_v<Robot, robots::Franka>;
+            if constexpr (visualization_supported) {
+                if (!path_smoothing) {
+                    std::cout
+                        << "visualization_path_smoothing: disabled "
+                        << "(raw planner path; no shortcut, quintic spline, "
+                        << "or TOPP-RA)\n";
+                } else if (result.solved && result.path.size() >= 3) {
+                    try {
+                        const std::size_t original_waypoint_count =
+                            result.path.size();
+                        auto simplification =
+                            pRRTC::simplify_path_for_visualization<Robot>(
+                                result.path,
+                                env,
+                                settings
+                            );
+                        result.path = std::move(simplification.path);
+                        std::cout
+                            << "visualization_path_simplification: "
+                            << "attempted="
+                            << simplification.attempted_shortcuts
+                            << " accepted="
+                            << simplification.accepted_shortcuts
+                            << " cost="
+                            << simplification.original_cost
+                            << "->"
+                            << simplification.simplified_cost
+                            << " waypoints="
+                            << original_waypoint_count
+                            << "->"
+                            << result.path.size()
+                            << "\n";
+                    } catch (const std::exception &error) {
+                        std::cerr
+                            << "warning: visualization path simplification "
+                            << "failed; using the original planner path: "
+                            << error.what()
+                            << "\n";
+                    }
+                }
+                if (
+                    path_smoothing &&
+                    result.solved &&
+                    result.path.size() >= 2
+                ) {
+                    try {
+                        visualization_geometric_path =
+                            build_validated_quintic_hermite_geometry<Robot>(
+                                result.path,
+                                start,
+                                env,
+                                settings
+                            );
+                    } catch (const std::exception &error) {
+                        visualization_geometric_path = json();
+                        std::cerr
+                            << "warning: visualization quintic Hermite "
+                            << "smoothing failed CUDA revalidation; using "
+                            << "the validated planner polyline without "
+                            << "smoothing or TOPP-RA: "
+                            << error.what()
+                            << "\n";
+                    }
+                }
+            }
             visualization_result = std::move(result);
         }
+    }
+
+    if (plot && settings.aorrtc) {
+        plot_aorrtc_convergence(
+            aorrtc_plot_runs,
+            robot_name,
+            problem_name,
+            problem_index,
+            runs
+        );
+    } else if (plot) {
+        plot_prrtc_run_ecdf(
+            prrtc_plot_runs,
+            robot_name,
+            problem_name,
+            problem_index,
+            runs
+        );
     }
 
     if (runs > 1) {
@@ -812,8 +1473,13 @@ int run_planner(
             planner_result_json::write_json_file(saved_results[0], save_json_path);
         } else {
             const json payload = {
-                {"format", "pRRTC_run_results_v1"},
-                {"planner", "pRRTC"},
+                {
+                    "format",
+                    settings.aorrtc
+                        ? "AORRTC_run_results_v1"
+                        : "pRRTC_run_results_v1"
+                },
+                {"planner", settings.aorrtc ? "AORRTC" : "pRRTC"},
                 {"robot", robot_name},
                 {"problem_name", problem_name},
                 {"problem_idx", problem_index},
@@ -825,6 +1491,27 @@ int run_planner(
         }
         std::cout << "saved_json: " << save_json_path << "\n";
     }
+    if (result_payload_out != nullptr) {
+        if (runs == 1) {
+            *result_payload_out = saved_results.at(0);
+        } else {
+            *result_payload_out = {
+                {
+                    "format",
+                    settings.aorrtc
+                        ? "AORRTC_run_results_v1"
+                        : "pRRTC_run_results_v1"
+                },
+                {"planner", settings.aorrtc ? "AORRTC" : "pRRTC"},
+                {"robot", robot_name},
+                {"problem_name", problem_name},
+                {"problem_idx", problem_index},
+                {"runs", runs},
+                {"solved_runs", solved_count},
+                {"results", saved_results},
+            };
+        }
+    }
     if (trace_options.requested) {
         if (save_json_path.empty()) {
             throw std::runtime_error("trace export requires a saved result JSON");
@@ -835,13 +1522,20 @@ int run_planner(
     }
     if (visualize) {
         if constexpr (std::is_same_v<Robot, robots::FfwSg2>) {
+            const auto &attached_object =
+                settings.ffw_sg2_attached_object_collision;
+            const std::array<float, 3> attached_object_frame_offset = {
+                attached_object.enabled ? attached_object.world_offset[0] : 0.1f,
+                attached_object.enabled ? attached_object.world_offset[1] : 0.0f,
+                attached_object.enabled ? attached_object.world_offset[2] : 0.0f,
+            };
             visualize_ffw_sg2_path(visualization_result, start, {
                 "lift_joint",
                 "arm_l_joint1", "arm_l_joint2", "arm_l_joint3", "arm_l_joint4",
                 "arm_l_joint5", "arm_l_joint6", "arm_l_joint7",
                 "arm_r_joint1", "arm_r_joint2", "arm_r_joint3", "arm_r_joint4",
                 "arm_r_joint5", "arm_r_joint6", "arm_r_joint7"
-            });
+            }, visualization_geometric_path, attached_object_frame_offset, true);
         } else if constexpr (std::is_same_v<Robot, robots::FfwSg2Mobility>) {
             const auto &attached_object =
                 settings.ffw_sg2_attached_object_collision;
@@ -874,13 +1568,15 @@ int run_planner(
                     attached_object_frame_offset,
                     object_mass_kg,
                     support_margin_m,
-                    real_options
+                    real_options,
+                    visualization_geometric_path
                 );
             } else {
                 visualize_ffw_sg2_path(
                     visualization_result,
                     start,
                     joint_names,
+                    visualization_geometric_path,
                     attached_object_frame_offset
                 );
             }
@@ -889,15 +1585,182 @@ int run_planner(
                 "lift_joint",
                 "arm_r_joint1", "arm_r_joint2", "arm_r_joint3", "arm_r_joint4",
                 "arm_r_joint5", "arm_r_joint6", "arm_r_joint7"
-            });
+            }, visualization_geometric_path);
         } else if constexpr (std::is_same_v<Robot, robots::G1>) {
-            visualize_g1_path(visualization_result, start, data);
+            visualize_g1_path(
+                visualization_result,
+                start,
+                data,
+                visualization_geometric_path,
+                g1_replanning,
+                settings,
+                visualization_planning_time_sec
+            );
+        } else if constexpr (std::is_same_v<Robot, robots::IgrisC>) {
+            float object_mass_kg = 0.15f;
+            if (data.contains("task")
+                && data["task"].contains("payload_mass_kg")) {
+                object_mass_kg = data["task"]["payload_mass_kg"].get<float>();
+            }
+            if (data.contains("constraints")
+                && data["constraints"].contains("com")
+                && data["constraints"]["com"].contains("payload_mass_kg")) {
+                object_mass_kg = data["constraints"]["com"]
+                    ["payload_mass_kg"].get<float>();
+            }
+            if (settings.ffw_sg2_object_mass_kg > 0.0f) {
+                object_mass_kg = settings.ffw_sg2_object_mass_kg;
+            }
+            visualize_igris_c_path(
+                visualization_result,
+                start,
+                data,
+                real_dynamics,
+                object_mass_kg,
+                real_options,
+                visualization_geometric_path
+            );
+        } else if constexpr (std::is_same_v<Robot, robots::FrankaSingle>) {
+            visualize_franka_path(visualization_result, start, {
+                "panda0_joint1", "panda0_joint2", "panda0_joint3",
+                "panda0_joint4", "panda0_joint5", "panda0_joint6",
+                "panda0_joint7"
+            }, visualization_geometric_path);
+        } else if constexpr (std::is_same_v<Robot, robots::Franka>) {
+            visualize_franka_path(visualization_result, start, {
+                "panda0_joint1", "panda0_joint2", "panda0_joint3",
+                "panda0_joint4", "panda0_joint5", "panda0_joint6",
+                "panda0_joint7", "panda1_joint1", "panda1_joint2",
+                "panda1_joint3", "panda1_joint4", "panda1_joint5",
+                "panda1_joint6", "panda1_joint7"
+            }, visualization_geometric_path);
         } else {
             throw std::runtime_error(
-                "--visualize supports only ffw_sg2, ffw_sg2_mobility, ffw_sg2_single, and g1"
+                "--visualize supports only ffw_sg2, ffw_sg2_mobility, "
+                "ffw_sg2_single, g1, igris_c, franka_single, and franka"
             );
         }
     }
+    return 0;
+}
+
+int run_g1_replan_server(
+    const json &problem_template,
+    AORRTC_settings &settings,
+    const G1ReplanningOptions &replanning
+) {
+    const RealDynamicsOptions no_real_dynamics;
+    const G1ReplanningOptions no_nested_replanning;
+    const TraceExportOptions no_trace;
+
+    pRRTC::set_cuda_device_reset_enabled(false);
+    pRRTC::set_persistent_workspace_enabled(!settings.aorrtc);
+    pRRTC::set_time_limit_seconds(
+        settings.aorrtc ? 0.0 : replanning.time_limit_sec
+    );
+    const std::size_t warmup_ns = measure_planner_warmup_ns();
+    std::cout
+        << "g1_replan_server: PATACON ready, warmup_s="
+        << static_cast<double>(warmup_ns) / 1.0e9
+        << ", time_limit_s="
+        << (settings.aorrtc
+            ? settings.time_limit_sec
+            : replanning.time_limit_sec)
+        << "\n";
+    std::cout.flush();
+
+    std::string request_line;
+    int request_index = 0;
+    const unsigned long long replanning_base_seed = settings.random_seed;
+    while (std::getline(std::cin, request_line)) {
+        if (request_line.empty()) {
+            continue;
+        }
+        ++request_index;
+        // Keep the initial plan on the requested base seed, then give every
+        // replanning request a fresh deterministic seed: base+1, base+2, ...
+        settings.random_seed = replanning_base_seed
+            + static_cast<unsigned long long>(request_index);
+        int response_request_index = request_index;
+        json response;
+        try {
+            const json request = json::parse(request_line);
+            response_request_index = request.value(
+                "request_index", request_index
+            );
+
+            json problem = problem_template;
+            robots::G1::Configuration projected_start =
+                request.at("start").get<robots::G1::Configuration>();
+            settings.g1_constraints =
+                g1_constraint_parameters_from_problem(problem);
+            if (!pRRTC::project_g1_configuration(
+                    projected_start,
+                    settings
+                )) {
+                throw std::runtime_error(
+                    "G1 replanning start projection failed"
+                );
+            }
+
+            problem["start"] = projected_start;
+            problem["goals"] = json::array({request.at("goal")});
+            problem["rigid_orientation_endpoints"]["start"] =
+                projected_start;
+            problem["rigid_orientation_endpoints"]["goals"] =
+                json::array({request.at("goal")});
+            if (request.contains("environment")) {
+                const auto &request_environment = request.at("environment");
+                problem["sphere"] = request_environment.at("sphere");
+                problem["cylinder"] = request_environment.at("cylinder");
+                problem["box"] = request_environment.at("box");
+            }
+
+            auto environment = problem_dict_to_env(
+                problem,
+                "g1_continuous_replan"
+            );
+            const int status = run_planner<robots::G1>(
+                problem,
+                environment,
+                settings,
+                false,
+                false,
+                false,
+                no_real_dynamics,
+                false,
+                false,
+                "g1",
+                "g1_continuous_replan",
+                1,
+                "",
+                no_trace,
+                1,
+                no_nested_replanning,
+                false,
+                &response
+            );
+            if (status != 0) {
+                response = {
+                    {"solved", false},
+                    {"server_error", "planner returned nonzero status"}
+                };
+            }
+        } catch (const std::exception &error) {
+            response = {
+                {"solved", false},
+                {"server_error", error.what()}
+            };
+        }
+
+        response["request_index"] = response_request_index;
+        response["seed"] = settings.random_seed;
+        std::cout << "G1_REPLAN_RESULT " << response.dump() << "\n";
+        std::cout.flush();
+        std::cerr.flush();
+    }
+    pRRTC::release_persistent_workspace();
+    pRRTC::set_persistent_workspace_enabled(false);
     return 0;
 }
 
@@ -906,12 +1769,14 @@ int main(int argc, char* argv[]) {
     std::string name = "cage";
     int problem_idx = 1;
     bool visualize = false;
+    bool path_smoothing = true;
     bool real_dynamics = false;
     bool plot = false;
     bool trace_trees = false;
     bool rigid_orientation = false;
     bool projection_smoothness = true;
     bool print_path = true;
+    bool collect_diagnostics = false;
     bool aorrtc = false;
     bool enable_com_constraint = false;
     bool object_mass_option_provided = false;
@@ -919,17 +1784,24 @@ int main(int argc, char* argv[]) {
     bool time_option_provided = false;
     float object_mass_kg = 0.0f;
     float support_margin_m = 0.0f;
+    float planner_range = 0.3f;
     double time_limit_sec = 5.0;
+    unsigned long long random_seed = 1ULL;
     int runs = 1;
     int max_concon_nodes = 4;
+    std::string problem_file_path;
     std::string save_json_path;
     TraceExportOptions trace_options;
     RealDynamicsOptions real_options;
+    G1ReplanningOptions g1_replanning;
 
     if (argc < 4) {
         std::cout
             << "Usage: ./single_mbm <robot_name> <problem_name> <problem_idx> "
-            << "[--visualize] [--real] [--save-json PATH] [--run N|--runs N] "
+            << "[--visualize] [--replanning] [--real] "
+            << "[--save-json PATH] [--run N|--runs N] "
+            << "[--problem-file PATH] "
+            << "[--seed N] [--range VALUE] "
             << "[--aorrtc] [--time SECONDS] [--plot] "
             << "[--com] [--object-mass-kg KG] [--support-margin M] "
             << "[--real-speed SPEED] [--real-settle-steps N] "
@@ -941,6 +1813,8 @@ int main(int argc, char* argv[]) {
             << "[--real-steer-rate-limit RPS] "
             << "[--real-drive-accel-limit RPS2] "
             << "[--rigid-orientation] "
+            << "[--diagnostics] "
+            << "[--no-path-smoothing] "
             << "[--no-waypoint-smoothing] "
             << "[--max-concon-nodes N] "
             << "[--trace-mode auto|path|tree] "
@@ -986,18 +1860,47 @@ int main(int argc, char* argv[]) {
         }
         return parsed;
     };
+    auto parse_seed = [](const std::string &value) {
+        if (value.empty() || value.front() == '-') {
+            throw std::invalid_argument(
+                "--seed must be a nonnegative integer"
+            );
+        }
+        std::size_t consumed = 0;
+        const unsigned long long parsed = std::stoull(value, &consumed);
+        if (consumed != value.size()) {
+            throw std::invalid_argument(
+                "--seed must be a nonnegative integer"
+            );
+        }
+        return parsed;
+    };
     try {
         problem_idx = std::stoi(argv[3]);
         for (int index = 4; index < argc; index++) {
             const std::string argument = argv[index];
             if (argument == "--visualize") {
                 visualize = true;
+            } else if (argument == "--replanning") {
+                g1_replanning.enabled = true;
+            } else if (argument == "--replan-server") {
+                g1_replanning.server = true;
+            } else if (argument == "--no-path-smoothing") {
+                path_smoothing = false;
             } else if (argument == "--real") {
                 real_dynamics = true;
             } else if (argument == "--save-json" && index + 1 < argc) {
                 save_json_path = argv[++index];
+            } else if (argument == "--problem-file" && index + 1 < argc) {
+                problem_file_path = argv[++index];
             } else if ((argument == "--run" || argument == "--runs") && index + 1 < argc) {
                 runs = std::max(1, std::stoi(argv[++index]));
+            } else if (argument == "--seed" && index + 1 < argc) {
+                random_seed = parse_seed(argv[++index]);
+            } else if (argument == "--range" && index + 1 < argc) {
+                planner_range = static_cast<float>(
+                    parse_positive_double(argument, argv[++index])
+                );
             } else if (
                 (
                     argument == "--max-concon-nodes" ||
@@ -1159,6 +2062,9 @@ int main(int argc, char* argv[]) {
             ) {
                 rigid_orientation = true;
             }
+            else if (argument == "--diagnostics") {
+                collect_diagnostics = true;
+            }
             else if (argument == "--no-waypoint-smoothing") {
                 projection_smoothness = false;
             }
@@ -1172,10 +2078,51 @@ int main(int argc, char* argv[]) {
         if (time_option_provided && !aorrtc) {
             throw std::invalid_argument("--time requires --aorrtc");
         }
-
-        if (plot && !aorrtc) {
+        if (g1_replanning.enabled) {
+            if (robot_name != "g1") {
+                throw std::invalid_argument(
+                    "--replanning is supported only for G1"
+                );
+            }
+            if (runs != 1) {
+                throw std::invalid_argument(
+                    "--replanning requires one planner run"
+                );
+            }
+            if (real_dynamics) {
+                throw std::invalid_argument(
+                    "--replanning selects G1 ctrl mode; do not add --real"
+                );
+            }
+            visualize = true;
+            path_smoothing = false;
+            g1_replanning.planner_executable =
+                std::filesystem::absolute(argv[0]).string();
+        }
+        if (g1_replanning.server
+            && (robot_name != "g1"
+                || visualize
+                || real_dynamics
+                || g1_replanning.enabled
+                || runs != 1
+                || plot
+                || trace_trees
+                || !save_json_path.empty())) {
             throw std::invalid_argument(
-                "--plot requires --aorrtc"
+                "--replan-server is an internal G1 non-visual mode"
+            );
+        }
+        if (collect_diagnostics && aorrtc) {
+            throw std::invalid_argument(
+                "--diagnostics currently supports pRRTC/TB-RRT only"
+            );
+        }
+        if (
+            random_seed > std::numeric_limits<unsigned long long>::max()
+                - static_cast<unsigned long long>(runs - 1)
+        ) {
+            throw std::invalid_argument(
+                "--seed plus the run count exceeds the supported seed range"
             );
         }
         if (real_dynamics && !visualize) {
@@ -1183,9 +2130,16 @@ int main(int argc, char* argv[]) {
                 "--real currently applies only to --visualize"
             );
         }
-        if (real_dynamics && robot_name != "ffw_sg2_mobility") {
+        if (!path_smoothing && !visualize) {
             throw std::invalid_argument(
-                "--real is supported only for ffw_sg2_mobility"
+                "--no-path-smoothing requires --visualize"
+            );
+        }
+        if (real_dynamics
+            && robot_name != "ffw_sg2_mobility"
+            && robot_name != "igris_c") {
+            throw std::invalid_argument(
+                "--real is supported only for ffw_sg2_mobility and igris_c"
             );
         }
         if (!real_dynamics && real_options.provided()) {
@@ -1204,10 +2158,12 @@ int main(int argc, char* argv[]) {
         }
         if (
             object_mass_option_provided &&
-            robot_name != "ffw_sg2_mobility"
+            robot_name != "ffw_sg2_mobility" &&
+            robot_name != "igris_c"
         ) {
             throw std::invalid_argument(
-                "--object-mass-kg is supported only for ffw_sg2_mobility"
+                "--object-mass-kg is supported only for "
+                "ffw_sg2_mobility and igris_c"
             );
         }
         if (object_mass_option_provided && !enable_com_constraint && !real_dynamics) {
@@ -1256,11 +2212,18 @@ int main(int argc, char* argv[]) {
         && robot_name != "ffw_sg2"
         && robot_name != "ffw_sg2_mobility"
         && robot_name != "ffw_sg2_single"
-        && robot_name != "g1") {
-        std::cerr << "--visualize supports only ffw_sg2, ffw_sg2_mobility, ffw_sg2_single, and g1\n";
+        && robot_name != "g1"
+        && robot_name != "igris_c"
+        && robot_name != "franka_single"
+        && robot_name != "franka") {
+        std::cerr
+            << "--visualize supports only ffw_sg2, ffw_sg2_mobility, "
+            << "ffw_sg2_single, g1, igris_c, franka_single, and franka\n";
         return 1;
     }
-    std::string path = "scripts/" + robot_name + "_problems.json";
+    const std::string path = problem_file_path.empty()
+        ? "scripts/" + robot_name + "_problems.json"
+        : problem_file_path;
     std::ifstream f(path);
     if (!f) {
         std::cerr << "Failed to open problem file: " << path << "\n";
@@ -1285,14 +2248,42 @@ int main(int argc, char* argv[]) {
     if (not data["valid"]) {
         return -1;
     }
+    if (g1_replanning.enabled && robot_name == "g1") {
+        if (!data.contains("replanning_endpoints")) {
+            throw std::invalid_argument(
+                "G1 --replanning requires replanning_endpoints"
+            );
+        }
+        const json replanning_endpoints = data.at("replanning_endpoints");
+        data["start"] = replanning_endpoints.at("start");
+        data["goals"] = replanning_endpoints.at("goals");
+        data["rigid_orientation_endpoints"]["start"] =
+            replanning_endpoints.at("start");
+        data["rigid_orientation_endpoints"]["goals"] =
+            replanning_endpoints.at("goals");
+
+        // In replanning mode the moving sphere is the only world obstacle.
+        // The MuJoCo floor remains part of the robot model.
+        data["sphere"] = json::array();
+        data["cylinder"] = json::array();
+        data["box"] = json::array();
+        data["sphere"].push_back(
+            {
+                {"name", "mouse_dynamic_obstacle"},
+                {"position", json::array({0.400, 0.200, 0.800})},
+                {"radius", 0.040}
+            }
+        );
+    }
     auto env = problem_dict_to_env(data, name);
     AORRTC_settings settings;
     settings.num_new_configs = 512; //usually:512
     settings.max_iters = 100000000;
+    settings.random_seed = random_seed;
     settings.aorrtc = aorrtc;
     settings.time_limit_sec = time_limit_sec;
     settings.granularity = 16;
-    settings.range = 0.4;
+    settings.range = planner_range;
     settings.lift_distance_weight = 1.0f;
     settings.ffw_sg2_enable_com_constraint = enable_com_constraint;
     settings.rigid_orientation = rigid_orientation;
@@ -1301,6 +2292,9 @@ int main(int argc, char* argv[]) {
     settings.tree_ratio = 1.0;
     settings.dynamic_domain = false;
     settings.trace_trees = trace_trees;
+    settings.collect_diagnostics = collect_diagnostics;
+    // Always use the TB-RRT forward-half-space rule for pRRTC and AORRTC.
+    settings.prevent_ts_backtracking = true;
     settings.dd_radius = 4.0;
     settings.dd_min_radius = 1.0;
     settings.dd_alpha = 0.0001;
@@ -1310,6 +2304,9 @@ int main(int argc, char* argv[]) {
 
     if (data.contains("constraints") && data["constraints"].contains("com")) {
         const auto &com_constraints = data["constraints"]["com"];
+        if (com_constraints.value("enabled", false)) {
+            settings.ffw_sg2_enable_com_constraint = true;
+        }
         if (com_constraints.contains("support_margin_m")) {
             settings.ffw_sg2_support_margin_m =
                 static_cast<float>(
@@ -1325,6 +2322,12 @@ int main(int argc, char* argv[]) {
     }
     if (object_mass_option_provided) {
         settings.ffw_sg2_object_mass_kg = object_mass_kg;
+    } else if (
+        enable_com_constraint &&
+        robot_name == "ffw_sg2_mobility" &&
+        settings.ffw_sg2_object_mass_kg <= 0.0f
+    ) {
+        settings.ffw_sg2_object_mass_kg = FFW_SG2_DEFAULT_OBJECT_MASS_KG;
     }
     if (support_margin_option_provided) {
         settings.ffw_sg2_support_margin_m = support_margin_m;
@@ -1340,27 +2343,44 @@ int main(int argc, char* argv[]) {
         if (robot_name == "g1") {
             settings.granularity = robots::G1::resolution;
             settings.g1_constraints = g1_constraint_parameters_from_problem(data);
+        } else if (robot_name == "igris_c") {
+            settings.granularity = robots::IgrisC::resolution;
+            settings.igris_c_constraints =
+                igris_c_constraint_parameters_from_problem(data);
+        }
+        if (g1_replanning.server) {
+            return run_g1_replan_server(data, settings, g1_replanning);
         }
         if (robot_name == "fetch") {
-            return run_planner<robots::Fetch>(data, env, settings, visualize, real_dynamics, real_options, print_path, plot,
+            return run_planner<robots::Fetch>(data, env, settings, visualize, path_smoothing, real_dynamics, real_options, print_path, plot,
                 robot_name, name, problem_idx, save_json_path, trace_options, runs);
         } else if (robot_name == "panda") {
-            return run_planner<robots::Panda>(data, env, settings, visualize, real_dynamics, real_options, print_path, plot,
+            return run_planner<robots::Panda>(data, env, settings, visualize, path_smoothing, real_dynamics, real_options, print_path, plot,
                 robot_name, name, problem_idx, save_json_path, trace_options, runs);
         } else if (robot_name == "baxter") {
-            return run_planner<robots::Baxter>(data, env, settings, visualize, real_dynamics, real_options, print_path, plot,
+            return run_planner<robots::Baxter>(data, env, settings, visualize, path_smoothing, real_dynamics, real_options, print_path, plot,
                 robot_name, name, problem_idx, save_json_path, trace_options, runs);
         } else if (robot_name == "ffw_sg2") {
-            return run_planner<robots::FfwSg2>(data, env, settings, visualize, real_dynamics, real_options, print_path, plot,
+            return run_planner<robots::FfwSg2>(data, env, settings, visualize, path_smoothing, real_dynamics, real_options, print_path, plot,
                 robot_name, name, problem_idx, save_json_path, trace_options, runs);
         } else if (robot_name == "ffw_sg2_mobility") {
-            return run_planner<robots::FfwSg2Mobility>(data, env, settings, visualize, real_dynamics, real_options, print_path, plot,
+            return run_planner<robots::FfwSg2Mobility>(data, env, settings, visualize, path_smoothing, real_dynamics, real_options, print_path, plot,
                 robot_name, name, problem_idx, save_json_path, trace_options, runs);
         } else if (robot_name == "ffw_sg2_single") {
-            return run_planner<robots::FfwSg2Single>(data, env, settings, visualize, real_dynamics, real_options, print_path, plot,
+            return run_planner<robots::FfwSg2Single>(data, env, settings, visualize, path_smoothing, real_dynamics, real_options, print_path, plot,
                 robot_name, name, problem_idx, save_json_path, trace_options, runs);
         } else if (robot_name == "g1") {
-            return run_planner<robots::G1>(data, env, settings, visualize, real_dynamics, real_options, print_path, plot,
+            return run_planner<robots::G1>(data, env, settings, visualize, path_smoothing, real_dynamics, real_options, print_path, plot,
+                robot_name, name, problem_idx, save_json_path, trace_options, runs,
+                g1_replanning);
+        } else if (robot_name == "igris_c") {
+            return run_planner<robots::IgrisC>(data, env, settings, visualize, path_smoothing, real_dynamics, real_options, print_path, plot,
+                robot_name, name, problem_idx, save_json_path, trace_options, runs);
+        } else if (robot_name == "franka_single") {
+            return run_planner<robots::FrankaSingle>(data, env, settings, visualize, path_smoothing, real_dynamics, real_options, print_path, plot,
+                robot_name, name, problem_idx, save_json_path, trace_options, runs);
+        } else if (robot_name == "franka") {
+            return run_planner<robots::Franka>(data, env, settings, visualize, path_smoothing, real_dynamics, real_options, print_path, plot,
                 robot_name, name, problem_idx, save_json_path, trace_options, runs);
         } else {
             std::cerr << "Unsupported robot type: " << robot_name << "\n";

@@ -6,6 +6,7 @@
 #include <fstream>
 #include <iostream>
 #include <stdexcept>
+#include <string>
 
 #include "scripts/g1_problem.hh"
 #include "src/robots/g1_constraint.cuh"
@@ -31,6 +32,7 @@ __global__ void validate_constraints_kernel(
     const float *start,
     const float *goal,
     ppln::constraints::G1ConstraintParameters parameters,
+    bool rigid_orientation,
     ConstraintValidationResult *result
 ) {
     if (threadIdx.x != 0 || blockIdx.x != 0) {
@@ -39,14 +41,20 @@ __global__ void validate_constraints_kernel(
 
     result->start_error = ppln::collision::g1_constraint_error_squared(
         start,
-        parameters
+        parameters,
+        rigid_orientation
     );
     result->goal_error = ppln::collision::g1_constraint_error_squared(
         goal,
-        parameters
+        parameters,
+        rigid_orientation
     );
-    ppln::collision::g1_constraint_residual(start, parameters, result->start_residual);
-    ppln::collision::g1_constraint_residual(goal, parameters, result->goal_residual);
+    ppln::collision::g1_constraint_residual(
+        start, parameters, rigid_orientation, result->start_residual
+    );
+    ppln::collision::g1_constraint_residual(
+        goal, parameters, rigid_orientation, result->goal_residual
+    );
 
     float equality_residual[ppln::collision::G1_EQUALITY_CONSTRAINT_DIM];
     float equality_jacobian[
@@ -57,20 +65,22 @@ __global__ void validate_constraints_kernel(
     ppln::collision::g1_equality_residual_and_jacobian(
         start,
         parameters,
+        rigid_orientation,
         equality_residual,
         equality_jacobian
     );
     result->tangent_basis_valid = ppln::collision::g1_tangent_basis_from_jacobian(
         equality_jacobian,
+        rigid_orientation,
         tangent_basis
     );
+    const int equality_dim =
+        ppln::collision::g1_equality_constraint_dim(rigid_orientation);
+    const int tangent_dim =
+        ppln::collision::g1_tangent_dim(rigid_orientation);
     result->maximum_tangent_nullspace_error = 0.0f;
-    for (int row = 0;
-         row < ppln::collision::G1_EQUALITY_CONSTRAINT_DIM;
-         ++row) {
-        for (int column = 0;
-             column < ppln::collision::G1_TANGENT_DIM;
-             ++column) {
+    for (int row = 0; row < equality_dim; ++row) {
+        for (int column = 0; column < tangent_dim; ++column) {
             float value = 0.0f;
             for (int joint = 0;
                  joint < ppln::collision::G1_JOINT_DIM;
@@ -88,12 +98,8 @@ __global__ void validate_constraints_kernel(
         }
     }
     result->maximum_tangent_orthonormality_error = 0.0f;
-    for (int left = 0;
-         left < ppln::collision::G1_TANGENT_DIM;
-         ++left) {
-        for (int right = 0;
-             right < ppln::collision::G1_TANGENT_DIM;
-             ++right) {
+    for (int left = 0; left < tangent_dim; ++left) {
+        for (int right = 0; right < tangent_dim; ++right) {
             float value = 0.0f;
             for (int joint = 0;
                  joint < ppln::collision::G1_JOINT_DIM;
@@ -119,7 +125,9 @@ __global__ void validate_constraints_kernel(
     perturbed[2] += 0.03f;
     perturbed[21] += 0.10f;
     result->perturbed_error_before =
-        ppln::collision::g1_constraint_error_squared(perturbed, parameters);
+        ppln::collision::g1_constraint_error_squared(
+            perturbed, parameters, rigid_orientation
+        );
 
     float analytic_residual[ppln::collision::G1_CONSTRAINT_DIM];
     float analytic_jacobian[
@@ -128,13 +136,16 @@ __global__ void validate_constraints_kernel(
     ppln::collision::g1_constraint_residual_and_jacobian(
         perturbed,
         parameters,
+        rigid_orientation,
         analytic_residual,
         analytic_jacobian
     );
     result->maximum_active_jacobian_error = 0.0f;
     result->active_jacobian_rows = 0;
     constexpr float difference_step = 1.0e-4f;
-    for (int row = 0; row < ppln::collision::G1_CONSTRAINT_DIM; ++row) {
+    const int constraint_dim =
+        ppln::collision::g1_constraint_dim(rigid_orientation);
+    for (int row = 0; row < constraint_dim; ++row) {
         if (fabsf(analytic_residual[row]) <= 1.0e-4f) {
             continue;
         }
@@ -153,11 +164,13 @@ __global__ void validate_constraints_kernel(
             ppln::collision::g1_constraint_residual(
                 plus,
                 parameters,
+                rigid_orientation,
                 plus_residual
             );
             ppln::collision::g1_constraint_residual(
                 minus,
                 parameters,
+                rigid_orientation,
                 minus_residual
             );
             const float numerical =
@@ -175,13 +188,17 @@ __global__ void validate_constraints_kernel(
     result->projected = ppln::collision::g1_project_configuration(
         perturbed,
         parameters,
+        rigid_orientation,
         50,
         0.5f,
         1.0e-4f,
         0.10f
     );
     result->perturbed_error_after =
-        ppln::collision::g1_constraint_error_squared(perturbed, parameters);
+        ppln::collision::g1_constraint_error_squared(
+            perturbed, parameters, rigid_orientation
+        );
+
 }
 
 void check_cuda(cudaError_t status, const char *operation) {
@@ -194,7 +211,9 @@ void check_cuda(cudaError_t status, const char *operation) {
 
 }  // namespace
 
-int main() {
+int main(int argc, char **argv) {
+    const bool rigid_orientation =
+        argc > 1 && std::string(argv[1]) == "--rigid-orientation";
     std::ifstream input("scripts/g1_problems.json");
     if (!input) {
         std::cerr << "failed to open scripts/g1_problems.json\n";
@@ -204,8 +223,13 @@ int main() {
     input >> problems;
     const auto &problem = problems.at("problems").at("humanoid_shelf").at(0);
     const auto parameters = g1_constraint_parameters_from_problem(problem);
-    const std::array<float, 35> start = problem.at("start").get<std::array<float, 35>>();
-    const std::array<float, 35> goal = problem.at("goals").at(0).get<std::array<float, 35>>();
+    const std::array<float, 35> start =
+        g1_start_from_problem(problem, rigid_orientation)
+            .get<std::array<float, 35>>();
+    const std::array<float, 35> goal =
+        g1_goals_from_problem(problem, rigid_orientation)
+            .at(0)
+            .get<std::array<float, 35>>();
 
     float *device_start = nullptr;
     float *device_goal = nullptr;
@@ -220,6 +244,7 @@ int main() {
         device_start,
         device_goal,
         parameters,
+        rigid_orientation,
         device_result
     );
     check_cuda(cudaDeviceSynchronize(), "constraint validation kernel");
@@ -235,7 +260,10 @@ int main() {
     cudaFree(device_goal);
     cudaFree(device_start);
 
-    std::cout << "G1 constraint validation\n"
+    const int constraint_dim =
+        ppln::collision::g1_constraint_dim(rigid_orientation);
+    std::cout << "G1 constraint validation (rigid orientation: "
+              << (rigid_orientation ? "on" : "off") << ")\n"
               << "start error squared: " << result.start_error << "\n"
               << "goal error squared: " << result.goal_error << "\n"
               << "perturbed before: " << result.perturbed_error_before << "\n"
@@ -251,12 +279,12 @@ int main() {
               << result.maximum_tangent_orthonormality_error << "\n"
               << "projection result: " << (result.projected ? "success" : "failure") << "\n";
     std::cout << "start residual:";
-    for (float value : result.start_residual) {
-        std::cout << ' ' << value;
+    for (int row = 0; row < constraint_dim; ++row) {
+        std::cout << ' ' << result.start_residual[row];
     }
     std::cout << "\ngoal residual:";
-    for (float value : result.goal_residual) {
-        std::cout << ' ' << value;
+    for (int row = 0; row < constraint_dim; ++row) {
+        std::cout << ' ' << result.goal_residual[row];
     }
     std::cout << '\n';
 

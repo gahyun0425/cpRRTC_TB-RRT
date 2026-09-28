@@ -139,6 +139,28 @@
             "half_extents": [0.2, 0.02, 0.16]
           }
         ],
+        "attached_object_collision": {
+          "enabled": true,
+          "world_offset": [0.12, 0.0, -0.05],
+          "box_sphere_grid": {
+            "center": [0.0, 0.0, 0.03],
+            "half_extents": [0.08, 0.205, 0.031],
+            "counts": [4, 10, 2],
+            "radius_padding": 0.001
+          },
+          "contact_links": [
+            "gripper_l_rh_p12_rn_base",
+            "gripper_l_rh_p12_rn_r1",
+            "gripper_l_rh_p12_rn_r2",
+            "gripper_l_rh_p12_rn_l1",
+            "gripper_l_rh_p12_rn_l2",
+            "gripper_r_rh_p12_rn_base",
+            "gripper_r_rh_p12_rn_r1",
+            "gripper_r_rh_p12_rn_r2",
+            "gripper_r_rh_p12_rn_l1",
+            "gripper_r_rh_p12_rn_l2"
+          ]
+        },
         "start": [
           0.0,
           -0.02857562154531479,

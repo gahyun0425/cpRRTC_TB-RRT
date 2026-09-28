@@ -81,6 +81,19 @@ namespace AORRTC {
         robots::CollisionTraits<robots::G1>::transform_slots == collision::G1_TRANSFORM_SLOTS,
         "G1 transform slot count differs from the generated collision code"
     );
+    static_assert(
+        robots::CollisionTraits<robots::IgrisC>::batch_size ==
+            collision::IGRIS_C_COLLISION_BATCH_SIZE &&
+        robots::CollisionTraits<robots::IgrisC>::fine_sphere_count ==
+            collision::IGRIS_C_SPHERE_COUNT &&
+        robots::CollisionTraits<robots::IgrisC>::approximate_sphere_count ==
+            collision::IGRIS_C_APPROX_SPHERE_COUNT &&
+        robots::CollisionTraits<robots::IgrisC>::joint_flag_stride ==
+            collision::IGRIS_C_JOINT_FLAG_STRIDE &&
+        robots::CollisionTraits<robots::IgrisC>::transform_slots ==
+            collision::IGRIS_C_TRANSFORM_SLOTS,
+        "IGRIS-C collision traits differ from the generated collision code"
+    );
     __device__ volatile int solved = 0;
     __device__ volatile int atomic_free_index[2]; // separate for tree_a and tree_b
     __device__ volatile int nodes_size[2];
@@ -170,6 +183,31 @@ namespace AORRTC {
         static constexpr int basis_size = collision::G1_TANGENT_BASIS_SIZE;
     };
 
+    template <>
+    struct TangentSpaceTraits<robots::IgrisC> {
+        static constexpr bool enabled = true;
+        static constexpr int max_tangent_dim = collision::IGRIS_C_TANGENT_DIM;
+        static constexpr int basis_size = collision::IGRIS_C_TANGENT_BASIS_SIZE;
+    };
+
+    template <>
+    struct TangentSpaceTraits<robots::FrankaSingle> {
+        static constexpr bool enabled = true;
+        static constexpr int max_tangent_dim =
+            collision::FRANKA_SINGLE_MAX_TANGENT_DIM;
+        static constexpr int basis_size =
+            collision::FRANKA_SINGLE_TANGENT_BASIS_SIZE;
+    };
+
+    template <>
+    struct TangentSpaceTraits<robots::Franka> {
+        static constexpr bool enabled = true;
+        static constexpr int max_tangent_dim =
+            collision::FRANKA_DUAL_MAX_TANGENT_DIM;
+        static constexpr int basis_size =
+            collision::FRANKA_DUAL_TANGENT_BASIS_SIZE;
+    };
+
     template <typename Robot>
     __device__ __forceinline__ int cprrtc_active_tangent_dim() {
         if constexpr (std::is_same_v<Robot, robots::FfwSg2>) {
@@ -177,7 +215,13 @@ namespace AORRTC {
         } else if constexpr (std::is_same_v<Robot, robots::FfwSg2Mobility>) {
             return FFW_SG2_MOBILITY_TANGENT_DIM;
         } else if constexpr (std::is_same_v<Robot, robots::G1>) {
-            return collision::G1_TANGENT_DIM;
+            return collision::g1_tangent_dim(d_settings.rigid_orientation);
+        } else if constexpr (std::is_same_v<Robot, robots::IgrisC>) {
+            return collision::IGRIS_C_TANGENT_DIM;
+        } else if constexpr (std::is_same_v<Robot, robots::FrankaSingle>) {
+            return d_settings.rigid_orientation ? 5 : 7;
+        } else if constexpr (std::is_same_v<Robot, robots::Franka>) {
+            return d_settings.rigid_orientation ? 6 : 8;
         }
         return 0;
     }
@@ -395,7 +439,8 @@ namespace AORRTC {
             149.f, 151.f
         };
         constexpr int shuffle_count =
-            std::is_same_v<Robot, robots::G1>
+            (std::is_same_v<Robot, robots::G1> ||
+             std::is_same_v<Robot, robots::IgrisC>)
                 ? Robot::dimension
                 : 16;
         constexpr int prime_count =
@@ -455,7 +500,11 @@ namespace AORRTC {
     }
 
     // RNG state를 GPU thread들이 병렬로 초기화 (global)
-    __global__ void init_rng(curandState* states, unsigned long seed, int num_rng_states) {
+    __global__ void init_rng(
+        curandState* states,
+        unsigned long long seed,
+        int num_rng_states
+    ) {
         int idx = blockIdx.x * blockDim.x + threadIdx.x;
         if (idx >= num_rng_states) return;
         curand_init(seed + idx, idx, 0, &states[idx]);
@@ -834,6 +883,7 @@ namespace AORRTC {
             motion_segment_next,
             d_settings.granularity,
             d_settings.g1_constraints,
+            d_settings.rigid_orientation,
             projection_valid,
             projection_prog,
             projection_success,
@@ -841,6 +891,140 @@ namespace AORRTC {
             d_settings.projection_alpha,
             d_settings.beta,
             d_settings.gamma,
+            d_settings.projection_damping,
+            d_settings.projection_task_tolerance,
+            d_settings.projection_smoothness_threshold,
+            d_settings.projection_smoothness_weight,
+            d_settings.projection_smoothness,
+            d_settings.projection_max_step,
+            tid
+        );
+    }
+
+    template <>
+    __device__ __forceinline__ bool cprrtc_project_motion<ppln::robots::IgrisC>(
+        volatile const float *q_start,
+        volatile const float *q_step,
+        volatile float *motion_segment,
+        volatile float *motion_segment_next,
+        volatile unsigned char *projection_valid,
+        volatile int *projection_prog,
+        volatile unsigned int *projection_success,
+        int tid
+    ) {
+        static constexpr int dim = ppln::robots::IgrisC::dimension;
+        const int waypoint = tid / 4 + 1;
+        const int lane = tid % 4;
+
+        if (tid < dim) {
+            motion_segment[tid] = q_start[tid];
+        }
+        if (waypoint <= d_settings.granularity) {
+            for (int joint = lane; joint < dim; joint += 4) {
+                motion_segment[waypoint * dim + joint] =
+                    q_start[joint] + static_cast<float>(waypoint) * q_step[joint];
+            }
+        }
+        __syncthreads();
+
+        return ppln::collision::igris_c_project_motion(
+            motion_segment,
+            motion_segment_next,
+            d_settings.granularity,
+            d_settings.igris_c_constraints,
+            projection_valid,
+            projection_prog,
+            projection_success,
+            d_settings.projection_max_iters,
+            d_settings.projection_alpha,
+            d_settings.beta,
+            d_settings.gamma,
+            d_settings.projection_damping,
+            d_settings.projection_task_tolerance,
+            d_settings.projection_smoothness_threshold,
+            d_settings.projection_smoothness_weight,
+            d_settings.projection_smoothness,
+            d_settings.projection_max_step,
+            tid
+        );
+    }
+
+    template <>
+    __device__ __forceinline__ bool cprrtc_project_motion<ppln::robots::FrankaSingle>(
+        volatile const float *q_start,
+        volatile const float *q_step,
+        volatile float *motion_segment,
+        volatile float *motion_segment_next,
+        volatile unsigned char *projection_valid,
+        volatile int *projection_prog,
+        volatile unsigned int *projection_success,
+        int tid
+    ) {
+        constexpr int dim = ppln::robots::FrankaSingle::dimension;
+        const int waypoint = tid / 4 + 1;
+        const int lane = tid % 4;
+        if (tid < dim) motion_segment[tid] = q_start[tid];
+        if (waypoint <= d_settings.granularity) {
+            for (int joint = lane; joint < dim; joint += 4) {
+                motion_segment[waypoint * dim + joint] =
+                    q_start[joint] + static_cast<float>(waypoint) * q_step[joint];
+            }
+        }
+        __syncthreads();
+        return ppln::collision::franka_single_project_motion(
+            motion_segment,
+            motion_segment_next,
+            d_settings.granularity,
+            d_settings.franka_constraints,
+            d_settings.rigid_orientation,
+            projection_valid,
+            projection_prog,
+            projection_success,
+            d_settings.projection_max_iters,
+            d_settings.projection_alpha,
+            d_settings.projection_damping,
+            d_settings.projection_task_tolerance,
+            d_settings.projection_smoothness_threshold,
+            d_settings.projection_smoothness_weight,
+            d_settings.projection_smoothness,
+            d_settings.projection_max_step,
+            tid
+        );
+    }
+
+    template <>
+    __device__ __forceinline__ bool cprrtc_project_motion<ppln::robots::Franka>(
+        volatile const float *q_start,
+        volatile const float *q_step,
+        volatile float *motion_segment,
+        volatile float *motion_segment_next,
+        volatile unsigned char *projection_valid,
+        volatile int *projection_prog,
+        volatile unsigned int *projection_success,
+        int tid
+    ) {
+        constexpr int dim = ppln::robots::Franka::dimension;
+        const int waypoint = tid / 4 + 1;
+        const int lane = tid % 4;
+        if (tid < dim) motion_segment[tid] = q_start[tid];
+        if (waypoint <= d_settings.granularity) {
+            for (int joint = lane; joint < dim; joint += 4) {
+                motion_segment[waypoint * dim + joint] =
+                    q_start[joint] + static_cast<float>(waypoint) * q_step[joint];
+            }
+        }
+        __syncthreads();
+        return ppln::collision::franka_dual_project_motion(
+            motion_segment,
+            motion_segment_next,
+            d_settings.granularity,
+            d_settings.franka_constraints,
+            d_settings.rigid_orientation,
+            projection_valid,
+            projection_prog,
+            projection_success,
+            d_settings.projection_max_iters,
+            d_settings.projection_alpha,
             d_settings.projection_damping,
             d_settings.projection_task_tolerance,
             d_settings.projection_smoothness_threshold,
@@ -882,6 +1066,27 @@ namespace AORRTC {
                 basis_ok = ppln::collision::g1_tangent_basis(
                     q,
                     d_settings.g1_constraints,
+                    d_settings.rigid_orientation,
+                    basis
+                );
+            } else if constexpr (std::is_same_v<Robot, robots::IgrisC>) {
+                basis_ok = ppln::collision::igris_c_tangent_basis(
+                    q,
+                    d_settings.igris_c_constraints,
+                    basis
+                );
+            } else if constexpr (std::is_same_v<Robot, robots::FrankaSingle>) {
+                basis_ok = ppln::collision::franka_single_tangent_basis(
+                    q,
+                    d_settings.franka_constraints,
+                    d_settings.rigid_orientation,
+                    basis
+                );
+            } else if constexpr (std::is_same_v<Robot, robots::Franka>) {
+                basis_ok = ppln::collision::franka_dual_tangent_basis(
+                    q,
+                    d_settings.franka_constraints,
+                    d_settings.rigid_orientation,
                     basis
                 );
             }
@@ -903,6 +1108,8 @@ namespace AORRTC {
     __device__ __forceinline__ void cprrtc_sample_tangent_config(
         float *tree_nodes,
         float *ts_bases,
+        const int *ts_root_node_indices,
+        const int *ts_parent_ids,
         int ts_root_node_idx,
         int selected_ts_id,
         float *ts_coeff,
@@ -937,6 +1144,57 @@ namespace AORRTC {
                 }
 
                 ts_tangent_dir[tid] = dir;
+            }
+
+            __syncthreads();
+
+            // PATACON/TB-RRT Section 3.5.1: for a non-root tangent
+            // space, keep samples in the half-space that points away from
+            // the parent tangent-space root.
+            if (tid == 0) {
+                bool flip_direction = false;
+
+                if (d_settings.prevent_ts_backtracking
+                    && selected_ts_id >= 0
+                    && selected_ts_id < d_settings.max_tangent_spaces) {
+                    const int parent_ts_id = ts_parent_ids[selected_ts_id];
+
+                    if (parent_ts_id >= 0
+                        && parent_ts_id < d_settings.max_tangent_spaces) {
+                        const int parent_root_idx =
+                            ts_root_node_indices[parent_ts_id];
+
+                        // A chart can be reserved by another block before all
+                        // of its metadata is published.  Never turn the -1
+                        // sentinel into tree_nodes[-dim].
+                        if (parent_root_idx >= 0
+                            && parent_root_idx < d_settings.max_samples) {
+                            const float *parent_q =
+                                &tree_nodes[parent_root_idx * dim];
+                            float direction_dot = 0.0f;
+
+                            for (int joint = 0; joint < dim; joint++) {
+                                direction_dot +=
+                                    ts_tangent_dir[joint] *
+                                    (base_q[joint] - parent_q[joint]);
+                            }
+                            flip_direction = direction_dot < 0.0f;
+                        }
+                    }
+                }
+
+                sdata[0] = flip_direction ? 1.0f : 0.0f;
+            }
+
+            __syncthreads();
+
+            if (tid < dim) {
+                float dir = ts_tangent_dir[tid];
+
+                if (sdata[0] != 0.0f) {
+                    dir = -dir;
+                    ts_tangent_dir[tid] = dir;
+                }
 
                 // joint limit 안에서 최대 이동 가능 거리 계산
                 const float lo = Robot::get_s_a(tid); // 해당 차원의 최솟값
@@ -1010,7 +1268,22 @@ namespace AORRTC {
         } else if constexpr (std::is_same_v<Robot, robots::G1>) {
             return ppln::collision::g1_equality_residual_norm(
                 q,
-                d_settings.g1_constraints
+                d_settings.g1_constraints,
+                d_settings.rigid_orientation
+            );
+        } else if constexpr (std::is_same_v<Robot, robots::IgrisC>) {
+            return ppln::collision::igris_c_equality_residual_norm(
+                q,
+                d_settings.igris_c_constraints
+            );
+        } else if constexpr (
+            std::is_same_v<Robot, robots::FrankaSingle> ||
+            std::is_same_v<Robot, robots::Franka>
+        ) {
+            return ppln::collision::franka_constraint_error_norm<Robot>(
+                q,
+                d_settings.franka_constraints,
+                d_settings.rigid_orientation
             );
         }
 
@@ -1021,6 +1294,7 @@ namespace AORRTC {
     __global__ void init_root_ts_banks(
         float **nodes,
         int **ts_root_node_idx,
+        int **ts_parent_id,
         float **ts_bases,
         int **ts_ready,
         int **node_ts_id,
@@ -1050,6 +1324,8 @@ namespace AORRTC {
 
                 // 이 TS가 어느 tree node에서 만들어졌는지 저장
                 ts_root_node_idx[tree][ts_idx] =node_idx;
+                // Start/goal root tangent spaces have no parent chart.
+                ts_parent_id[tree][ts_idx] = -1;
 
                 // root q에서 tangent basis 계산
                 const bool basis_ok =cprrtc_store_tangent_basis<Robot>(&nodes[tree][node_idx * Robot::dimension],ts_bases[tree],ts_idx);
@@ -1229,6 +1505,28 @@ namespace AORRTC {
         int tid,
         volatile unsigned int *motion_cc_flag
     ) {
+        if constexpr (
+            std::is_same_v<Robot, ppln::robots::FrankaSingle> ||
+            std::is_same_v<Robot, ppln::robots::Franka>
+        ) {
+            return ppln::collision::franka_attached_object_env_collision_check<Robot>(
+                q, env, tid
+            );
+        }
+        if constexpr (std::is_same_v<Robot, ppln::robots::FfwSg2>) {
+            return ppln::collision::ffw_sg2_attached_object_collision_check_approx(
+                q,
+                sphere_pos_approx,
+                env,
+                tid,
+                motion_cc_flag
+            );
+        }
+        if constexpr (std::is_same_v<Robot, ppln::robots::G1>) {
+            return ppln::collision::g1_attached_object_collision_check_approx(
+                q, env, tid
+            );
+        }
         return true;
     }
 
@@ -1259,6 +1557,28 @@ namespace AORRTC {
         int tid,
         volatile unsigned int *motion_cc_flag
     ) {
+        if constexpr (
+            std::is_same_v<Robot, ppln::robots::FrankaSingle> ||
+            std::is_same_v<Robot, ppln::robots::Franka>
+        ) {
+            return ppln::collision::franka_attached_object_env_collision_check<Robot>(
+                q, env, tid
+            );
+        }
+        if constexpr (std::is_same_v<Robot, ppln::robots::FfwSg2>) {
+            return ppln::collision::ffw_sg2_attached_object_collision_check(
+                q,
+                sphere_pos,
+                env,
+                tid,
+                motion_cc_flag
+            );
+        }
+        if constexpr (std::is_same_v<Robot, ppln::robots::G1>) {
+            return ppln::collision::g1_attached_object_collision_check(
+                q, sphere_pos, env, tid
+            );
+        }
         return true;
     }
 
@@ -1857,6 +2177,7 @@ namespace AORRTC {
         // Tangent Space Bank
         int *ts_count,
         int **ts_root_node_idx,
+        int **ts_parent_id,
         float **ts_bases,
         int **ts_ready,
         int **ts_node_count,
@@ -1892,6 +2213,7 @@ namespace AORRTC {
         __shared__ int *t_node_ts_id;
         __shared__ float *t_node_ts_q;
         __shared__ int *t_ts_root_node_idx;
+        __shared__ int *t_ts_parent_id;
         __shared__ float *t_ts_bases;
         __shared__ int *t_ts_ready;
         __shared__ int *t_ts_node_count;
@@ -2144,6 +2466,7 @@ namespace AORRTC {
                     t_node_ts_q =node_ts_q[t_tree_id];
                     // 현재 확장할 tree의 TSBank
                     t_ts_root_node_idx =ts_root_node_idx[t_tree_id];
+                    t_ts_parent_id =ts_parent_id[t_tree_id];
                     t_ts_bases =ts_bases[t_tree_id];
                     t_ts_ready =ts_ready[t_tree_id];
                     t_ts_node_count =ts_node_count[t_tree_id];
@@ -2179,8 +2502,17 @@ namespace AORRTC {
 
                             // 완전히 생성된 TS만 사용
                             if (t_ts_ready[candidate_ts] != 0) {
+                                const int candidate_root_idx =
+                                    t_ts_root_node_idx[candidate_ts];
+
+                                if (candidate_root_idx < 0
+                                    || candidate_root_idx >= t_tree_size
+                                    || t_node_ready[candidate_root_idx] == 0) {
+                                    continue;
+                                }
+
                                 selected_ts_id =candidate_ts;
-                                selected_ts_root_idx =t_ts_root_node_idx[candidate_ts];
+                                selected_ts_root_idx =candidate_root_idx;
 
                                 break;
                             }
@@ -2208,7 +2540,9 @@ namespace AORRTC {
                     }
 
                     // 4. 그 방향으로 얼마나 갈지
-                    ts_alpha_fraction =halton_sample[active_tangent_dim];
+                    ts_alpha_fraction = active_tangent_dim < dim
+                        ? halton_sample[active_tangent_dim]
+                        : curand_uniform(&rng_states[bid]);
                 }
 
                 // 다른 Robot은 기존 ambient sampling 그대로
@@ -2271,6 +2605,8 @@ namespace AORRTC {
                 cprrtc_sample_tangent_config<Robot>(
                     t_nodes, 
                     t_ts_bases, // node별 basis가 아니라 TSBank
+                    t_ts_root_node_idx,
+                    t_ts_parent_id,
                     selected_ts_root_idx, // 선택한 TS root
                     selected_ts_id, // 선택한 TS ID
                     ts_coeff,
@@ -2985,6 +3321,9 @@ namespace AORRTC {
                                     new_ts_basis_ok =cprrtc_store_tangent_basis<Robot>(&t_nodes[index * dim],t_ts_bases,new_ts_id);
 
                                     if (new_ts_basis_ok) {
+                                        // Record the chart ancestry used by
+                                        // PATACON's forward half-space rule.
+                                        t_ts_parent_id[new_ts_id] =selected_ts_id;
                                         // 이 node는 기존 TS가 아니라 새 TS의 root가 된다.
                                         t_node_ts_id[index] =new_ts_id;
                                     }
@@ -3098,7 +3437,9 @@ namespace AORRTC {
             } // edge 검사 완료
 
             // ConCon validation 전체가 끝난 뒤 CONNECT 여부 결정
-            if (concon_valid_count > 0 && concon_valid_count == extend_edge_count) { // concon edge가 모두 성공했는지 확인. (성공한 edge가 최소 하나 이상 && 계획했던 모든 edge가 성공)
+            // A non-empty valid prefix is enough to attempt CONNECT from the
+            // last EXTEND node that was actually inserted into the tree.
+            if (concon_valid_count > 0) {
                 // connect
                 local_min_dist = FLT_MAX;
                 local_near_idx = 0;
@@ -3760,6 +4101,7 @@ namespace AORRTC {
                                             );
 
                                         if (new_ts_basis_ok) {
+                                            t_ts_parent_id[new_ts_id] =selected_ts_id;
                                             t_node_ts_id[index] =new_ts_id;
                                         }
                                         else {
@@ -4366,6 +4708,20 @@ namespace AORRTC {
         // AORRTC owns independent device symbols in this translation unit.
         reset_device_variables();
         cudaMemcpyToSymbol(d_settings, &settings, sizeof(settings));
+        if constexpr (std::is_same_v<Robot, robots::G1>) {
+            cudaMemcpyToSymbol(
+                ppln::collision::g1_attached_object_collision,
+                &settings.g1_constraints.attached_object_collision,
+                sizeof(settings.g1_constraints.attached_object_collision)
+            );
+        }
+        if constexpr (std::is_same_v<Robot, robots::FfwSg2>) {
+            cudaMemcpyToSymbol(
+                ppln::collision::ffw_sg2_mobility_attached_object_collision,
+                &settings.ffw_sg2_attached_object_collision,
+                sizeof(settings.ffw_sg2_attached_object_collision)
+            );
+        }
         if constexpr (std::is_same_v<Robot, robots::FfwSg2Mobility>) {
             cudaMemcpyToSymbol(
                 ppln::collision::ffw_sg2_mobility_attached_object_collision,
@@ -4383,6 +4739,7 @@ namespace AORRTC {
         int *node_ts_id[2] = {nullptr, nullptr};
         float *node_ts_q[2] = {nullptr, nullptr};
         int *ts_root_node_idx[2] = {nullptr, nullptr};
+        int *ts_parent_id[2] = {nullptr, nullptr};
         float *ts_bases[2] = {nullptr, nullptr};
         int *ts_ready[2] = {nullptr, nullptr};
         int *ts_node_count[2] = {nullptr, nullptr};
@@ -4397,6 +4754,7 @@ namespace AORRTC {
         int **d_node_ts_id = nullptr;
         float **d_node_ts_q = nullptr;
         int **d_ts_root_node_idx = nullptr;
+        int **d_ts_parent_id = nullptr;
         float **d_ts_bases = nullptr;
         int **d_ts_ready = nullptr;
         int **d_ts_node_count = nullptr;
@@ -4412,6 +4770,7 @@ namespace AORRTC {
         cudaMalloc(&d_node_ts_id, 2 * sizeof(int *));
         cudaMalloc(&d_node_ts_q, 2 * sizeof(float *));
         cudaMalloc(&d_ts_root_node_idx, 2 * sizeof(int *));
+        cudaMalloc(&d_ts_parent_id, 2 * sizeof(int *));
         cudaMalloc(&d_ts_bases, 2 * sizeof(float *));
         cudaMalloc(&d_ts_ready, 2 * sizeof(int *));
         cudaMalloc(&d_ts_node_count, 2 * sizeof(int *));
@@ -4452,6 +4811,8 @@ namespace AORRTC {
                     * sizeof(int);
 
                 cudaMalloc(&ts_bases[tree], basis_bytes);
+                cudaMalloc(&ts_parent_id[tree], ts_count_bytes);
+                cudaMemset(ts_parent_id[tree], 0xff, ts_count_bytes);
                 cudaMalloc(&ts_node_count[tree], ts_count_bytes);
                 cudaMalloc(&ts_lane_head[tree], lane_bytes);
                 cudaMalloc(
@@ -4491,6 +4852,12 @@ namespace AORRTC {
         cudaMemcpy(
             d_ts_root_node_idx,
             ts_root_node_idx,
+            2 * sizeof(int *),
+            cudaMemcpyHostToDevice
+        );
+        cudaMemcpy(
+            d_ts_parent_id,
+            ts_parent_id,
             2 * sizeof(int *),
             cudaMemcpyHostToDevice
         );
@@ -4562,7 +4929,7 @@ namespace AORRTC {
             (num_rng_states + BLOCK_SIZE - 1) / BLOCK_SIZE;
         init_rng<<<rng_blocks, BLOCK_SIZE>>>(
             rng_states,
-            1,
+            settings.random_seed,
             num_rng_states
         );
 
@@ -4760,6 +5127,7 @@ namespace AORRTC {
                 init_root_ts_banks<Robot><<<1 + num_goals, 1>>>(
                     d_nodes,
                     d_ts_root_node_idx,
+                    d_ts_parent_id,
                     d_ts_bases,
                     d_ts_ready,
                     d_node_ts_id,
@@ -4822,6 +5190,7 @@ namespace AORRTC {
                         d_node_ts_q,
                         ts_count,
                         d_ts_root_node_idx,
+                        d_ts_parent_id,
                         d_ts_bases,
                         d_ts_ready,
                         d_ts_node_count,
@@ -4849,6 +5218,7 @@ namespace AORRTC {
                         d_node_ts_q,
                         ts_count,
                         d_ts_root_node_idx,
+                        d_ts_parent_id,
                         d_ts_bases,
                         d_ts_ready,
                         d_ts_node_count,
@@ -5090,6 +5460,9 @@ namespace AORRTC {
             cudaFree(node_ts_id[tree]);
             cudaFree(node_ts_q[tree]);
             cudaFree(ts_root_node_idx[tree]);
+            if (ts_parent_id[tree] != nullptr) {
+                cudaFree(ts_parent_id[tree]);
+            }
             cudaFree(ts_ready[tree]);
             if (ts_bases[tree] != nullptr) {
                 cudaFree(ts_bases[tree]);
@@ -5117,6 +5490,7 @@ namespace AORRTC {
         cudaFree(d_node_ts_q);
         cudaFree(ts_count);
         cudaFree(d_ts_root_node_idx);
+        cudaFree(d_ts_parent_id);
         cudaFree(d_ts_bases);
         cudaFree(d_ts_ready);
         cudaFree(d_ts_node_count);
@@ -5130,11 +5504,14 @@ namespace AORRTC {
     }
 
     template AORRTCResult<ppln::robots::Panda> solve<ppln::robots::Panda>(std::array<float, 7>&, std::vector<std::array<float, 7>>&, ppln::collision::Environment<float>&, AORRTC_settings&);
+    template AORRTCResult<ppln::robots::FrankaSingle> solve<ppln::robots::FrankaSingle>(std::array<float, 7>&, std::vector<std::array<float, 7>>&, ppln::collision::Environment<float>&, AORRTC_settings&);
+    template AORRTCResult<ppln::robots::Franka> solve<ppln::robots::Franka>(std::array<float, 14>&, std::vector<std::array<float, 14>>&, ppln::collision::Environment<float>&, AORRTC_settings&);
     template AORRTCResult<ppln::robots::Fetch> solve<ppln::robots::Fetch>(std::array<float, 8>&, std::vector<std::array<float, 8>>&, ppln::collision::Environment<float>&, AORRTC_settings&);
     template AORRTCResult<ppln::robots::Baxter> solve<ppln::robots::Baxter>(std::array<float, 14>&, std::vector<std::array<float, 14>>&, ppln::collision::Environment<float>&, AORRTC_settings&);
     template AORRTCResult<ppln::robots::FfwSg2> solve<ppln::robots::FfwSg2>(std::array<float, 15>&, std::vector<std::array<float, 15>>&, ppln::collision::Environment<float>&, AORRTC_settings&);
     template AORRTCResult<ppln::robots::FfwSg2Mobility> solve<ppln::robots::FfwSg2Mobility>(std::array<float, 18>&, std::vector<std::array<float, 18>>&, ppln::collision::Environment<float>&, AORRTC_settings&);
     template AORRTCResult<ppln::robots::FfwSg2Single> solve<ppln::robots::FfwSg2Single>(std::array<float, 8>&, std::vector<std::array<float, 8>>&, ppln::collision::Environment<float>&, AORRTC_settings&);
     template AORRTCResult<ppln::robots::G1> solve<ppln::robots::G1>(std::array<float, 35>&, std::vector<std::array<float, 35>>&, ppln::collision::Environment<float>&, AORRTC_settings&);
+    template AORRTCResult<ppln::robots::IgrisC> solve<ppln::robots::IgrisC>(std::array<float, 35>&, std::vector<std::array<float, 35>>&, ppln::collision::Environment<float>&, AORRTC_settings&);
 
 }

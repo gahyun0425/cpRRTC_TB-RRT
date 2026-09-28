@@ -254,14 +254,19 @@ inline json settings_to_json(const pRRTC_settings &settings) {
         {"num_new_configs", settings.num_new_configs},
         {"granularity", settings.granularity},
         {"range", settings.range},
+        {"random_seed", settings.random_seed},
         {"lift_distance_weight", settings.lift_distance_weight},
+        {"rigid_orientation", settings.rigid_orientation},
+        {"g1_support_margin_m", settings.g1_constraints.support_margin_m},
         {"ffw_sg2_enable_com_constraint", settings.ffw_sg2_enable_com_constraint},
         {"ffw_sg2_support_margin_m", settings.ffw_sg2_support_margin_m},
         {"ffw_sg2_object_mass_kg", settings.ffw_sg2_object_mass_kg},
         {"balance", settings.balance},
         {"tree_ratio", settings.tree_ratio},
         {"dynamic_domain", settings.dynamic_domain},
+        {"prevent_ts_backtracking", settings.prevent_ts_backtracking},
         {"trace_trees", settings.trace_trees},
+        {"collect_diagnostics", settings.collect_diagnostics},
         {"dd_alpha", settings.dd_alpha},
         {"dd_radius", settings.dd_radius},
         {"dd_min_radius", settings.dd_min_radius},
@@ -316,7 +321,97 @@ inline json settings_to_json(const pRRTC_settings &settings) {
         );
     }
     output["ffw_sg2_attached_object_collision"] = attached_object_json;
+    const auto &g1_object =
+        settings.g1_constraints.attached_object_collision;
+    json g1_object_json = {
+        {"enabled", g1_object.enabled},
+        {"sphere_count", g1_object.sphere_count},
+        {
+            "left_hand_center_offset",
+            {
+                g1_object.left_hand_center_offset[0],
+                g1_object.left_hand_center_offset[1],
+                g1_object.left_hand_center_offset[2],
+            }
+        },
+        {
+            "ignored_robot_sphere_count",
+            g1_object.ignored_robot_sphere_count
+        },
+    };
+    g1_object_json["spheres"] = json::array();
+    for (int i = 0; i < g1_object.sphere_count; ++i) {
+        g1_object_json["spheres"].push_back({
+            g1_object.spheres[i][0],
+            g1_object.spheres[i][1],
+            g1_object.spheres[i][2],
+            g1_object.spheres[i][3],
+        });
+    }
+    g1_object_json["ignored_robot_spheres"] = json::array();
+    for (int i = 0; i < g1_object.ignored_robot_sphere_count; ++i) {
+        g1_object_json["ignored_robot_spheres"].push_back(
+            g1_object.ignored_robot_spheres[i]
+        );
+    }
+    output["g1_attached_object_collision"] = g1_object_json;
     return output;
+}
+
+inline json diagnostics_to_json(const PlannerDiagnostics &diagnostics) {
+    return {
+        {
+            "tangent_space_count",
+            {
+                {"start", diagnostics.tangent_space_count[0]},
+                {"goal", diagnostics.tangent_space_count[1]},
+                {
+                    "total",
+                    diagnostics.tangent_space_count[0] +
+                        diagnostics.tangent_space_count[1]
+                },
+            }
+        },
+        {"extend_attempts", diagnostics.extend_attempts},
+        {
+            "extend_backtracking_flips",
+            diagnostics.extend_backtracking_flips
+        },
+        {"extend_em_stops", diagnostics.extend_em_stops},
+        {
+            "extend_anchor_projection_stops",
+            diagnostics.extend_anchor_projection_stops
+        },
+        {
+            "extend_edge_projection_stops",
+            diagnostics.extend_edge_projection_stops
+        },
+        {"extend_collision_stops", diagnostics.extend_collision_stops},
+        {"extend_full_successes", diagnostics.extend_full_successes},
+        {"connect_attempts", diagnostics.connect_attempts},
+        {"connect_chunks", diagnostics.connect_chunks},
+        {
+            "connect_invalid_tangent_spaces",
+            diagnostics.connect_invalid_tangent_spaces
+        },
+        {
+            "connect_tangent_direction_stops",
+            diagnostics.connect_tangent_direction_stops
+        },
+        {"connect_em_stops", diagnostics.connect_em_stops},
+        {
+            "connect_anchor_projection_stops",
+            diagnostics.connect_anchor_projection_stops
+        },
+        {
+            "connect_edge_projection_stops",
+            diagnostics.connect_edge_projection_stops
+        },
+        {"connect_progress_stops", diagnostics.connect_progress_stops},
+        {"connect_collision_stops", diagnostics.connect_collision_stops},
+        {"connect_successes", diagnostics.connect_successes},
+        {"connect_failures", diagnostics.connect_failures},
+    };
 }
 
 inline json settings_to_json(const AORRTC_settings &settings) {
@@ -416,6 +511,7 @@ json result_to_json(
         {"robot", robot_name},
         {"problem_name", problem_name},
         {"problem_idx", problem_index},
+        {"seed", settings.random_seed},
         {"dimension", Robot::dimension},
         {"joint_names", joint_names_for_robot(robot_name, Robot::dimension)},
         {"solved", result.solved},
@@ -439,6 +535,9 @@ json result_to_json(
     };
     if (!result.tree_nodes[0].empty() || !result.tree_nodes[1].empty()) {
         payload["tree_trace"] = tree_trace_to_json<Robot>(result);
+    }
+    if (settings.collect_diagnostics) {
+        payload["diagnostics"] = diagnostics_to_json(result.diagnostics);
     }
     return payload;
 }
@@ -473,6 +572,9 @@ json result_to_json(
     payload["planner"] = "AORRTC";
     payload["settings"] = settings_to_json(settings);
     payload["initial_cost"] = result.initial_cost;
+    payload["planning_ns"] = result.planning_ns;
+    payload["planning_sec"] =
+        static_cast<double>(result.planning_ns) / 1.0e9;
     payload["initial_solution_ns"] = result.initial_solution_ns;
     payload["initial_solution_sec"] =
         static_cast<double>(result.initial_solution_ns) / 1.0e9;

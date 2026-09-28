@@ -2273,7 +2273,7 @@ __device__ __forceinline__ bool ffw_sg2_mobility_com_project_motion(
         __syncthreads();
 
         if (projection_success[0] != 0 && return_when_success) {
-            return true;
+            break;
         }
 
         if (waypoint <= granularity && waypoint > projection_prog[0]) {
@@ -2292,7 +2292,17 @@ __device__ __forceinline__ bool ffw_sg2_mobility_com_project_motion(
         __syncthreads();
     }
 
-    return projection_success[0] != 0;
+    if (projection_success[0] == 0) {
+        return false;
+    }
+    if (tid == 0) {
+        projection_valid[0] =
+            planning::configuration_within_joint_limits<
+                robots::FfwSg2Mobility
+            >(&motion_segment[granularity * FFW_SG2_MOBILITY_DIM]);
+    }
+    __syncthreads();
+    return projection_valid[0] != 0;
 }
 
 } // namespace ppln::collision

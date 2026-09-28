@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Robots.hh"
+#include "src/robots/igris_c.cuh"
 
 namespace ppln::robots {
 
@@ -14,6 +15,26 @@ namespace ppln::robots {
         static constexpr int approximate_sphere_count = 11;
         static constexpr int joint_flag_stride = 20;
         static constexpr int transform_slots = 1;
+    };
+
+    template<>
+    struct CollisionTraits<FrankaSingle> {
+        static constexpr int batch_size = 16;
+        static constexpr int fine_sphere_count = 59;
+        static constexpr int approximate_sphere_count = 11;
+        static constexpr int joint_flag_stride = 20;
+        static constexpr int transform_slots = 1;
+    };
+
+    template<>
+    struct CollisionTraits<Franka> {
+        static constexpr int batch_size = 16;
+        static constexpr int fine_sphere_count = 118;
+        static constexpr int approximate_sphere_count = 22;
+        // Both identical arms share the legacy Panda link-flag slots.  A flag
+        // activates the corresponding link on both arms during refinement.
+        static constexpr int joint_flag_stride = 20;
+        static constexpr int transform_slots = 2;
     };
 
     template<>
@@ -66,6 +87,16 @@ namespace ppln::robots {
         static constexpr int batch_size = G1::resolution;
         static constexpr int fine_sphere_count = G1::n_spheres;
         static constexpr int approximate_sphere_count = 1;
+        static constexpr int joint_flag_stride = 1;
+        static constexpr int transform_slots = 1;
+    };
+
+    template<>
+    struct CollisionTraits<IgrisC> {
+        static constexpr int batch_size = IgrisC::resolution;
+        static constexpr int fine_sphere_count = IgrisC::n_spheres;
+        static constexpr int approximate_sphere_count =
+            IgrisC::n_approx_spheres;
         static constexpr int joint_flag_stride = 1;
         static constexpr int transform_slots = 1;
     };

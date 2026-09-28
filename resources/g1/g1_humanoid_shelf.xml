@@ -1,0 +1,33 @@
+<mujoco model="g1_humanoid_shelf">
+  <!--
+    The G1 source model and meshes live in the sibling VAMP checkout.
+    Paths are resolved relative to this file:
+      PATACON/resources/g1 -> gh_ws/vamp
+  -->
+  <include file="../../../../vamp/third_party/unitree_ros/robots/g1_description/g1_29dof.xml"/>
+
+  <compiler meshdir="../../../../vamp/third_party/unitree_ros/robots/g1_description/meshes"/>
+
+  <worldbody>
+    <geom name="shelf_0" type="box"
+          pos="0.45 0 0.4" size="0.1925 0.5 0.0075"
+          contype="0" conaffinity="1" density="0"
+          rgba="0.45 0.32 0.18 0.65"/>
+    <geom name="shelf_1" type="box"
+          pos="0.45 0 0.78" size="0.1925 0.5 0.0075"
+          contype="0" conaffinity="1" density="0"
+          rgba="0.45 0.32 0.18 0.65"/>
+    <geom name="shelf_2" type="box"
+          pos="0.45 0 1.2" size="0.1925 0.5 0.0075"
+          contype="0" conaffinity="1" density="0"
+          rgba="0.45 0.32 0.18 0.65"/>
+    <geom name="shelf_back" type="box"
+          pos="0.6 0 1.0" size="0.015 0.5 1.0"
+          contype="0" conaffinity="1" density="0"
+          rgba="0.45 0.32 0.18 0.65"/>
+    <geom name="obstacle" type="box"
+          pos="0 0.4 0.225" size="0.2 0.15 0.225"
+          contype="0" conaffinity="1" density="0"
+          rgba="0.85 0.20 0.15 0.65"/>
+  </worldbody>
+</mujoco>

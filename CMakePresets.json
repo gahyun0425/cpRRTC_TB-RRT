@@ -1,0 +1,35 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 21,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "patacon",
+      "displayName": "PATACON (build_patacon)",
+      "generator": "Unix Makefiles",
+      "binaryDir": "${sourceDir}/build_patacon"
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "patacon",
+      "configurePreset": "patacon",
+      "jobs": 2
+    },
+    {
+      "name": "patacon-single",
+      "configurePreset": "patacon",
+      "targets": ["single_mbm"],
+      "jobs": 2
+    },
+    {
+      "name": "patacon-evaluate",
+      "configurePreset": "patacon",
+      "targets": ["evaluate_mbm"],
+      "jobs": 2
+    }
+  ]
+}

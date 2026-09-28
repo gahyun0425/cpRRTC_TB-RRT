@@ -37,6 +37,7 @@ AORRTC-specific behavior is isolated in `src/planning/AORRTC.cu`:
 7. **CONNECT budget:** the opposite-tree target must leave enough total cost budget for a path strictly better than `c_max`.
 8. **Anytime restart:** the first solution of each fresh bounded search becomes the new best; the trees and Tangent-Space membership are cleared and a new search starts with the tighter bound. GPU allocations and RNG/Halton state are reused, but tree nodes are not reused.
 9. **Time budget:** the fresh-search loop continues until `--time` expires or `max_iters` is reached.
+10. **PATACON forward half-space:** every non-root Tangent Space records its parent chart. A sampled tangent direction that points back toward the parent root is flipped before joint-limit scaling. This rule is enabled automatically for AORRTC in the PATACON worktree.
 
 ## Path simplification
 

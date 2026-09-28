@@ -1,3 +1,6 @@
 [submodule "extern/vamp"]
 	path = extern/vamp
 	url = https://github.com/KavrakiLab/vamp.git
+[submodule "igris_c_description_public"]
+	path = igris_c_description_public
+	url = https://github.com/robrosinc/igris_c_description_public.git

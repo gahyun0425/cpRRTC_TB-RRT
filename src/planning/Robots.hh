@@ -64,6 +64,90 @@ namespace ppln::robots {
         }
     };
 
+    // Franka models imported from cptbrrt_pkg.  These intentionally remain
+    // separate robot types from the legacy Panda benchmark: the imported
+    // models use the official Franka joint limits and, for the dual model,
+    // two fixed arm mounts.
+    struct FrankaSingle
+    {
+        static constexpr auto name = "franka_single";
+        static constexpr auto dimension = 7;
+        using Configuration = std::array<float, dimension>;
+
+        __device__ static constexpr float get_s_m(int i) {
+            constexpr float values[] = {
+                5.7946f, 3.5256f, 5.7946f, 3.0020f,
+                5.7946f, 3.7700f, 5.7946f
+            };
+            return values[i];
+        }
+
+        __device__ static constexpr float get_s_a(int i) {
+            constexpr float values[] = {
+                -2.8973f, -1.7628f, -2.8973f, -3.0718f,
+                -2.8973f, -0.0175f, -2.8973f
+            };
+            return values[i];
+        }
+
+        template<size_t I = 0>
+        __device__ __forceinline__ static void scale_cfg_impl(float *q) {
+            if constexpr (I < dimension) {
+                q[I] = q[I] * get_s_m(I) + get_s_a(I);
+                scale_cfg_impl<I + 1>(q);
+            }
+        }
+
+        __device__ __forceinline__ static void scale_cfg(float *q) {
+            scale_cfg_impl(q);
+        }
+
+        inline static void print_robot_config(Configuration &cfg) {
+            for (float value : cfg) std::cout << value << ' ';
+            std::cout << '\n';
+        }
+    };
+
+    struct Franka
+    {
+        static constexpr auto name = "franka";
+        static constexpr auto dimension = 14;
+        using Configuration = std::array<float, dimension>;
+
+        __device__ static constexpr float get_s_m(int i) {
+            constexpr float values[] = {
+                5.7946f, 3.5256f, 5.7946f, 3.0020f,
+                5.7946f, 3.7700f, 5.7946f
+            };
+            return values[i % 7];
+        }
+
+        __device__ static constexpr float get_s_a(int i) {
+            constexpr float values[] = {
+                -2.8973f, -1.7628f, -2.8973f, -3.0718f,
+                -2.8973f, -0.0175f, -2.8973f
+            };
+            return values[i % 7];
+        }
+
+        template<size_t I = 0>
+        __device__ __forceinline__ static void scale_cfg_impl(float *q) {
+            if constexpr (I < dimension) {
+                q[I] = q[I] * get_s_m(I) + get_s_a(I);
+                scale_cfg_impl<I + 1>(q);
+            }
+        }
+
+        __device__ __forceinline__ static void scale_cfg(float *q) {
+            scale_cfg_impl(q);
+        }
+
+        inline static void print_robot_config(Configuration &cfg) {
+            for (float value : cfg) std::cout << value << ' ';
+            std::cout << '\n';
+        }
+    };
+
     struct Fetch
     {
         static constexpr auto name = "fetch";
@@ -442,7 +526,7 @@ namespace ppln::robots {
     {
         static constexpr auto name = "g1_unitree";
         static constexpr int dimension = 35;
-        static constexpr int n_spheres = 133;
+        static constexpr int n_spheres = 165;
         static constexpr float min_radius = 0.012152000330388546f;
         static constexpr float max_radius = 0.12820099294185638f;
         static constexpr int resolution = 16;

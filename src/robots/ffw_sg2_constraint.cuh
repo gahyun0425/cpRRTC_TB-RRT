@@ -1,5 +1,6 @@
 #pragma once
 
+#include "src/planning/JointLimits.cuh"
 #include "src/planning/Robots.hh"
 
 namespace ppln::collision {
@@ -1459,7 +1460,7 @@ namespace ppln::collision {
             __syncthreads();
 
             if (projection_success[0] != 0 && return_when_success) {
-                return true;
+                break;
             }
 
             if (
@@ -1474,7 +1475,17 @@ namespace ppln::collision {
             __syncthreads();
         }
 
-        return projection_success[0] != 0;
+        if (projection_success[0] == 0) {
+            return false;
+        }
+        if (tid == 0) {
+            projection_valid[0] =
+                planning::configuration_within_joint_limits<robots::FfwSg2>(
+                    &motion_segment[granularity * 15]
+                );
+        }
+        __syncthreads();
+        return projection_valid[0] != 0;
     }
 
 } // namespace ppln::collision

@@ -8,7 +8,10 @@
 namespace ppln::collision {
 
 constexpr int G1_DIM = 35;
-constexpr int G1_SPHERE_COUNT = 133;
+constexpr int G1_BASE_SPHERE_COUNT = 133;
+constexpr int G1_HAND_SPHERES_PER_HAND = 16;
+constexpr int G1_HAND_SPHERE_COUNT = 2 * G1_HAND_SPHERES_PER_HAND;
+constexpr int G1_SPHERE_COUNT = G1_BASE_SPHERE_COUNT + G1_HAND_SPHERE_COUNT;
 constexpr int G1_BATCH_SIZE = 16;
 constexpr int G1_APPROX_SPHERE_COUNT = 1;
 constexpr int G1_JOINT_FLAG_STRIDE = 1;
@@ -32,8 +35,68 @@ __device__ __constant__ float g1_sphere_radii[G1_SPHERE_COUNT] = {
     0.0291080009192228f, 0.0277960002422333f, 0.0285909995436668f, 0.0221200007945299f, 0.0222689993679523f, 0.0230129994452f, 0.0218640007078648f, 0.0221950002014637f,
     0.0215680003166199f, 0.020116999745369f, 0.0218819994479418f, 0.0354419983923435f, 0.0358939990401268f, 0.0359739996492863f, 0.0144180003553629f, 0.0141949998214841f,
     0.0134439999237657f, 0.015769999474287f, 0.0136599997058511f, 0.0135730002075434f, 0.013926999643445f, 0.0322670005261898f, 0.035946000367403f, 0.0346920005977154f,
-    0.0331490002572536f, 0.0357390008866787f, 0.0336529985070229f, 0.0378089994192123f, 0.030902000144124f,
+    0.0331490002572536f, 0.0357390008866787f, 0.0336529985070229f, 0.0378089994192123f, 0.030902000144124f, 0.02931885f, 0.02799455f, 0.02470695f,
+    0.02478403f, 0.02615127f, 0.02779738f, 0.02628334f, 0.02594034f, 0.02387999f, 0.0285087f, 0.02382529f,
+    0.02598777f, 0.02726159f, 0.02451706f, 0.02588009f, 0.02586787f, 0.02931885f, 0.02799455f, 0.02470695f,
+    0.02478403f, 0.02615127f, 0.02779738f, 0.02628334f, 0.02594034f, 0.02387999f, 0.0285087f, 0.02382529f,
+    0.02598777f, 0.02726159f, 0.02451706f, 0.02588009f, 0.02586787f,
 };
+
+// Local [x, y, z, radius] in the left rubber-hand frame.  The right-hand
+// centers use the same table with Y negated.
+__device__ __constant__ float
+g1_hand_collision_spheres[G1_HAND_SPHERES_PER_HAND][4] = {
+    {0.12226864f, -0.03011716f, 0.01868166f, 0.02931885f},
+    {0.09663538f, -0.00758845f, 0.02718773f, 0.02799455f},
+    {0.05331516f, 0.00350596f, -0.00436968f, 0.02470695f},
+    {0.05910708f, -0.00107804f, -0.02724501f, 0.02478403f},
+    {0.10652422f, -0.00932616f, -0.00106243f, 0.02615127f},
+    {0.01030900f, -0.00082258f, 0.01180645f, 0.02779738f},
+    {0.06198332f, 0.00022062f, 0.01865049f, 0.02628334f},
+    {0.03230769f, 0.00719398f, 0.00238796f, 0.02594034f},
+    {0.07663987f, -0.01592605f, 0.05459807f, 0.02387999f},
+    {0.11677683f, -0.02764390f, -0.02561341f, 0.02850870f},
+    {0.05344048f, -0.00345635f, 0.04005556f, 0.02382529f},
+    {0.03220964f, -0.00078795f, 0.02467711f, 0.02598777f},
+    {0.01101009f, 0.00126941f, -0.01060248f, 0.02726159f},
+    {0.07808721f, -0.00260465f, -0.00295349f, 0.02451706f},
+    {0.03363579f, 0.00064050f, -0.02265777f, 0.02588009f},
+    {0.09328908f, -0.00691221f, -0.03138116f, 0.02586787f},
+};
+
+// g1_kinematics.cuh is included later in each CUDA translation unit.
+__device__ __noinline__ void g1_end_effector_fk(
+    const float *x,
+    float *output
+);
+
+__device__ __forceinline__ void g1_append_hand_sphere_fk(
+    const float *q,
+    float *sphere_values
+) {
+    float transforms[48];
+    g1_end_effector_fk(q, transforms);
+    for (int hand = 0; hand < 2; ++hand) {
+        const float *transform = transforms + hand * 12;
+        for (int sphere = 0; sphere < G1_HAND_SPHERES_PER_HAND; ++sphere) {
+            const float local_x = g1_hand_collision_spheres[sphere][0];
+            const float local_y = hand == 0
+                ? g1_hand_collision_spheres[sphere][1]
+                : -g1_hand_collision_spheres[sphere][1];
+            const float local_z = g1_hand_collision_spheres[sphere][2];
+            const int output_sphere = G1_BASE_SPHERE_COUNT +
+                hand * G1_HAND_SPHERES_PER_HAND + sphere;
+            float *output = sphere_values + output_sphere * 4;
+            output[0] = transform[0] + transform[3] * local_x +
+                transform[6] * local_y + transform[9] * local_z;
+            output[1] = transform[1] + transform[4] * local_x +
+                transform[7] * local_y + transform[10] * local_z;
+            output[2] = transform[2] + transform[5] * local_x +
+                transform[8] * local_y + transform[11] * local_z;
+            output[3] = g1_hand_collision_spheres[sphere][3];
+        }
+    }
+}
 
 // Global read-only device memory is used because the complete pair table is
 // too large to share CUDA constant memory with the other generated robots.
@@ -1902,6 +1965,7 @@ v[0] = cosf(x[4]);
     y[523] = 0.0336529985070229;
     y[527] = 0.0378089994192123;
     y[531] = 0.030902000144124;
+    g1_append_hand_sphere_fk(x, y);
 }
 
 __device__ __forceinline__ void g1_sphere_fk(

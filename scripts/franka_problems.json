@@ -1,0 +1,53 @@
+{
+  "source": "cptbrrt_pkg robots/franka profile and world_collision.yaml",
+  "problems": {
+    "demo": [
+      {
+        "valid": true,
+        "goal_source": "generated on the start-defined relative-pose plus world-yaw-free orientation equality manifold because the source profile has no fixed goal configuration",
+        "start": [
+          -0.4095856547355652,
+          0.1583261787891388,
+          -0.3371204435825348,
+          -1.827283263206482,
+          0.0567844919860363,
+          1.976252794265747,
+          0.020194638520479202,
+          -0.3320198357105255,
+          -0.11336389929056168,
+          -0.1694837510585785,
+          -2.1494860649108887,
+          -0.021369339898228645,
+          2.0376393795013428,
+          -2.8470065593719482
+        ],
+    "goals": [
+      [
+        0.3571626028566033,
+        0.008509420428409922,
+        0.26907038030049474,
+        -2.008856608641872,
+        -0.0025119744459908906,
+        2.0170607739252397,
+        1.412717155288127,
+        0.5113564549984769,
+        0.3343264745890165,
+        0.35285938731127914,
+        -1.5934830202689503,
+        -0.12038267991238594,
+        1.9063211590186366,
+        -1.4702369602605752
+      ]
+        ],
+        "sphere": [],
+        "cylinder": [],
+        "box": [
+          {"name": "table_box0", "position": [0.65, 0.6, 0.37], "orientation_euler_xyz": [0.0, 0.0, 1.5707963267948966], "half_extents": [0.6, 0.375, 0.38]},
+          {"name": "table_box1", "position": [0.65, -0.6, 0.37], "orientation_euler_xyz": [0.0, 0.0, 1.5707963267948966], "half_extents": [0.6, 0.375, 0.38]},
+          {"name": "object_2", "position": [0.475, 0.1, 0.9], "orientation_euler_xyz": [0.0, 0.0, 0.0], "half_extents": [0.1, 0.05, 0.15]},
+          {"name": "object_3", "position": [0.775, 0.3, 0.85], "orientation_euler_xyz": [0.0, 0.0, 0.0], "half_extents": [0.07, 0.07, 0.1]}
+        ]
+      }
+    ]
+  }
+}

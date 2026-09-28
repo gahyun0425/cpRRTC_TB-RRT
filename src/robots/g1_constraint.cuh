@@ -1,6 +1,7 @@
 #pragma once
 
 #include "src/planning/G1ConstraintParameters.hh"
+#include "src/planning/JointLimits.cuh"
 #include "src/planning/Robots.hh"
 #include "src/robots/g1_kinematics.cuh"
 
@@ -18,13 +19,43 @@ constexpr int G1_BIMANUAL_POSITION_DIM = 3;
 constexpr int G1_BIMANUAL_ORIENTATION_DIM = 3;
 constexpr int G1_BIMANUAL_CONSTRAINT_DIM =
     G1_BIMANUAL_POSITION_DIM + G1_BIMANUAL_ORIENTATION_DIM;
+constexpr int G1_AXIS_CONSTRAINT_DIM = 2;
 
-constexpr int G1_CONSTRAINT_DIM = G1_FEET_CONSTRAINT_DIM +
+constexpr int G1_BASE_CONSTRAINT_DIM = G1_FEET_CONSTRAINT_DIM +
     G1_COM_CONSTRAINT_DIM + G1_BIMANUAL_CONSTRAINT_DIM;
-constexpr int G1_EQUALITY_CONSTRAINT_DIM =
+constexpr int G1_CONSTRAINT_DIM =
+    G1_BASE_CONSTRAINT_DIM + G1_AXIS_CONSTRAINT_DIM;
+constexpr int G1_BASE_EQUALITY_CONSTRAINT_DIM =
     G1_FEET_CONSTRAINT_DIM + G1_BIMANUAL_CONSTRAINT_DIM;
-constexpr int G1_TANGENT_DIM = G1_JOINT_DIM - G1_EQUALITY_CONSTRAINT_DIM;
+constexpr int G1_EQUALITY_CONSTRAINT_DIM =
+    G1_BASE_EQUALITY_CONSTRAINT_DIM + G1_AXIS_CONSTRAINT_DIM;
+// Storage stride is the larger non-rigid tangent dimension.
+constexpr int G1_TANGENT_DIM =
+    G1_JOINT_DIM - G1_BASE_EQUALITY_CONSTRAINT_DIM;
+constexpr int G1_RIGID_TANGENT_DIM =
+    G1_JOINT_DIM - G1_EQUALITY_CONSTRAINT_DIM;
 constexpr int G1_TANGENT_BASIS_SIZE = G1_JOINT_DIM * G1_TANGENT_DIM;
+constexpr float G1_ROBOT_MASS_KG = 35.11514202f;
+
+__host__ __device__ __forceinline__ int g1_constraint_dim(
+    bool rigid_orientation
+) {
+    return rigid_orientation ? G1_CONSTRAINT_DIM : G1_BASE_CONSTRAINT_DIM;
+}
+
+__host__ __device__ __forceinline__ int g1_equality_constraint_dim(
+    bool rigid_orientation
+) {
+    return rigid_orientation
+        ? G1_EQUALITY_CONSTRAINT_DIM
+        : G1_BASE_EQUALITY_CONSTRAINT_DIM;
+}
+
+__host__ __device__ __forceinline__ int g1_tangent_dim(
+    bool rigid_orientation
+) {
+    return rigid_orientation ? G1_RIGID_TANGENT_DIM : G1_TANGENT_DIM;
+}
 
 __device__ __forceinline__ void g1_identity3(float matrix[9]) {
     for (int index = 0; index < 9; ++index) {
@@ -104,6 +135,207 @@ __device__ __forceinline__ void g1_apply_rpy_rotation(
     g1_apply_axis_rotation(rotation, 2, yaw);
     g1_apply_axis_rotation(rotation, 1, pitch);
     g1_apply_axis_rotation(rotation, 0, roll);
+}
+
+__device__ __forceinline__ void g1_apply_translation(
+    const float rotation[9],
+    float position[3],
+    float x,
+    float y,
+    float z
+) {
+    position[0] += rotation[0] * x + rotation[1] * y + rotation[2] * z;
+    position[1] += rotation[3] * x + rotation[4] * y + rotation[5] * z;
+    position[2] += rotation[6] * x + rotation[7] * y + rotation[8] * z;
+}
+
+__device__ __forceinline__ void g1_record_position_joint(
+    const float rotation[9],
+    const float position[3],
+    int axis,
+    int joint,
+    int &count,
+    int joints[13],
+    float axes[39],
+    float origins[39]
+) {
+    joints[count] = joint;
+    for (int component = 0; component < 3; ++component) {
+        axes[3 * count + component] = rotation[3 * component + axis];
+        origins[3 * count + component] = position[component];
+    }
+    ++count;
+}
+
+// Position and geometric Jacobian of the rubber-hand endpoint used by VAMP.
+// The transform sequence mirrors g1_end_effector_fk and the G1 MuJoCo XML.
+__device__ __forceinline__ void g1_hand_position_and_jacobian(
+    const float q[G1_JOINT_DIM],
+    int hand,
+    float position[3],
+    float *jacobian,
+    float jacobian_scale = 1.0f,
+    const float *local_point_offset = nullptr
+) {
+    float rotation[9];
+    g1_identity3(rotation);
+    position[0] = q[0];
+    position[1] = q[1];
+    position[2] = q[2];
+
+    int joints[13];
+    float axes[39];
+    float origins[39];
+    int count = 0;
+
+    g1_record_position_joint(
+        rotation, position, 0, 3, count, joints, axes, origins
+    );
+    g1_apply_axis_rotation(rotation, 0, q[3]);
+    g1_record_position_joint(
+        rotation, position, 1, 4, count, joints, axes, origins
+    );
+    g1_apply_axis_rotation(rotation, 1, q[4]);
+    g1_record_position_joint(
+        rotation, position, 2, 5, count, joints, axes, origins
+    );
+    g1_apply_axis_rotation(rotation, 2, q[5]);
+
+    g1_record_position_joint(
+        rotation, position, 2, 18, count, joints, axes, origins
+    );
+    g1_apply_axis_rotation(rotation, 2, q[18]);
+    g1_apply_translation(rotation, position, -0.0039635f, 0.0f, 0.035f);
+    g1_record_position_joint(
+        rotation, position, 0, 19, count, joints, axes, origins
+    );
+    g1_apply_axis_rotation(rotation, 0, q[19]);
+    g1_apply_translation(rotation, position, 0.0f, 0.0f, 0.019f);
+    g1_record_position_joint(
+        rotation, position, 1, 20, count, joints, axes, origins
+    );
+    g1_apply_axis_rotation(rotation, 1, q[20]);
+
+    const bool left = hand == 0;
+    const float side = left ? 1.0f : -1.0f;
+    const int arm = left ? 21 : 28;
+    g1_apply_translation(
+        rotation,
+        position,
+        0.0039563f,
+        side * (left ? 0.10022f : 0.10021f),
+        0.23778f
+    );
+    g1_apply_rpy_rotation(
+        rotation,
+        side * 0.27931f,
+        5.4949e-05f,
+        -side * 0.00019159f
+    );
+    g1_record_position_joint(
+        rotation, position, 1, arm, count, joints, axes, origins
+    );
+    g1_apply_axis_rotation(rotation, 1, q[arm]);
+
+    g1_apply_translation(
+        rotation, position, 0.0f, side * 0.038f, -0.013831f
+    );
+    g1_apply_rpy_rotation(rotation, -side * 0.27925f, 0.0f, 0.0f);
+    g1_record_position_joint(
+        rotation, position, 0, arm + 1, count, joints, axes, origins
+    );
+    g1_apply_axis_rotation(rotation, 0, q[arm + 1]);
+
+    g1_apply_translation(
+        rotation, position, 0.0f, side * 0.00624f, -0.1032f
+    );
+    g1_record_position_joint(
+        rotation, position, 2, arm + 2, count, joints, axes, origins
+    );
+    g1_apply_axis_rotation(rotation, 2, q[arm + 2]);
+
+    g1_apply_translation(rotation, position, 0.015783f, 0.0f, -0.080518f);
+    g1_record_position_joint(
+        rotation, position, 1, arm + 3, count, joints, axes, origins
+    );
+    g1_apply_axis_rotation(rotation, 1, q[arm + 3]);
+
+    g1_apply_translation(
+        rotation, position, 0.1f, side * 0.00188791f, -0.01f
+    );
+    g1_record_position_joint(
+        rotation, position, 0, arm + 4, count, joints, axes, origins
+    );
+    g1_apply_axis_rotation(rotation, 0, q[arm + 4]);
+
+    g1_apply_translation(rotation, position, 0.038f, 0.0f, 0.0f);
+    g1_record_position_joint(
+        rotation, position, 1, arm + 5, count, joints, axes, origins
+    );
+    g1_apply_axis_rotation(rotation, 1, q[arm + 5]);
+
+    g1_apply_translation(rotation, position, 0.046f, 0.0f, 0.0f);
+    g1_record_position_joint(
+        rotation, position, 2, arm + 6, count, joints, axes, origins
+    );
+    g1_apply_axis_rotation(rotation, 2, q[arm + 6]);
+    g1_apply_translation(
+        rotation, position, 0.0415f, side * 0.003f, 0.0f
+    );
+    if (local_point_offset != nullptr) {
+        g1_apply_translation(
+            rotation,
+            position,
+            local_point_offset[0],
+            local_point_offset[1],
+            local_point_offset[2]
+        );
+    }
+
+    if (jacobian == nullptr) {
+        return;
+    }
+    jacobian[0 * G1_JOINT_DIM + 0] += jacobian_scale;
+    jacobian[1 * G1_JOINT_DIM + 1] += jacobian_scale;
+    jacobian[2 * G1_JOINT_DIM + 2] += jacobian_scale;
+    for (int entry = 0; entry < count; ++entry) {
+        const float dx = position[0] - origins[3 * entry];
+        const float dy = position[1] - origins[3 * entry + 1];
+        const float dz = position[2] - origins[3 * entry + 2];
+        const float ax = axes[3 * entry];
+        const float ay = axes[3 * entry + 1];
+        const float az = axes[3 * entry + 2];
+        const int joint = joints[entry];
+        jacobian[0 * G1_JOINT_DIM + joint] +=
+            jacobian_scale * (ay * dz - az * dy);
+        jacobian[1 * G1_JOINT_DIM + joint] +=
+            jacobian_scale * (az * dx - ax * dz);
+        jacobian[2 * G1_JOINT_DIM + joint] +=
+            jacobian_scale * (ax * dy - ay * dx);
+    }
+}
+
+__device__ __forceinline__ void g1_payload_center_and_jacobian(
+    const float q[G1_JOINT_DIM],
+    const constraints::G1ConstraintParameters &parameters,
+    float center[3],
+    float *jacobian
+) {
+    const float *center_offset =
+        parameters.attached_object_collision.left_hand_center_offset;
+    if (jacobian == nullptr) {
+        g1_hand_position_and_jacobian(
+            q, 0, center, nullptr, 1.0f, center_offset
+        );
+        return;
+    }
+
+    for (int index = 0; index < 3 * G1_JOINT_DIM; ++index) {
+        jacobian[index] = 0.0f;
+    }
+    g1_hand_position_and_jacobian(
+        q, 0, center, jacobian, 1.0f, center_offset
+    );
 }
 
 __device__ __forceinline__ void g1_record_world_axis(
@@ -226,6 +458,41 @@ __device__ __forceinline__ void g1_hand_rotation_and_world_jacobian(
     g1_apply_axis_rotation(rotation, 1, q[arm + 5]);
     g1_record_world_axis_full(rotation, 2, arm + 6, jacobian);
     g1_apply_axis_rotation(rotation, 2, q[arm + 6]);
+}
+
+// Keep the carried box horizontal: left-hand local +Z is parallel to world Z.
+// The two residuals leave rotation about world Z (yaw) unconstrained.
+__device__ __forceinline__ void g1_axis_residual_and_jacobian(
+    const float q[G1_JOINT_DIM],
+    float residual[G1_AXIS_CONSTRAINT_DIM],
+    float *jacobian
+) {
+    float rotation[9];
+    float angular_jacobian[3 * G1_JOINT_DIM];
+    g1_hand_rotation_and_world_jacobian(
+        q, 0, rotation, angular_jacobian
+    );
+    constexpr int local_axis = 2;
+    const float axis[3] = {
+        rotation[local_axis],
+        rotation[3 + local_axis],
+        rotation[6 + local_axis]
+    };
+    residual[0] = axis[0];
+    residual[1] = axis[1];
+    if (jacobian == nullptr) {
+        return;
+    }
+    for (int joint = 0; joint < G1_JOINT_DIM; ++joint) {
+        const float angular_x = angular_jacobian[joint];
+        const float angular_y =
+            angular_jacobian[G1_JOINT_DIM + joint];
+        const float angular_z =
+            angular_jacobian[2 * G1_JOINT_DIM + joint];
+        jacobian[joint] = angular_y * axis[2] - angular_z * axis[1];
+        jacobian[G1_JOINT_DIM + joint] =
+            angular_z * axis[0] - angular_x * axis[2];
+    }
 }
 
 __device__ __forceinline__ void g1_quaternion_to_matrix(
@@ -479,11 +746,12 @@ __device__ __forceinline__ void g1_fill_bimanual_input(
     }
 }
 
-// Build one combined 20x35 system: feet pose equality[12], CoM inequality[2],
-// and bimanual relative-pose equality[6].
+// Build the base 20x35 system (feet[12], CoM[2], bimanual pose[6]) and,
+// in rigid-orientation mode, append the two carried-object axis rows.
 __device__ __noinline__ void g1_constraint_residual_and_jacobian(
     const float q[G1_JOINT_DIM],
     const constraints::G1ConstraintParameters &parameters,
+    bool rigid_orientation,
     float residual[G1_CONSTRAINT_DIM],
     float *jacobian
 ) {
@@ -544,6 +812,37 @@ __device__ __noinline__ void g1_constraint_residual_and_jacobian(
 
     float com_output[108];
     g1_com_kinematics_analytic(q, com_output);
+    if (parameters.payload_mass_kg > 0.0f) {
+        const float inverse_total_mass =
+            1.0f / (G1_ROBOT_MASS_KG + parameters.payload_mass_kg);
+        float payload_center[3];
+        if (jacobian == nullptr) {
+            g1_payload_center_and_jacobian(
+                q, parameters, payload_center, nullptr
+            );
+        } else {
+            float payload_jacobian[3 * G1_JOINT_DIM];
+            g1_payload_center_and_jacobian(
+                q, parameters, payload_center, payload_jacobian
+            );
+            for (int axis = 0; axis < 3; ++axis) {
+                for (int joint = 0; joint < G1_JOINT_DIM; ++joint) {
+                    const int index = 3 + axis * G1_JOINT_DIM + joint;
+                    com_output[index] = inverse_total_mass * (
+                        G1_ROBOT_MASS_KG * com_output[index] +
+                        parameters.payload_mass_kg *
+                            payload_jacobian[axis * G1_JOINT_DIM + joint]
+                    );
+                }
+            }
+        }
+        for (int axis = 0; axis < 3; ++axis) {
+            com_output[axis] = inverse_total_mass * (
+                G1_ROBOT_MASS_KG * com_output[axis] +
+                parameters.payload_mass_kg * payload_center[axis]
+            );
+        }
+    }
     residual[G1_FEET_CONSTRAINT_DIM] = 0.0f;
     residual[G1_FEET_CONSTRAINT_DIM + 1] = 0.0f;
     float com_error_jacobian[6] = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
@@ -560,11 +859,17 @@ __device__ __noinline__ void g1_constraint_residual_and_jacobian(
         const float length = sqrtf(normal_x * normal_x + normal_y * normal_y);
         const float unit_x = normal_x / length;
         const float unit_y = normal_y / length;
-        const float signed_distance =unit_x * (com_output[0] - x0) + unit_y * (com_output[1] - y0);
-        const float active = signed_distance > 0.0f ? 1.0f : 0.0f;
+        const float signed_distance =
+            unit_x * (com_output[0] - x0) +
+            unit_y * (com_output[1] - y0);
+        const float margin_violation =
+            signed_distance + parameters.support_margin_m;
+        const float active = margin_violation > 0.0f ? 1.0f : 0.0f;
 
-        residual[G1_FEET_CONSTRAINT_DIM] += signed_distance * unit_x * active;
-        residual[G1_FEET_CONSTRAINT_DIM + 1] += signed_distance * unit_y * active;
+        residual[G1_FEET_CONSTRAINT_DIM] +=
+            margin_violation * unit_x * active;
+        residual[G1_FEET_CONSTRAINT_DIM + 1] +=
+            margin_violation * unit_y * active;
         com_error_jacobian[0] += unit_x * unit_x * active;
         com_error_jacobian[1] += unit_x * unit_y * active;
         com_error_jacobian[3] += unit_y * unit_x * active;
@@ -627,15 +932,43 @@ __device__ __noinline__ void g1_constraint_residual_and_jacobian(
             }
         }
     }
+
+    if (rigid_orientation) {
+        float axis_residual[G1_AXIS_CONSTRAINT_DIM];
+        float axis_jacobian[G1_AXIS_CONSTRAINT_DIM * G1_JOINT_DIM];
+        g1_axis_residual_and_jacobian(
+            q,
+            axis_residual,
+            jacobian == nullptr ? nullptr : axis_jacobian
+        );
+        for (int component = 0; component < G1_AXIS_CONSTRAINT_DIM; ++component) {
+            const int row = G1_BASE_CONSTRAINT_DIM + component;
+            residual[row] = axis_residual[component];
+            if (jacobian != nullptr) {
+                for (int joint = 0; joint < G1_JOINT_DIM; ++joint) {
+                    jacobian[row * G1_JOINT_DIM + joint] =
+                        axis_jacobian[component * G1_JOINT_DIM + joint];
+                }
+            }
+        }
+    }
 }
 
-__device__ __forceinline__ void g1_constraint_residual(const float q[G1_JOINT_DIM], const constraints::G1ConstraintParameters &parameters, float residual[G1_CONSTRAINT_DIM]) {
-    g1_constraint_residual_and_jacobian(q, parameters, residual, nullptr);
+__device__ __forceinline__ void g1_constraint_residual(
+    const float q[G1_JOINT_DIM],
+    const constraints::G1ConstraintParameters &parameters,
+    bool rigid_orientation,
+    float residual[G1_CONSTRAINT_DIM]
+) {
+    g1_constraint_residual_and_jacobian(
+        q, parameters, rigid_orientation, residual, nullptr
+    );
 }
 
 __device__ __forceinline__ void g1_equality_residual_and_jacobian(
     const float q[G1_JOINT_DIM],
     const constraints::G1ConstraintParameters &parameters,
+    bool rigid_orientation,
     float residual[G1_EQUALITY_CONSTRAINT_DIM],
     float *jacobian
 ) {
@@ -768,24 +1101,49 @@ __device__ __forceinline__ void g1_equality_residual_and_jacobian(
             }
         }
     }
+
+    if (rigid_orientation) {
+        float axis_residual[G1_AXIS_CONSTRAINT_DIM];
+        float axis_jacobian[G1_AXIS_CONSTRAINT_DIM * G1_JOINT_DIM];
+        g1_axis_residual_and_jacobian(
+            q,
+            axis_residual,
+            jacobian == nullptr ? nullptr : axis_jacobian
+        );
+        for (int component = 0; component < G1_AXIS_CONSTRAINT_DIM; ++component) {
+            const int row = G1_BASE_EQUALITY_CONSTRAINT_DIM + component;
+            residual[row] = axis_residual[component];
+            if (jacobian != nullptr) {
+                for (int joint = 0; joint < G1_JOINT_DIM; ++joint) {
+                    jacobian[row * G1_JOINT_DIM + joint] =
+                        axis_jacobian[component * G1_JOINT_DIM + joint];
+                }
+            }
+        }
+    }
 }
 
 __device__ __forceinline__ void g1_equality_residual(
     const float q[G1_JOINT_DIM],
     const constraints::G1ConstraintParameters &parameters,
+    bool rigid_orientation,
     float residual[G1_EQUALITY_CONSTRAINT_DIM]
 ) {
-    g1_equality_residual_and_jacobian(q, parameters, residual, nullptr);
+    g1_equality_residual_and_jacobian(
+        q, parameters, rigid_orientation, residual, nullptr
+    );
 }
 
 __device__ __forceinline__ float g1_equality_residual_norm(
     const float q[G1_JOINT_DIM],
-    const constraints::G1ConstraintParameters &parameters
+    const constraints::G1ConstraintParameters &parameters,
+    bool rigid_orientation
 ) {
     float residual[G1_EQUALITY_CONSTRAINT_DIM];
-    g1_equality_residual(q, parameters, residual);
+    g1_equality_residual(q, parameters, rigid_orientation, residual);
     float norm_squared = 0.0f;
-    for (int row = 0; row < G1_EQUALITY_CONSTRAINT_DIM; ++row) {
+    const int equality_dim = g1_equality_constraint_dim(rigid_orientation);
+    for (int row = 0; row < equality_dim; ++row) {
         norm_squared += residual[row] * residual[row];
     }
     return sqrtf(norm_squared);
@@ -793,10 +1151,13 @@ __device__ __forceinline__ float g1_equality_residual_norm(
 
 __device__ __forceinline__ bool g1_tangent_basis_from_jacobian(
     const float jacobian[G1_EQUALITY_CONSTRAINT_DIM * G1_JOINT_DIM],
+    bool rigid_orientation,
     float basis[G1_TANGENT_BASIS_SIZE]
 ) {
+    const int equality_dim = g1_equality_constraint_dim(rigid_orientation);
+    const int tangent_dim = g1_tangent_dim(rigid_orientation);
     float reduced[G1_EQUALITY_CONSTRAINT_DIM][G1_JOINT_DIM];
-    for (int row = 0; row < G1_EQUALITY_CONSTRAINT_DIM; ++row) {
+    for (int row = 0; row < equality_dim; ++row) {
         for (int joint = 0; joint < G1_JOINT_DIM; ++joint) {
             reduced[row][joint] =
                 jacobian[row * G1_JOINT_DIM + joint];
@@ -806,12 +1167,12 @@ __device__ __forceinline__ bool g1_tangent_basis_from_jacobian(
     int pivot_columns[G1_EQUALITY_CONSTRAINT_DIM];
     int rank = 0;
     for (int column = 0;
-         column < G1_JOINT_DIM && rank < G1_EQUALITY_CONSTRAINT_DIM;
+         column < G1_JOINT_DIM && rank < equality_dim;
          ++column) {
         int pivot = rank;
         float best = fabsf(reduced[rank][column]);
         for (int row = rank + 1;
-             row < G1_EQUALITY_CONSTRAINT_DIM;
+             row < equality_dim;
              ++row) {
             const float value = fabsf(reduced[row][column]);
             if (value > best) {
@@ -834,7 +1195,7 @@ __device__ __forceinline__ bool g1_tangent_basis_from_jacobian(
         for (int joint = column; joint < G1_JOINT_DIM; ++joint) {
             reduced[rank][joint] *= inverse_pivot;
         }
-        for (int row = 0; row < G1_EQUALITY_CONSTRAINT_DIM; ++row) {
+        for (int row = 0; row < equality_dim; ++row) {
             if (row == rank) {
                 continue;
             }
@@ -860,7 +1221,7 @@ __device__ __forceinline__ bool g1_tangent_basis_from_jacobian(
 
     int basis_column = 0;
     for (int free_column = 0;
-         free_column < G1_JOINT_DIM && basis_column < G1_TANGENT_DIM;
+         free_column < G1_JOINT_DIM && basis_column < tangent_dim;
          ++free_column) {
         if (is_pivot[free_column]) {
             continue;
@@ -902,13 +1263,13 @@ __device__ __forceinline__ bool g1_tangent_basis_from_jacobian(
         ++basis_column;
     }
 
-    return rank == G1_EQUALITY_CONSTRAINT_DIM &&
-        basis_column == G1_TANGENT_DIM;
+    return rank == equality_dim && basis_column == tangent_dim;
 }
 
 __device__ __forceinline__ bool g1_tangent_basis(
     const float q[G1_JOINT_DIM],
     const constraints::G1ConstraintParameters &parameters,
+    bool rigid_orientation,
     float basis[G1_TANGENT_BASIS_SIZE]
 ) {
     float residual[G1_EQUALITY_CONSTRAINT_DIM];
@@ -916,20 +1277,25 @@ __device__ __forceinline__ bool g1_tangent_basis(
     g1_equality_residual_and_jacobian(
         q,
         parameters,
+        rigid_orientation,
         residual,
         jacobian
     );
-    return g1_tangent_basis_from_jacobian(jacobian, basis);
+    return g1_tangent_basis_from_jacobian(
+        jacobian, rigid_orientation, basis
+    );
 }
 
 __device__ __forceinline__ float g1_constraint_error_squared(
     const float q[G1_JOINT_DIM],
-    const constraints::G1ConstraintParameters &parameters
+    const constraints::G1ConstraintParameters &parameters,
+    bool rigid_orientation
 ) {
     float residual[G1_CONSTRAINT_DIM];
-    g1_constraint_residual(q, parameters, residual);
+    g1_constraint_residual(q, parameters, rigid_orientation, residual);
     float result = 0.0f;
-    for (int row = 0; row < G1_CONSTRAINT_DIM; ++row) {
+    const int constraint_dim = g1_constraint_dim(rigid_orientation);
+    for (int row = 0; row < constraint_dim; ++row) {
         result += residual[row] * residual[row];
     }
     return result;
@@ -950,6 +1316,7 @@ __device__ __forceinline__ void g1_clamp_configuration(
 __device__ __forceinline__ bool g1_task_correction(
     const float q[G1_JOINT_DIM],
     const constraints::G1ConstraintParameters &parameters,
+    bool rigid_orientation,
     float damping,
     float maximum_step,
     float correction[G1_JOINT_DIM],
@@ -957,17 +1324,20 @@ __device__ __forceinline__ bool g1_task_correction(
 ) {
     float residual[G1_CONSTRAINT_DIM];
     float jacobian[G1_CONSTRAINT_DIM * G1_JOINT_DIM];
-    g1_constraint_residual_and_jacobian(q, parameters, residual, jacobian);
+    g1_constraint_residual_and_jacobian(
+        q, parameters, rigid_orientation, residual, jacobian
+    );
 
+    const int constraint_dim = g1_constraint_dim(rigid_orientation);
     float error_squared = 0.0f;
-    for (int row = 0; row < G1_CONSTRAINT_DIM; ++row) {
+    for (int row = 0; row < constraint_dim; ++row) {
         error_squared += residual[row] * residual[row];
     }
     task_error_norm = sqrtf(error_squared);
 
     float system[G1_CONSTRAINT_DIM][G1_CONSTRAINT_DIM + 1];
-    for (int row = 0; row < G1_CONSTRAINT_DIM; ++row) {
-        for (int column = 0; column < G1_CONSTRAINT_DIM; ++column) {
+    for (int row = 0; row < constraint_dim; ++row) {
+        for (int column = 0; column < constraint_dim; ++column) {
             float value = row == column ? damping : 0.0f;
             for (int joint = 0; joint < G1_JOINT_DIM; ++joint) {
                 value += jacobian[row * G1_JOINT_DIM + joint] *
@@ -975,13 +1345,13 @@ __device__ __forceinline__ bool g1_task_correction(
             }
             system[row][column] = value;
         }
-        system[row][G1_CONSTRAINT_DIM] = residual[row];
+        system[row][constraint_dim] = residual[row];
     }
 
-    for (int pivot = 0; pivot < G1_CONSTRAINT_DIM; ++pivot) {
+    for (int pivot = 0; pivot < constraint_dim; ++pivot) {
         int best_row = pivot;
         float best_value = fabsf(system[pivot][pivot]);
-        for (int row = pivot + 1; row < G1_CONSTRAINT_DIM; ++row) {
+        for (int row = pivot + 1; row < constraint_dim; ++row) {
             const float value = fabsf(system[row][pivot]);
             if (value > best_value) {
                 best_value = value;
@@ -992,22 +1362,22 @@ __device__ __forceinline__ bool g1_task_correction(
             return false;
         }
         if (best_row != pivot) {
-            for (int column = pivot; column <= G1_CONSTRAINT_DIM; ++column) {
+            for (int column = pivot; column <= constraint_dim; ++column) {
                 const float temporary = system[pivot][column];
                 system[pivot][column] = system[best_row][column];
                 system[best_row][column] = temporary;
             }
         }
         const float inverse_pivot = 1.0f / system[pivot][pivot];
-        for (int column = pivot; column <= G1_CONSTRAINT_DIM; ++column) {
+        for (int column = pivot; column <= constraint_dim; ++column) {
             system[pivot][column] *= inverse_pivot;
         }
-        for (int row = 0; row < G1_CONSTRAINT_DIM; ++row) {
+        for (int row = 0; row < constraint_dim; ++row) {
             if (row == pivot) {
                 continue;
             }
             const float factor = system[row][pivot];
-            for (int column = pivot; column <= G1_CONSTRAINT_DIM; ++column) {
+            for (int column = pivot; column <= constraint_dim; ++column) {
                 system[row][column] -= factor * system[pivot][column];
             }
         }
@@ -1016,9 +1386,9 @@ __device__ __forceinline__ bool g1_task_correction(
     float correction_norm_squared = 0.0f;
     for (int joint = 0; joint < G1_JOINT_DIM; ++joint) {
         float value = 0.0f;
-        for (int row = 0; row < G1_CONSTRAINT_DIM; ++row) {
+        for (int row = 0; row < constraint_dim; ++row) {
             value += jacobian[row * G1_JOINT_DIM + joint] *
-                system[row][G1_CONSTRAINT_DIM];
+                system[row][constraint_dim];
         }
         correction[joint] = value;
         correction_norm_squared += value * value;
@@ -1036,7 +1406,8 @@ __device__ __forceinline__ bool g1_task_correction(
 
 __device__ __noinline__ bool g1_project_configuration(
     float q[G1_JOINT_DIM],
-    const constraints::G1ConstraintParameters &parameters,
+    constraints::G1ConstraintParameters parameters,
+    bool rigid_orientation,
     int max_iterations,
     float alpha,
     float damping,
@@ -1046,9 +1417,12 @@ __device__ __noinline__ bool g1_project_configuration(
     float jacobian[G1_CONSTRAINT_DIM * G1_JOINT_DIM];
 
     for (int iteration = 0; iteration < max_iterations; ++iteration) {
-        g1_constraint_residual_and_jacobian(q, parameters, residual, jacobian);
+        g1_constraint_residual_and_jacobian(
+            q, parameters, rigid_orientation, residual, jacobian
+        );
+        const int constraint_dim = g1_constraint_dim(rigid_orientation);
         float error_squared = 0.0f;
-        for (int row = 0; row < G1_CONSTRAINT_DIM; ++row) {
+        for (int row = 0; row < constraint_dim; ++row) {
             error_squared += residual[row] * residual[row];
         }
         if (error_squared <= parameters.tolerance_squared) {
@@ -1058,21 +1432,21 @@ __device__ __noinline__ bool g1_project_configuration(
         // One combined inner-LM system for all three constraints.
         // step = J^T * (J * J^T + lambda I)^-1 * residual.
         float system[G1_CONSTRAINT_DIM][G1_CONSTRAINT_DIM + 1];
-        for (int row = 0; row < G1_CONSTRAINT_DIM; ++row) {
-            for (int column = 0; column < G1_CONSTRAINT_DIM; ++column) {
+        for (int row = 0; row < constraint_dim; ++row) {
+            for (int column = 0; column < constraint_dim; ++column) {
                 float value = row == column ? damping : 0.0f;
                 for (int joint = 0; joint < G1_JOINT_DIM; ++joint) {
                     value += jacobian[row * G1_JOINT_DIM + joint] * jacobian[column * G1_JOINT_DIM + joint];
                 }
                 system[row][column] = value;
             }
-            system[row][G1_CONSTRAINT_DIM] = residual[row];
+            system[row][constraint_dim] = residual[row];
         }
 
-        for (int pivot = 0; pivot < G1_CONSTRAINT_DIM; ++pivot) {
+        for (int pivot = 0; pivot < constraint_dim; ++pivot) {
             int best_row = pivot;
             float best_value = fabsf(system[pivot][pivot]);
-            for (int row = pivot + 1; row < G1_CONSTRAINT_DIM; ++row) {
+            for (int row = pivot + 1; row < constraint_dim; ++row) {
                 const float value = fabsf(system[row][pivot]);
                 if (value > best_value) {
                     best_value = value;
@@ -1083,22 +1457,22 @@ __device__ __noinline__ bool g1_project_configuration(
                 return false;
             }
             if (best_row != pivot) {
-                for (int column = pivot; column <= G1_CONSTRAINT_DIM; ++column) {
+                for (int column = pivot; column <= constraint_dim; ++column) {
                     const float temporary = system[pivot][column];
                     system[pivot][column] = system[best_row][column];
                     system[best_row][column] = temporary;
                 }
             }
             const float inverse_pivot = 1.0f / system[pivot][pivot];
-            for (int column = pivot; column <= G1_CONSTRAINT_DIM; ++column) {
+            for (int column = pivot; column <= constraint_dim; ++column) {
                 system[pivot][column] *= inverse_pivot;
             }
-            for (int row = 0; row < G1_CONSTRAINT_DIM; ++row) {
+            for (int row = 0; row < constraint_dim; ++row) {
                 if (row == pivot) {
                     continue;
                 }
                 const float factor = system[row][pivot];
-                for (int column = pivot; column <= G1_CONSTRAINT_DIM; ++column) {
+                for (int column = pivot; column <= constraint_dim; ++column) {
                     system[row][column] -= factor * system[pivot][column];
                 }
             }
@@ -1108,9 +1482,9 @@ __device__ __noinline__ bool g1_project_configuration(
         float step_norm_squared = 0.0f;
         for (int joint = 0; joint < G1_JOINT_DIM; ++joint) {
             float value = 0.0f;
-            for (int row = 0; row < G1_CONSTRAINT_DIM; ++row) {
+            for (int row = 0; row < constraint_dim; ++row) {
                 value += jacobian[row * G1_JOINT_DIM + joint] *
-                    system[row][G1_CONSTRAINT_DIM];
+                    system[row][constraint_dim];
             }
             step[joint] = alpha * value;
             step_norm_squared += step[joint] * step[joint];
@@ -1128,7 +1502,9 @@ __device__ __noinline__ bool g1_project_configuration(
             }
             g1_clamp_configuration(candidate);
             const float candidate_error =
-                g1_constraint_error_squared(candidate, parameters);
+                g1_constraint_error_squared(
+                    candidate, parameters, rigid_orientation
+                );
             if (candidate_error < error_squared) {
                 for (int joint = 0; joint < G1_JOINT_DIM; ++joint) {
                     q[joint] = candidate[joint];
@@ -1143,7 +1519,9 @@ __device__ __noinline__ bool g1_project_configuration(
         }
     }
 
-    return g1_constraint_error_squared(q, parameters) <= parameters.tolerance_squared;
+    return g1_constraint_error_squared(
+        q, parameters, rigid_orientation
+    ) <= parameters.tolerance_squared;
 }
 
 __device__ __forceinline__ bool g1_project_motion(
@@ -1151,6 +1529,7 @@ __device__ __forceinline__ bool g1_project_motion(
     volatile float *motion_segment_next,
     int granularity,
     const constraints::G1ConstraintParameters &parameters,
+    bool rigid_orientation,
     volatile unsigned char *projection_valid,
     volatile int *projection_progress,
     volatile unsigned int *projection_success,
@@ -1199,6 +1578,7 @@ __device__ __forceinline__ bool g1_project_motion(
                     const bool correction_ok = g1_task_correction(
                         q,
                         parameters,
+                        rigid_orientation,
                         damping,
                         maximum_step,
                         correction,
@@ -1292,7 +1672,7 @@ __device__ __forceinline__ bool g1_project_motion(
         __syncthreads();
 
         if (projection_success[0] != 0 && return_when_success) {
-            return true;
+            break;
         }
 
         if (
@@ -1311,7 +1691,17 @@ __device__ __forceinline__ bool g1_project_motion(
         __syncthreads();
     }
 
-    return projection_success[0] != 0;
+    if (projection_success[0] == 0) {
+        return false;
+    }
+    if (tid == 0) {
+        projection_valid[0] =
+            planning::configuration_within_joint_limits<robots::G1>(
+                &motion_segment[granularity * G1_JOINT_DIM]
+            );
+    }
+    __syncthreads();
+    return projection_valid[0] != 0;
 }
 
 }  // namespace ppln::collision

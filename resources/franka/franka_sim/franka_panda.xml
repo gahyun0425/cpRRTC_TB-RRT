@@ -1,0 +1,208 @@
+<mujoco model="franka_dual_panda_floor v200">
+<!-- =================================================
+    Copyright 2018 Vikash Kumar
+    Model   :: Franka (MuJoCoV2.0)
+    Author  :: Vikash Kumar (vikashplus@gmail.com)
+    source  :: https://github.com/vikashplus/franka_sim
+    License :: Under Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with the License. You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2.0 Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the specific language governing permissions and limitations under the License.
+====================================================== -->
+
+    <include file="assets/assets.xml"/>
+    <include file="assets/gripper_assets.xml"/>
+    <compiler meshdir=""/>
+    <include file="../furniture_sim/simpleTable/simpleTable_asset.xml"/>
+
+    <asset>
+        <texture name="floor_grid_tex"
+                 type="2d"
+                 builtin="checker"
+                 width="1024" height="1024"
+                 rgb1="0.48 0.48 0.48"
+                 rgb2="0.48 0.48 0.48"
+                 mark="none"/>
+
+        <material name="floor_grid_mat"
+                  texture="floor_grid_tex"
+                  texrepeat="6 6"
+                  texuniform="true"
+                  reflectance="0.0"/>
+
+        <texture name="white_sky"
+                 type="skybox"
+                 builtin="gradient"
+                 rgb1="0.72 0.72 0.72"
+                 rgb2="0.72 0.72 0.72"
+                 width="256"
+                 height="1536"/>
+
+        <texture name="stone1"
+                 type="2d"
+                 file="../furniture_sim/common/textures/stone1.png"/>
+        <material name="object_matte" texture="stone1"/>
+
+    </asset>
+
+    <visual>
+        <headlight ambient="0.65 0.65 0.65"
+                   diffuse="0.45 0.45 0.45"
+                   specular="0.05 0.05 0.05"/>
+        <rgba haze="0.72 0.72 0.72 1"/>
+    </visual>
+
+    <worldbody>
+        <light name="main_light"
+               pos="0 0 5"
+               dir="0 0 -1"
+               diffuse="0.85 0.85 0.85"
+               specular="0.05 0.05 0.05"
+               directional="true"/>
+
+        <geom name="floor"
+              type="plane"
+              size="0 0 0.05"
+              material="floor_grid_mat"
+              contype="1"
+              conaffinity="1"
+              friction="1 0.005 0.0001"/>
+
+        <body name="table_1" pos="0.65 0.6 0" quat="0.70710678 0 0 0.70710678" childclass="body_simpleTable">
+                <geom class="viz_simpleWoodTable" type="box" size=".6 .375 .025" pos="0 0 0.735"/>
+                <geom class="viz_simpleWoodTable" type="box" size="0.59 0.26 .05" pos="0 0 0.66"/>
+                <geom class="viz_simpleWoodTable" type="box" size="0.025 0.025 0.305" pos="-0.565 0.235 0.305"/>
+                <geom class="viz_simpleWoodTable" type="box" size="0.025 0.025 0.305" pos="-0.565 -0.235 0.305"/>
+                <geom class="viz_simpleWoodTable" type="box" size="0.025 0.025 0.305" pos="0.565 0.235 0.305"/>
+                <geom class="viz_simpleWoodTable" type="box" size="0.025 0.025 0.305" pos="0.565 -0.235 0.305"/>
+
+                <geom type="box" size=".6 .375 .025" pos="0 0 0.735" mass="40"/>
+                <geom type="box" size="0.59 0.26 .05" pos="0 0 0.66"/>
+                <geom type="box" size="0.025 0.025 0.305" pos="-0.565 0.235 0.305"/>
+                <geom type="box" size="0.025 0.025 0.305" pos="-0.565 -0.235 0.305"/>
+                <geom type="box" size="0.025 0.025 0.305" pos="0.565 0.235 0.305"/>
+                <geom type="box" size="0.025 0.025 0.305" pos="0.565 -0.235 0.305"/>
+        </body>
+
+        <body name="table_2" pos="0.65 -0.6 0" quat="0.70710678 0 0 0.70710678" childclass="body_simpleTable">
+                <geom class="viz_simpleWoodTable" type="box" size=".6 .375 .025" pos="0 0 0.735"/>
+                <geom class="viz_simpleWoodTable" type="box" size="0.59 0.26 .05" pos="0 0 0.66"/>
+                <geom class="viz_simpleWoodTable" type="box" size="0.025 0.025 0.305" pos="-0.565 0.235 0.305"/>
+                <geom class="viz_simpleWoodTable" type="box" size="0.025 0.025 0.305" pos="-0.565 -0.235 0.305"/>
+                <geom class="viz_simpleWoodTable" type="box" size="0.025 0.025 0.305" pos="0.565 0.235 0.305"/>
+                <geom class="viz_simpleWoodTable" type="box" size="0.025 0.025 0.305" pos="0.565 -0.235 0.305"/>
+
+                <geom type="box" size=".6 .375 .025" pos="0 0 0.735" mass="40"/>
+                <geom type="box" size="0.59 0.26 .05" pos="0 0 0.66"/>
+                <geom type="box" size="0.025 0.025 0.305" pos="-0.565 0.235 0.305"/>
+                <geom type="box" size="0.025 0.025 0.305" pos="-0.565 -0.235 0.305"/>
+                <geom type="box" size="0.025 0.025 0.305" pos="0.565 0.235 0.305"/>
+                <geom type="box" size="0.025 0.025 0.305" pos="0.565 -0.235 0.305"/>
+        </body>
+
+        <body name="arm_pedestal" pos="0 0 0.3">
+                <geom name="arm_pedestal_geom"
+                      type="box"
+                      size="0.15 0.75 0.3"
+                      rgba="0.45 0.45 0.45 1"
+                      contype="1"
+                      conaffinity="1"/>
+        </body>
+
+        <body name="object" pos="0.45 -0.325 0.9">
+            <freejoint/>
+            <inertial pos="0 0 0.0" mass="0.01" diaginertia="0.002 0.002 0.002"/>
+
+            <geom name="pot_bottom"
+                  type="box"
+                  friction="8.0 0.30 0.03"
+                  condim="3"
+                  priority="1"
+                  size="0.08 0.125 0.01"
+                  pos="0 0 0"
+                  mass="0"
+                  material="object_matte"/>
+
+            <geom name="pot_wall_front"
+                  type="box"
+                  friction="8.0 0.30 0.03"
+                  condim="3"
+                  priority="1"
+                  size="0.08 0.005 0.03"
+                  pos="0 0.12 0.04"
+                  density="1500"
+                  material="object_matte"/>
+            <geom name="pot_wall_back"
+                  type="box"
+                  friction="8.0 0.30 0.03"
+                  condim="3"
+                  priority="1"
+                  size="0.08 0.005 0.03"
+                  pos="0 -0.12 0.04"
+                  density="1500"
+                  material="object_matte"/>
+
+            <geom name="pot_wall_left"
+                  type="box"
+                  friction="8.0 0.30 0.03"
+                  condim="3"
+                  priority="1"
+                  size="0.005 0.125 0.03"
+                  pos="-0.075 0 0.04"
+                  density="1500"
+                  material="object_matte"/>
+            <geom name="pot_wall_right"
+                  type="box"
+                  friction="8.0 0.30 0.03"
+                  condim="3"
+                  priority="1"
+                  size="0.005 0.125 0.03"
+                  pos="0.075 0 0.04"
+                  density="1500"
+                  material="object_matte"/>
+        </body>
+
+        <body name="object_2" pos="0.475 0.1 0.90">
+            <freejoint/>
+            <inertial pos="0 0 0.0" mass="0.1" diaginertia="0.002 0.002 0.002"/>
+
+            <geom name="box"
+                  type="box"
+                  friction="8.0 0.30 0.03"
+                  condim="3"
+                  priority="1"
+                  size="0.1 0.05 0.15"
+                  pos="0 0 0"
+                  rgba="1 0 0 0.35"
+                  mass="0"/>
+        </body>
+
+        <body name="object_3" pos="0.775 0.3 0.85">
+            <freejoint/>
+            <inertial pos="0 0 0.0" mass="0.1" diaginertia="0.002 0.002 0.002"/>
+
+            <geom name="box_2"
+                  type="box"
+                  friction="8.0 0.30 0.03"
+                  condim="3"
+                  priority="1"
+                  size="0.07 0.07 0.1"
+                  pos="0 0 0"
+                  rgba="1 0 0 0.35"
+                  mass="0"/>
+        </body>
+
+        <!-- Fixed URDF joints are represented by nested bodies in MuJoCo. -->
+        <body name="base_link">
+            <body name="panda0_base_link" pos="0.0 0.2 0.6">
+                <include file="assets/chain0.xml"/>
+            </body>
+
+            <body name="panda1_base_link" pos="0.0 -0.2 0.6">
+                <include file="assets/chain1.xml"/>
+            </body>
+        </body>
+    </worldbody>
+
+    <include file="assets/actuator0.xml"/>
+    <include file="assets/gripper_actuator0.xml"/>
+    <include file="assets/actuator1.xml"/>
+
+</mujoco>
