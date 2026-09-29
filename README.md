@@ -54,11 +54,15 @@ cmake --build --preset patacon-single
 cmake --build --preset patacon-evaluate
 ```
 
-`pRRTC.cu` and `AORRTC.cu` form one large CUDA translation unit. CMake builds
-that unit once as the shared `patacon_planners` static library, then links it
-into both frontends. CUDA 13.1 split compilation is enabled for this library
-with `--split-compile=0`, and relocatable device code remains enabled because
-it produced the lowest measured end-to-end clean backend build time on the
+`src/planning/PATACON.cu` is the single CUDA translation unit for both planner
+modes. It owns the unchanged first-feasible-path search and includes the
+AORRTC-only bounded optimization phase from
+`src/planning/AORRTCOptimization.cuh`. Shared sampling, projection, collision,
+and Tangent-Space helpers are defined only by the PATACON implementation. The
+resulting `patacon_planners` static library is linked into both frontends.
+CUDA 13.1 split compilation is enabled for this library with
+`--split-compile=0`, and relocatable device code remains enabled because it
+produced the lowest measured end-to-end clean backend build time on the
 current 16-core machine:
 
 | Planner backend configuration | Measured time |
@@ -66,6 +70,10 @@ current 16-core machine:
 | split OFF, separable ON | 2345.64 s |
 | split ON, separable ON | 628.10 s |
 | split ON, separable OFF | 800.95 s |
+
+These measurements predate the unified PATACON layout and are retained as a
+historical comparison of the compiler options; clean-build timings for the
+current layout should be measured separately.
 
 With separable compilation ON, linking both frontends added 45.41 seconds in
 the measured clean build. The default therefore reduced the measured total
@@ -276,14 +284,15 @@ The AORRTC search budget defaults to 5 seconds. Override it with `--time`:
 ./build_patacon/single_mbm ffw_sg2 tray_lift 1 --aorrtc --time 10
 ```
 
-`--time` is accepted only together with `--aorrtc`. The first search is the
-current bidirectional planner without a cost bound. Every node records its
-cost-to-come. After a solution is found, subsequent fresh-tree searches use
-AORRTC cost sampling, cost-aware nearest-neighbour selection, lower-cost parent
-resampling, and the remaining solution-cost budget during CONNECT. When a
-better solution is found, both trees and Tangent-Space membership are cleared
-and the search restarts with the tighter cost bound. GPU allocations and the
-RNG/Halton sequence are reused, but tree nodes are not reused.
+`--time` is accepted only together with `--aorrtc`. Both modes first run the
+same PATACON search for a feasible path. Without `--aorrtc`, that result is
+returned immediately. With `--aorrtc`, the first path cost becomes `c_max` and
+subsequent fresh-tree searches use AORRTC cost sampling, cost-aware
+nearest-neighbour selection, lower-cost parent resampling, and the remaining
+solution-cost budget during CONNECT. When a better solution is found, both
+trees and Tangent-Space membership are cleared and the search restarts with
+the tighter cost bound. GPU allocations and the RNG/Halton sequence are reused
+within the bounded phase, but tree nodes are not reused.
 
 The AORRTC optimization loop itself uses identity path simplification; its
 reported and saved planner path is therefore unchanged. When `--visualize` is
@@ -901,10 +910,10 @@ Make sure to reference the approximate urdf. Batch size should be equal to the n
 
 7. After building cricket run the script `gpu_fkcc_gen.sh robot`. This will put the generated code into a file `robot_fk.hh`.
 
-8. Add this to pRRTC as `src/robot/robot.cuh`, and include it in `src/planning/pRRTC.cu`.
+8. Add this to PATACON as `src/robot/robot.cuh`, and include it in `src/planning/PATACON.cu`.
 
 ### Integrating the generated code
-9. Add a template instantiation for your robot to the bottom of `src/planning/pRRTC.cu`.
+9. Add a template instantiation for your robot to the bottom of `src/planning/PATACON.cu`.
 10. Add your robot to `src/planning/Robots.hh`.
 
     a. Generate the robot struct from cricket with `build/fkcc_gen robot_struct.json`.

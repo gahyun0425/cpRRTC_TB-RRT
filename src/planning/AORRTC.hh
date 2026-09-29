@@ -58,3 +58,13 @@ namespace AORRTC {
         AORRTC_settings &settings
     );
 }
+
+namespace PATACON {
+    template <typename Robot>
+    AORRTCResult<Robot> solve(
+        typename Robot::Configuration &start,
+        std::vector<typename Robot::Configuration> &goals,
+        ppln::collision::Environment<float> &environment,
+        AORRTC_settings &settings
+    );
+}

@@ -13,7 +13,8 @@ unchanged PATACON planner kernels.
   tangent-basis implementations. The historical `src/robots/*_constraint.cuh`
   files are compatibility forwarding headers.
 
-The JSON layer may be extended without changing `pRRTC.cu` or `AORRTC.cu`.
+The JSON layer may be extended without changing `PATACON.cu` or
+`AORRTCOptimization.cuh`.
 Adding an entirely new robot still requires a compiled kinematics/collision
 backend and planner template instantiation because robot dimensions and CUDA
 workspace sizes remain compile-time properties.

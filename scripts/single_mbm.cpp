@@ -1185,13 +1185,12 @@ int run_planner(
         if (run_index == 1 && perform_warmup) {
             warmup_ns = measure_planner_warmup_ns();
         }
-        AORRTCResult<Robot> result;
-        if (settings.aorrtc) {
-            result = AORRTC::solve<Robot>(start, goals, env, settings);
-        } else {
-            static_cast<PlannerResult<Robot> &>(result) =
-                pRRTC::solve<Robot>(start, goals, env, settings);
-        }
+        AORRTCResult<Robot> result = PATACON::solve<Robot>(
+            start,
+            goals,
+            env,
+            settings
+        );
 
         if (print_path) {
             for (auto& cfg : result.path) {

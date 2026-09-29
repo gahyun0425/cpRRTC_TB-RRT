@@ -26,9 +26,11 @@ Set another total AORRTC planning budget:
 
 The implementation uses the repository's current bidirectional cpRRTC/TB-RRT search as the satisficing search inside AORRTC. Its Tangent-Space sampling, ConCon expansion, projection, collision checking, Dynamic Domain and balanced tree-selection logic are retained.
 
-AORRTC-specific behavior is isolated in `src/planning/AORRTC.cu`:
+AORRTC-specific behavior is isolated in
+`src/planning/AORRTCOptimization.cuh`, which is included by
+`src/planning/PATACON.cu`:
 
-1. **Initial search:** starts with no cost bound, matching the underlying planner behavior while also recording each node's cost-to-come.
+1. **Initial search:** calls the same PATACON first-feasible-path implementation used when `--aorrtc` is absent. The resulting path cost becomes the initial `c_max`.
 2. **Augmented vertex cost:** each tree node stores `g_T(v)`, with root cost zero and child cost `parent_cost + edge_cost`.
 3. **Informed/rejection sampling:** after a first solution, a sampled configuration is rejected unless its admissible start/goal lower bound can beat the current best cost.
 4. **Random cost bound:** for a feasible sample, `c_rand` is sampled between the root-to-sample lower bound and `c_max - h_hat(sample)`.
@@ -55,4 +57,9 @@ When `--save-json` is used with `--aorrtc`, the result is tagged as `AORRTC` and
 
 ## Build note
 
-`single_mbm` compiles `src/planning/AORRTC.cu`. That file includes the unchanged `pRRTC.cu` so the legacy `pRRTC::solve()` and the opt-in `AORRTC::solve()` are emitted from one CUDA translation unit. `evaluate_mbm` remains linked directly against `pRRTC.cu`.
+`src/planning/PATACON.cu` and its included
+`src/planning/AORRTCOptimization.cuh` form one CUDA translation unit and one
+`PATACON.cu.o`. The initial search owns the common sampling, projection,
+collision, and Tangent-Space helpers; the AORRTC phase reuses them instead of
+defining another copy. Both benchmark frontends link the resulting
+`patacon_planners` library.

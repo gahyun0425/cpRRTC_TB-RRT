@@ -52,13 +52,13 @@ find_package(CUDAToolkit REQUIRED)
 set(CMAKE_CUDA_FLAGS ${CMAKE_CUDA_FLAGS} "-lineinfo")  # enable line info in ncu ui
 
 
-### Shared pRRTC/AORRTC CUDA backend
+### Unified PATACON CUDA backend
 
-# AORRTC.cu intentionally includes pRRTC.cu so generated device definitions
-# live in one CUDA translation unit. Compile that expensive unit once and
-# share it between the benchmark frontends.
+# Compile the initial PATACON search and the opt-in AORRTC optimization phase
+# as one CUDA translation unit. The implementation is split into .cuh files
+# for navigation without introducing cross-translation-unit device calls.
 add_library(patacon_planners STATIC
-    src/planning/AORRTC.cu
+    src/planning/PATACON.cu
 )
 
 set_target_properties(patacon_planners PROPERTIES

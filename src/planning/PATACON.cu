@@ -73,6 +73,7 @@ namespace pRRTC {
         bool cuda_device_reset_enabled = true;
         bool persistent_workspace_enabled = false;
         double time_limit_seconds = 0.0;
+        bool time_limit_counts_kernel_only = false;
         float *persistent_g1_projection_configuration = nullptr;
         bool *persistent_g1_projection_success = nullptr;
 
@@ -1975,7 +1976,7 @@ namespace pRRTC {
         return 0.0f;
     }
 
-    template <typename Robot>
+    template <typename Robot, int LaneStride = MAX_THREADS_PER_BLOCK>
     __global__ void init_root_ts_banks(
         float **nodes,
         int **ts_root_node_idx,
@@ -2037,7 +2038,7 @@ namespace pRRTC {
 
                     // 최초 root node를 이 TS의 thread 0 목록에 등록
                     ts_node_count[tree][ts_idx] = 1;
-                    ts_lane_head[tree][ts_idx * MAX_THREADS_PER_BLOCK] =node_idx;
+                    ts_lane_head[tree][ts_idx * LaneStride] =node_idx;
                     node_next_in_ts[tree][node_idx] = -1;
                 }
 
@@ -2843,6 +2844,7 @@ namespace pRRTC {
         return -1;
     }
 
+    template <int LaneStride = MAX_THREADS_PER_BLOCK>
     __device__ __forceinline__
     void cprrtc_register_node_in_ts(
         int node_idx,
@@ -2858,7 +2860,7 @@ namespace pRRTC {
         // TS 안에서 등록된 순서에 따라 64개 thread 목록에 고르게 배정
         const int ordinal =atomicAdd(&ts_node_count[ts_id],1);
         const int lane =ordinal % blockDim.x;
-        const int head_slot =ts_id * MAX_THREADS_PER_BLOCK + lane;
+        const int head_slot =ts_id * LaneStride + lane;
 
         int old_head =atomicAdd(&ts_lane_head[head_slot],0);
 
@@ -6440,12 +6442,19 @@ namespace pRRTC {
             const auto total_time_limit_ns = static_cast<std::uint64_t>(
                 std::llround(time_limit_seconds * 1.0e9)
             );
-            const auto elapsed_before_kernel_ns = static_cast<std::uint64_t>(
-                get_elapsed_nanoseconds(start_time)
-            );
-            kernel_time_limit_ns = elapsed_before_kernel_ns < total_time_limit_ns
-                ? total_time_limit_ns - elapsed_before_kernel_ns
-                : 1;
+            if (time_limit_counts_kernel_only) {
+                kernel_time_limit_ns = total_time_limit_ns;
+            }
+            else {
+                const auto elapsed_before_kernel_ns =
+                    static_cast<std::uint64_t>(
+                        get_elapsed_nanoseconds(start_time)
+                    );
+                kernel_time_limit_ns =
+                    elapsed_before_kernel_ns < total_time_limit_ns
+                        ? total_time_limit_ns - elapsed_before_kernel_ns
+                        : 1;
+            }
         }
         cudaMemcpyToSymbol(
             p_rrtc_time_limit_ns,
@@ -6793,3 +6802,7 @@ namespace pRRTC {
     template PathValidationResult validate_path_for_visualization<ppln::robots::IgrisC>(const std::vector<std::array<float, 35>>&, ppln::collision::Environment<float>&, pRRTC_settings&, float);
 
 }
+
+// AORRTC is part of the same CUDA translation unit so the initial PATACON
+// search and the bounded optimization phase can share one compiled backend.
+#include "AORRTCOptimization.cuh"

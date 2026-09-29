@@ -552,17 +552,12 @@ void run_planning(
                 if (run_index == 1) {
                     warm_up_planner();
                 }
-                AORRTCResult<Robot> result;
-                if (problem_settings.aorrtc) {
-                    result = AORRTC::solve<Robot>(
-                        start, goals, env, problem_settings
-                    );
-                } else {
-                    static_cast<PlannerResult<Robot> &>(result) =
-                        pRRTC::solve<Robot>(
-                            start, goals, env, problem_settings
-                        );
-                }
+                AORRTCResult<Robot> result = PATACON::solve<Robot>(
+                    start,
+                    goals,
+                    env,
+                    problem_settings
+                );
                 if (print_path) {
                     for (auto& cfg: result.path) {
                         print_cfg<Robot>(cfg);
