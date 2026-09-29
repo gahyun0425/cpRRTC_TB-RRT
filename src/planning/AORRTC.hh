@@ -2,7 +2,7 @@
 
 #include "Planners.hh"
 
-struct AORRTC_settings : pRRTC_settings {
+struct AORRTC_settings : PATACON_settings {
     // Opt-in flag used by single_mbm.
     bool aorrtc = false;
 

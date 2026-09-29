@@ -1,7 +1,7 @@
 #pragma once
 
 #include "src/planning/Robots.hh"
-#include "src/planning/pRRTC_settings.hh"
+#include "src/planning/PATACON_settings.hh"
 #include "src/planning/utils.cuh"
 #include "src/robots/ffw_sg2.cuh"
 #include "src/robots/ffw_sg2_constraint.cuh"

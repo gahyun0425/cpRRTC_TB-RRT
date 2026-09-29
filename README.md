@@ -1,16 +1,18 @@
-# pRRTC: GPU-Parallel RRT-Connect
+# PATACON: GPU-Parallel RRT-Connect
 
-[![arXiv VAMP](https://img.shields.io/badge/arXiv-2503.06757-b31b1b.svg)](https://arxiv.org/abs/2503.06757)
-[![Project Website](https://img.shields.io/badge/Project-Website-blue.svg)](https://commalab.org/papers/pRRTC/)
+[![arXiv Paper](https://img.shields.io/badge/arXiv-2503.06757-b31b1b.svg)](https://arxiv.org/abs/2503.06757)
 
-This repository holds the code for the ICRA 2026 paper [pRRTC: GPU-Parallel RRT-Connect for Fast, Consistent, and Low-Cost Motion Planning.](https://arxiv.org/abs/2503.06757)
-
-We introduce pRRTC, a GPU-based, parallel RRT-Connect-based algorithm. Our approach has three key improvements: 
+PATACON is a GPU-based, parallel RRT-Connect planner derived from the method
+described in the linked ICRA 2026 paper. The implementation has three key
+improvements:
 - Concurrent sampling, expansion and connection of start and goal trees via GPU multithreading
 - SIMT-optimized collision checking to quickly validate edges, inspired by the SIMD-optimized validation of [Vector-Accelerated Motion Planning](https://github.com/KavrakiLab/vamp/tree/main)
 - Efficient memory management between block- and thread-level parallelism, reducing expensive memory transfer overheads
 
-Our empirical evaluations show that pRRTC achieves a 10x average speedup on constrained reaching tasks. pRRTC also demonstrates a 5.4x reduction in solution time standard deviation and 1.4x improvement in initial path costs compared to state-of-the-art motion planners in complex environments.
+The associated empirical evaluations report a 10x average speedup on
+constrained reaching tasks, a 5.4x reduction in solution-time standard
+deviation, and a 1.4x improvement in initial path costs compared with other
+motion planners in complex environments.
 
 ## Supported Robots
 
@@ -37,10 +39,9 @@ check; only attached-payload-to-robot checks omit them because the grasped
 payload intentionally overlaps the hands.
 
 ## Building Code
-To build pRRTC, follow the instructions below:
+Clone this repository into a directory named `PATACON`, then run:
 
 ```bash
-git clone https://github.com/gahyun0425/cpRRTC_TB-RRT.git PATACON
 cd PATACON
 cmake --preset patacon
 cmake --build --preset patacon
@@ -221,7 +222,7 @@ Both benchmark executables accept `--problem-file PATH`, `--save-json PATH`,
 
 `single_mbm` additionally accepts:
 
-- `--seed N` and `--plot` for repeated-run pRRTC timing ECDFs.
+- `--seed N` and `--plot` for repeated-run PATACON timing ECDFs.
 - `--visualize` for `franka_single`, `franka`, `ffw_sg2`,
   `ffw_sg2_mobility`, `g1`, and `igris_c`.
 - `--no-path-smoothing` with `--visualize` to replay the raw planner waypoint
@@ -247,7 +248,7 @@ requires `--aorrtc`. Its `--visualize` option supports `g1`, `franka_single`,
 is intentionally excluded.
 
 Tangent-Space backtracking prevention is always enabled for both the standard
-pRRTC path and `--aorrtc`; no command-line option is required.
+PATACON path and `--aorrtc`; no command-line option is required.
 
 Repeat planning with `--run N` (`--runs N` is also accepted):
 
@@ -255,18 +256,18 @@ Repeat planning with `--run N` (`--runs N` is also accepted):
 ./build_patacon/single_mbm ffw_sg2 tray_lift 1 --run 100 --no-print-path
 ```
 
-The base pRRTC seed defaults to `1`. Repeated runs use consecutive seeds,
+The base PATACON seed defaults to `1`. Repeated runs use consecutive seeds,
 starting at the value passed to `--seed`. Use `--plot` to save a log-scale
-ECDF of cumulative solved runs versus pRRTC kernel planning time:
+ECDF of cumulative solved runs versus PATACON kernel planning time:
 
 ```bash
 ./build_patacon/single_mbm ffw_sg2 tray_lift 1 \
   --runs 500 --seed 1 --plot \
-  --save-json logs/prrtc_500runs.json --no-print-path
+  --save-json logs/patacon_500runs.json --no-print-path
 ```
 
 The plot is written to
-`logs/prrtc_<robot>_<problem>_<index>_<runs>runs_ecdf.png`. When `--aorrtc`
+`logs/patacon_<robot>_<problem>_<index>_<runs>runs_ecdf.png`. When `--aorrtc`
 is also present, `--plot` retains its AORRTC anytime-cost convergence meaning.
 
 ### Optional AORRTC anytime optimization
@@ -617,62 +618,62 @@ must be combined with `--visualize`:
 Use the `--real-*` options listed above to tune replay speed, settling, mobile
 base tracking, and payload behavior. Without `--real`, these two robots use
 kinematic trajectory replay. G1 visualization defaults to torque-PD actuator
-control through MuJoCo `ctrl`; set `PRRTC_G1_CONTROL_MODE=qpos` to use direct
+control through MuJoCo `ctrl`; set `PATACON_G1_CONTROL_MODE=qpos` to use direct
 kinematic replay instead. Playback continues until the MuJoCo window is closed.
 
 Render an MP4 directly from MuJoCo instead of recording the viewer window by
-setting `PRRTC_VIDEO` when invoking `single_mbm`. This works for every robot
+setting `PATACON_VIDEO` when invoking `single_mbm`. This works for every robot
 supported by `--visualize`, including `--real` playback:
 
 ```bash
-PRRTC_VIDEO=logs/simul/franka_single/franka_single_demo.mp4 \
-PRRTC_VIDEO_VIEWS=all \
+PATACON_VIDEO=logs/simul/franka_single/franka_single_demo.mp4 \
+PATACON_VIDEO_VIEWS=all \
   ./build_patacon/single_mbm franka_single demo 1 --visualize --rigid-orientation
 
-PRRTC_VIDEO=logs/simul/franka_dual/franka_demo.mp4 \
-PRRTC_VIDEO_VIEWS=all \
+PATACON_VIDEO=logs/simul/franka_dual/franka_demo.mp4 \
+PATACON_VIDEO_VIEWS=all \
   ./build_patacon/single_mbm franka demo 1 --visualize
 
-PRRTC_VIDEO=logs/simul/franka_dual_rigid/franka_demo.mp4 \
-PRRTC_VIDEO_VIEWS=all \
+PATACON_VIDEO=logs/simul/franka_dual_rigid/franka_demo.mp4 \
+PATACON_VIDEO_VIEWS=all \
   ./build_patacon/single_mbm franka demo 1 --visualize --rigid-orientation
 
-PRRTC_VIDEO=logs/simul/ffw_sg2/ffw_sg2_tray_lift.mp4 \
-PRRTC_VIDEO_VIEWS=all \
+PATACON_VIDEO=logs/simul/ffw_sg2/ffw_sg2_tray_lift.mp4 \
+PATACON_VIDEO_VIEWS=all \
   ./build_patacon/single_mbm ffw_sg2 tray_lift 1 --visualize
 
-PRRTC_VIDEO=logs/simul/ffw_sg2_rigid/ffw_sg2_tray_lift.mp4 \
-PRRTC_VIDEO_VIEWS=all \
+PATACON_VIDEO=logs/simul/ffw_sg2_rigid/ffw_sg2_tray_lift.mp4 \
+PATACON_VIDEO_VIEWS=all \
   ./build_patacon/single_mbm ffw_sg2 tray_lift 1 --visualize --rigid-orientation
 
-PRRTC_VIDEO=logs/simul/ffw_sg2_mobile/ffw_sg2_mobility_tray_lift.mp4 \
-PRRTC_VIDEO_VIEWS=all \
+PATACON_VIDEO=logs/simul/ffw_sg2_mobile/ffw_sg2_mobility_tray_lift.mp4 \
+PATACON_VIDEO_VIEWS=all \
   ./build_patacon/single_mbm ffw_sg2_mobility tray_lift 1 --visualize --rigid-orientation --com
 
-PRRTC_VIDEO=logs/simul/g1/g1_humanoid_shelf.mp4 \
-PRRTC_VIDEO_VIEWS=all \
+PATACON_VIDEO=logs/simul/g1/g1_humanoid_shelf.mp4 \
+PATACON_VIDEO_VIEWS=all \
   ./build_patacon/single_mbm g1 humanoid_shelf 1 --visualize
 
-PRRTC_VIDEO=logs/simul/g1_rigid/g1_humanoid_shelf.mp4 \
-PRRTC_VIDEO_VIEWS=all \
+PATACON_VIDEO=logs/simul/g1_rigid/g1_humanoid_shelf.mp4 \
+PATACON_VIDEO_VIEWS=all \
   ./build_patacon/single_mbm g1 humanoid_shelf 1 --visualize --rigid-orientation
 
-PRRTC_VIDEO=logs/simul/igris/igris_c_shelf_lift.mp4 \
-PRRTC_VIDEO_VIEWS=all \
+PATACON_VIDEO=logs/simul/igris/igris_c_shelf_lift.mp4 \
+PATACON_VIDEO_VIEWS=all \
   ./build_patacon/single_mbm igris_c igris_c_shelf_lift 1 --visualize
 
-PRRTC_VIDEO=logs/simul/replanning/g1_humanoid_shelf.mp4 \
-PRRTC_VIDEO_VIEWS=all \
+PATACON_VIDEO=logs/simul/replanning/g1_humanoid_shelf.mp4 \
+PATACON_VIDEO_VIEWS=all \
   ./build_patacon/single_mbm g1 humanoid_shelf 1   --replanning --no-print-path
 
 ```
 
 To save synchronized videos from four camera directions, add
-`PRRTC_VIDEO_VIEWS=all`:
+`PATACON_VIDEO_VIEWS=all`:
 
 ```bash
-PRRTC_VIDEO=logs/simul/franka_single_demo.mp4 \
-PRRTC_VIDEO_VIEWS=all \
+PATACON_VIDEO=logs/simul/franka_single_demo.mp4 \
+PATACON_VIDEO_VIEWS=all \
   ./build_patacon/single_mbm franka_single demo 1 --visualize
 ```
 
@@ -686,15 +687,15 @@ logs/simul/franka_single_demo_overhead.mp4
 ```
 
 Use a comma-separated subset such as
-`PRRTC_VIDEO_VIEWS=front,left,right,rear` when only selected directions are
+`PATACON_VIDEO_VIEWS=front,left,right,rear` when only selected directions are
 needed. `all` selects the generally unobstructed `front`, `front_left`,
 `front_right`, and `overhead` views; the side and rear views remain available
-explicitly. With no `PRRTC_VIDEO_VIEWS`, the original single front-view output
+explicitly. With no `PATACON_VIDEO_VIEWS`, the original single front-view output
 path is used unchanged. Multi-view rendering advances the trajectory or
 physics only once and records every camera at the same simulation frame.
 
-The robot-specific aliases `PRRTC_FRANKA_VIDEO`, `PRRTC_FFW_SG2_VIDEO`,
-`PRRTC_G1_VIDEO`, and `PRRTC_IGRIS_C_VIDEO` are also accepted. All MP4 paths
+The robot-specific aliases `PATACON_FRANKA_VIDEO`, `PATACON_FFW_SG2_VIDEO`,
+`PATACON_G1_VIDEO`, and `PATACON_IGRIS_C_VIDEO` are also accepted. All MP4 paths
 require the `ffmpeg` executable. The visualizers render one start-to-goal pass,
 include short start/end holds, create missing output directories, and then
 exit. Video duration is determined from the generated frame count and `--fps`
@@ -725,7 +726,7 @@ different matching description. The six floating-base coordinates use a
 doubled `1.4` m/s or rad/s fallback because they have no URDF joint limits.
 `--velocity-scale` is a scaling factor in `(0, 1]` for these doubled velocity
 limits and defaults to `1.0`; `--speed` remains an alias. A scale of `0.5`
-restores the original URDF-rate playback. `PRRTC_G1_VELOCITY_SCALE` sets the
+restores the original URDF-rate playback. `PATACON_G1_VELOCITY_SCALE` sets the
 same value when G1 is launched indirectly through `single_mbm --visualize`.
 The URDF has no acceleration limits, so `--acceleration` is an explicit
 per-coordinate fallback and defaults to `5.6` m/s^2 or rad/s^2. Both options
@@ -866,7 +867,7 @@ The exporter searches `PATACON_ROOT`, a sibling `patacon` checkout, and
 The [MotionBenchMaker](https://github.com/KavrakiLab/motion_bench_maker) JSON files are generated using the script detailed [here](https://github.com/KavrakiLab/vamp/blob/35080be604aabd4373cc7db8608297afaa446878/resources/README.md#motionbenchmaker-problems).
 
 ## Planner Configuration
-pRRTC has the following parameters which can be modified in the benchmarking scripts:
+PATACON has the following parameters which can be modified in the benchmarking scripts:
 - <ins>**max_samples**</ins>: maximum number of samples in trees
 - <ins>**max_iters**</ins>: maximum number of planning iterations
 - <ins>**num_new_configs**</ins>: amount of new samples generated per iteration
@@ -887,6 +888,11 @@ pRRTC has the following parameters which can be modified in the benchmarking scr
 
 2. Clone [Cricket](https://github.com/CoMMALab/cricket.git) and switch to the `gpu-cc-early-exit` branch.
 
+   The PATACON resource configs expect `patacon_main_template.hh`,
+   `patacon_approx_template.hh`, and `patacon_robot_template.hh` under
+   Cricket's `resources/templates` directory. Install the PATACON-named
+   templates there before running Cricket's generator.
+
 3. Create a folder under `resources/<robot name>`
 
 4. Add the two spherized urdfs and the robot srdf file to this folder.
@@ -899,12 +905,12 @@ pRRTC has the following parameters which can be modified in the benchmarking scr
     "srdf": "robot/robot.srdf",
     "end_effector": "robot_grasptarget",
     "batch_size": 16,
-    "template": "templates/prrtc_approx_template.hh",
+    "template": "templates/patacon_approx_template.hh",
     "subtemplates": [],
-    "output": "robot_prrtc_approx.hh"
+    "output": "robot_patacon_approx.hh"
 }
 ```
-Make sure to reference the approximate urdf. Batch size should be equal to the number of discretized collision checks on each extension of pRRTC.
+Make sure to reference the approximate urdf. Batch size should be equal to the number of discretized collision checks on each extension of PATACON.
 
 6. Repeat step 5 and create a config file for the main fkcc generation. Ex. `resources/robot_main.json`. See the FFW-SG2 config files for examples.
 
@@ -925,11 +931,11 @@ Make sure to reference the approximate urdf. Batch size should be equal to the n
         "srdf": "robot/robot.srdf",
         "end_effector": "robot_grasptarget",
         "resolution": 32,
-        "template": "templates/prrtc_robot_template.hh",
+        "template": "templates/patacon_robot_template.hh",
         "subtemplates": [],
         "output": "robot_struct.hh"
     }
     ```
 
     b. copy the generated struct into `src/planning/Robots.hh`.
-11. Recompile pRRTC.
+11. Recompile PATACON.

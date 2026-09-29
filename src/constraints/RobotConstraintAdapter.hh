@@ -6,7 +6,7 @@
 #include <vector>
 
 #include "src/planning/Robots.hh"
-#include "src/planning/pRRTC_settings.hh"
+#include "src/planning/PATACON_settings.hh"
 #include "FrankaConstraintConfig.hh"
 #include "G1ConstraintConfig.hh"
 #include "IgrisCConstraintConfig.hh"
@@ -22,7 +22,7 @@ struct PreparedConstraintQuery {
 template <typename Robot>
 inline PreparedConstraintQuery<Robot> prepare_constraint_query(
     const nlohmann::json &problem,
-    pRRTC_settings &settings
+    PATACON_settings &settings
 ) {
     PreparedConstraintQuery<Robot> query{
         problem.at("start").template get<typename Robot::Configuration>(),
@@ -53,7 +53,7 @@ inline PreparedConstraintQuery<Robot> prepare_constraint_query(
 }
 
 template <typename Robot>
-inline void apply_constraint_backend_defaults(pRRTC_settings &settings) {
+inline void apply_constraint_backend_defaults(PATACON_settings &settings) {
     if constexpr (std::is_same_v<Robot, robots::G1>) {
         settings.granularity = robots::G1::resolution;
     } else if constexpr (std::is_same_v<Robot, robots::IgrisC>) {

@@ -723,7 +723,7 @@ __device__ __noinline__ bool igris_c_project_configuration(
 }
 
 // ParallelProject kernel body used by the robot adapter. `smoothness_threshold`
-// is explicit so node anchors can use the cpRRTC_TB-RRT policy
+// is explicit so node anchors can use the PATACON_TB-RRT policy
 // granularity * projection_smoothness_threshold without changing this robot code.
 __device__ __forceinline__ bool igris_c_project_motion(
     volatile float *motion_segment,

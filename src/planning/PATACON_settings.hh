@@ -23,7 +23,7 @@ struct FfwSg2AttachedObjectCollisionSpec {
     ] = {};
 };
 
-struct pRRTC_settings {
+struct PATACON_settings {
     int max_samples = 1000000;
     // Tree 하나가 만들 수 있는 최대 Tangent Space 개수
     int max_tangent_spaces = 10000;
@@ -50,7 +50,7 @@ struct pRRTC_settings {
     // Opt-in device counters for diagnosing TB-RRT expansion behavior.
     bool collect_diagnostics = false;
 
-    // cpRRTC projection
+    // PATACON projection
     bool rigid_orientation = false;
 
     int projection_max_iters = 60;

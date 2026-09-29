@@ -78,12 +78,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--video-width",
         type=int,
-        default=os.environ.get("PRRTC_VIDEO_WIDTH", str(DEFAULT_VIDEO_WIDTH)),
+        default=os.environ.get("PATACON_VIDEO_WIDTH", str(DEFAULT_VIDEO_WIDTH)),
     )
     parser.add_argument(
         "--video-height",
         type=int,
-        default=os.environ.get("PRRTC_VIDEO_HEIGHT", str(DEFAULT_VIDEO_HEIGHT)),
+        default=os.environ.get("PATACON_VIDEO_HEIGHT", str(DEFAULT_VIDEO_HEIGHT)),
     )
     add_video_view_argument(parser)
     args = parser.parse_args()

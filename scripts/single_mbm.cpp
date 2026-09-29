@@ -25,7 +25,7 @@
 #include "src/collision/factory.hh"
 #include "src/planning/Planners.hh"
 #include "src/planning/AORRTC.hh"
-#include "src/planning/pRRTC_settings.hh"
+#include "src/planning/PATACON_settings.hh"
 #include "src/config/PlanningProblemJson.hh"
 #include "src/constraints/RobotConstraintAdapter.hh"
 #include "scripts/ffw_sg2_attached_object_collision.hh"
@@ -106,7 +106,7 @@ std::string filename_component(std::string value) {
     return value;
 }
 
-void plot_prrtc_run_ecdf(
+void plot_patacon_run_ecdf(
     const json &runs,
     const std::string &robot_name,
     const std::string &problem_name,
@@ -114,18 +114,18 @@ void plot_prrtc_run_ecdf(
     int run_count
 ) {
     if (runs.empty()) {
-        std::cout << "pRRTC ECDF plot skipped: no run history.\n";
+        std::cout << "PATACON ECDF plot skipped: no run history.\n";
         return;
     }
 
     const auto timestamp = std::chrono::steady_clock::now()
         .time_since_epoch().count();
     const auto input_path = std::filesystem::temp_directory_path()
-        / ("prrtc_run_ecdf_" + std::to_string(timestamp) + ".json");
+        / ("patacon_run_ecdf_" + std::to_string(timestamp) + ".json");
     const auto output_path = std::filesystem::absolute(
         std::filesystem::path("logs")
         / (
-            "prrtc_" + filename_component(robot_name)
+            "patacon_" + filename_component(robot_name)
             + "_" + filename_component(problem_name)
             + "_" + std::to_string(problem_index)
             + "_" + std::to_string(run_count) + "runs_ecdf.png"
@@ -136,12 +136,12 @@ void plot_prrtc_run_ecdf(
     std::ofstream input(input_path);
     if (!input) {
         throw std::runtime_error(
-            "failed to create temporary pRRTC ECDF JSON"
+            "failed to create temporary PATACON ECDF JSON"
         );
     }
     input << json{
-        {"format", "pRRTC_run_ecdf_v1"},
-        {"planner", "pRRTC"},
+        {"format", "PATACON_run_ecdf_v1"},
+        {"planner", "PATACON"},
         {"robot", robot_name},
         {"problem_name", problem_name},
         {"problem_idx", problem_index},
@@ -151,10 +151,10 @@ void plot_prrtc_run_ecdf(
     input.close();
 
     const auto script_path = std::filesystem::absolute(
-        "scripts/plot_prrtc_ecdf.py"
+        "scripts/plot_patacon_ecdf.py"
     );
     const std::string title =
-        "pRRTC - " + robot_name + " / " + problem_name
+        "PATACON - " + robot_name + " / " + problem_name
         + " #" + std::to_string(problem_index);
     const std::string command =
         "python3 "
@@ -166,7 +166,7 @@ void plot_prrtc_run_ecdf(
         + " --title "
         + shell_quote(title);
 
-    std::cout << "plotting pRRTC run-time ECDF...\n";
+    std::cout << "plotting PATACON run-time ECDF...\n";
     std::cout.flush();
     std::cerr.flush();
     const int status = std::system(command.c_str());
@@ -175,10 +175,10 @@ void plot_prrtc_run_ecdf(
 
     if (status != 0) {
         throw std::runtime_error(
-            "pRRTC ECDF plotting script exited with an error"
+            "PATACON ECDF plotting script exited with an error"
         );
     }
-    std::cout << "prrtc_ecdf_plot: " << output_path.string() << "\n";
+    std::cout << "patacon_ecdf_plot: " << output_path.string() << "\n";
 }
 
 void plot_aorrtc_convergence(
@@ -303,7 +303,7 @@ int export_trace_files(
     }
     std::ostringstream command;
     command
-        << "python3 scripts/prrtc_path_trace.py "
+        << "python3 scripts/patacon_path_trace.py "
         << shell_quote(result_json_path)
         << " --trace-mode " << shell_quote(options.trace_mode)
         << " --path-key " << shell_quote(options.path_key)
@@ -421,7 +421,7 @@ json build_validated_quintic_hermite_geometry(
     const std::vector<typename Robot::Configuration> &path,
     const typename Robot::Configuration &start,
     Environment<float> &environment,
-    pRRTC_settings &settings
+    PATACON_settings &settings
 ) {
     if (path.size() < 2) {
         throw std::runtime_error(
@@ -455,9 +455,9 @@ json build_validated_quintic_hermite_geometry(
         .time_since_epoch().count();
     const auto temporary_directory = std::filesystem::temp_directory_path();
     const auto input_path = temporary_directory /
-        ("prrtc_quintic_input_" + std::to_string(timestamp) + ".json");
+        ("patacon_quintic_input_" + std::to_string(timestamp) + ".json");
     const auto output_path = temporary_directory /
-        ("prrtc_quintic_output_" + std::to_string(timestamp) + ".json");
+        ("patacon_quintic_output_" + std::to_string(timestamp) + ".json");
     {
         std::ofstream input(input_path);
         if (!input) {
@@ -510,7 +510,7 @@ json build_validated_quintic_hermite_geometry(
         generated_candidate = true;
         const auto validation_samples = output.at("validation_samples")
             .template get<std::vector<typename Robot::Configuration>>();
-        last_validation = pRRTC::validate_path_for_visualization<Robot>(
+        last_validation = PATACON::validate_path_for_visualization<Robot>(
             validation_samples,
             environment,
             settings,
@@ -616,7 +616,7 @@ void visualize_ffw_sg2_path(
     const auto timestamp = std::chrono::steady_clock::now()
         .time_since_epoch().count();
     const auto trajectory_path = std::filesystem::temp_directory_path()
-        / ("prrtc_" + std::string(Robot::name) + "_trajectory_"
+        / ("patacon_" + std::string(Robot::name) + "_trajectory_"
             + std::to_string(timestamp) + ".json");
     {
         std::ofstream trajectory_file(trajectory_path);
@@ -693,7 +693,7 @@ void visualize_franka_path(
     const auto timestamp = std::chrono::steady_clock::now()
         .time_since_epoch().count();
     const auto trajectory_path = std::filesystem::temp_directory_path() /
-        ("prrtc_" + std::string(Robot::name) + "_trajectory_" +
+        ("patacon_" + std::string(Robot::name) + "_trajectory_" +
          std::to_string(timestamp) + ".json");
     {
         std::ofstream output(trajectory_path);
@@ -780,7 +780,7 @@ void visualize_ffw_sg2_rack_real_path(
     const auto timestamp = std::chrono::steady_clock::now()
         .time_since_epoch().count();
     const auto trajectory_path = std::filesystem::temp_directory_path()
-        / ("prrtc_" + std::string(Robot::name) + "_trajectory_"
+        / ("patacon_" + std::string(Robot::name) + "_trajectory_"
             + std::to_string(timestamp) + ".json");
     {
         std::ofstream trajectory_file(trajectory_path);
@@ -956,7 +956,7 @@ void visualize_g1_path(
     const auto timestamp = std::chrono::steady_clock::now()
         .time_since_epoch().count();
     const auto trajectory_path = std::filesystem::temp_directory_path()
-        / ("prrtc_g1_trajectory_" + std::to_string(timestamp) + ".json");
+        / ("patacon_g1_trajectory_" + std::to_string(timestamp) + ".json");
     {
         std::ofstream trajectory_file(trajectory_path);
         if (!trajectory_file) {
@@ -1050,7 +1050,7 @@ void visualize_igris_c_path(
     const auto timestamp = std::chrono::steady_clock::now()
         .time_since_epoch().count();
     const auto trajectory_path = std::filesystem::temp_directory_path()
-        / ("prrtc_igris_c_trajectory_" + std::to_string(timestamp) + ".json");
+        / ("patacon_igris_c_trajectory_" + std::to_string(timestamp) + ".json");
     {
         std::ofstream trajectory_file(trajectory_path);
         if (!trajectory_file) {
@@ -1143,13 +1143,13 @@ int run_planner(
     std::vector<Configuration> goals = std::move(prepared_query.goals);
     if constexpr (std::is_same_v<Robot, robots::G1>) {
         if (g1_replanning.enabled) {
-            if (!pRRTC::project_g1_configuration(start, settings)) {
+            if (!PATACON::project_g1_configuration(start, settings)) {
                 throw std::runtime_error(
                     "G1 replanning start constraint projection failed"
                 );
             }
             for (auto &goal : goals) {
-                if (!pRRTC::project_g1_configuration(goal, settings)) {
+                if (!PATACON::project_g1_configuration(goal, settings)) {
                     throw std::runtime_error(
                         "G1 replanning goal constraint projection failed"
                     );
@@ -1166,7 +1166,7 @@ int run_planner(
     std::vector<double> times_sec;
     std::vector<int> path_lengths;
     std::vector<float> costs;
-    json prrtc_plot_runs = json::array();
+    json patacon_plot_runs = json::array();
     json aorrtc_plot_runs = json::array();
     PlannerResult<Robot> visualization_result;
     json visualization_geometric_path;
@@ -1212,7 +1212,7 @@ int run_planner(
             planning_sec =
                 static_cast<double>(result.planning_ns) / 1.0e9;
         } else {
-            // 기존 pRRTC 동작은 그대로 유지
+            // 기존 PATACON 동작은 그대로 유지
             planning_sec =
                 static_cast<double>(result.kernel_ns) / 1.0e9;
         }
@@ -1299,7 +1299,7 @@ int run_planner(
                 {"solution_history", solution_history},
             });
         } else if (plot) {
-            prrtc_plot_runs.push_back({
+            patacon_plot_runs.push_back({
                 {"run_idx", run_index},
                 {"seed", settings.random_seed},
                 {"solved", result.solved},
@@ -1328,7 +1328,7 @@ int run_planner(
                         const std::size_t original_waypoint_count =
                             result.path.size();
                         auto simplification =
-                            pRRTC::simplify_path_for_visualization<Robot>(
+                            PATACON::simplify_path_for_visualization<Robot>(
                                 result.path,
                                 env,
                                 settings
@@ -1395,8 +1395,8 @@ int run_planner(
             runs
         );
     } else if (plot) {
-        plot_prrtc_run_ecdf(
-            prrtc_plot_runs,
+        plot_patacon_run_ecdf(
+            patacon_plot_runs,
             robot_name,
             problem_name,
             problem_index,
@@ -1468,9 +1468,9 @@ int run_planner(
                     "format",
                     settings.aorrtc
                         ? "AORRTC_run_results_v1"
-                        : "pRRTC_run_results_v1"
+                        : "PATACON_run_results_v1"
                 },
-                {"planner", settings.aorrtc ? "AORRTC" : "pRRTC"},
+                {"planner", settings.aorrtc ? "AORRTC" : "PATACON"},
                 {"robot", robot_name},
                 {"problem_name", problem_name},
                 {"problem_idx", problem_index},
@@ -1491,9 +1491,9 @@ int run_planner(
                     "format",
                     settings.aorrtc
                         ? "AORRTC_run_results_v1"
-                        : "pRRTC_run_results_v1"
+                        : "PATACON_run_results_v1"
                 },
-                {"planner", settings.aorrtc ? "AORRTC" : "pRRTC"},
+                {"planner", settings.aorrtc ? "AORRTC" : "PATACON"},
                 {"robot", robot_name},
                 {"problem_name", problem_name},
                 {"problem_idx", problem_index},
@@ -1638,9 +1638,9 @@ int run_g1_replan_server(
     const G1ReplanningOptions no_nested_replanning;
     const TraceExportOptions no_trace;
 
-    pRRTC::set_cuda_device_reset_enabled(false);
-    pRRTC::set_persistent_workspace_enabled(!settings.aorrtc);
-    pRRTC::set_time_limit_seconds(
+    PATACON::set_cuda_device_reset_enabled(false);
+    PATACON::set_persistent_workspace_enabled(!settings.aorrtc);
+    PATACON::set_time_limit_seconds(
         settings.aorrtc ? 0.0 : replanning.time_limit_sec
     );
     const std::size_t warmup_ns = measure_planner_warmup_ns();
@@ -1679,7 +1679,7 @@ int run_g1_replan_server(
                 request.at("start").get<robots::G1::Configuration>();
             settings.g1_constraints =
                 g1_constraint_parameters_from_problem(problem);
-            if (!pRRTC::project_g1_configuration(
+            if (!PATACON::project_g1_configuration(
                     projected_start,
                     settings
                 )) {
@@ -1744,8 +1744,8 @@ int run_g1_replan_server(
         std::cout.flush();
         std::cerr.flush();
     }
-    pRRTC::release_persistent_workspace();
-    pRRTC::set_persistent_workspace_enabled(false);
+    PATACON::release_persistent_workspace();
+    PATACON::set_persistent_workspace_enabled(false);
     return 0;
 }
 
@@ -2135,7 +2135,7 @@ int main(int argc, char* argv[]) {
         }
         if (collect_diagnostics && aorrtc) {
             throw std::invalid_argument(
-                "--diagnostics currently supports pRRTC/TB-RRT only"
+                "--diagnostics currently supports PATACON/TB-RRT only"
             );
         }
         if (
@@ -2360,7 +2360,7 @@ int main(int argc, char* argv[]) {
     settings.dynamic_domain = false;
     settings.trace_trees = trace_trees;
     settings.collect_diagnostics = collect_diagnostics;
-    // Always use the TB-RRT forward-half-space rule for pRRTC and AORRTC.
+    // Always use the TB-RRT forward-half-space rule for PATACON and AORRTC.
     settings.prevent_ts_backtracking = true;
     settings.dd_radius = 4.0;
     settings.dd_min_radius = 1.0;

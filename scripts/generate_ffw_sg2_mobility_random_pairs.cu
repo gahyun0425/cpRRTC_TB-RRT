@@ -949,7 +949,7 @@ int main(int argc, char **argv) {
             source_problem.at("goals").at(0), "goals[0]"
         );
 
-        pRRTC_settings settings;
+        PATACON_settings settings;
         ffw_sg2_attached_object_collision::apply_from_problem(
             source_problem,
             settings

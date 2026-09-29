@@ -1077,7 +1077,7 @@ def build_constraint_contract(urdf_bytes: bytes) -> dict[str, object]:
             "parallel_projection": {
                 "waypoint_smoothness": True,
                 "node_projection_threshold_policy": "granularity * projection_smoothness_threshold",
-                "reference_repository": "/home/dam2/gh_ws/new/cpRRTC_IGRIS",
+                "reference_repository": "PATACON",
                 "planner_source_policy": "do not modify planner algorithm sources",
             },
         },

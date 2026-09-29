@@ -1332,7 +1332,7 @@ namespace ppln::collision {
     ) {
         // Four CUDA threads form one waypoint group.  The group mapping is
         // waypoint = tid / 4 + 1 and lane = tid % 4.  To preserve the exact
-        // none_NVRTC cpRRTC projection algorithm, lane 0 executes the complete
+        // none_NVRTC PATACON projection algorithm, lane 0 executes the complete
         // DLS + smoothness update while all four lanes cooperatively move the
         // waypoint vector and later share FK/collision work.
         const int waypoint = tid / 4 + 1;

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Replay a 35-DoF pRRTC G1 trajectory with its planning obstacles."""
+"""Replay a 35-DoF PATACON G1 trajectory with its planning obstacles."""
 
 from __future__ import annotations
 
@@ -168,11 +168,11 @@ def parse_args() -> argparse.Namespace:
         "--speed",
         dest="velocity_scale",
         type=float,
-        default=os.environ.get("PRRTC_G1_VELOCITY_SCALE", "1.0"),
+        default=os.environ.get("PATACON_G1_VELOCITY_SCALE", "1.0"),
         help=(
             "Scale applied to the 2x-playback URDF joint and floating-base "
             "velocity limits; must be in (0, 1] (default: 1.0). "
-            "PRRTC_G1_VELOCITY_SCALE provides the same option."
+            "PATACON_G1_VELOCITY_SCALE provides the same option."
         ),
     )
     parser.add_argument(
@@ -187,7 +187,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--control-mode",
         choices=("ctrl", "qpos"),
-        default=os.environ.get("PRRTC_G1_CONTROL_MODE", "ctrl"),
+        default=os.environ.get("PATACON_G1_CONTROL_MODE", "ctrl"),
         help=(
             "ctrl uses torque-PD actuators and physics (default); "
             "qpos directly replays the planned configurations"
@@ -207,7 +207,7 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Load and validate without opening a viewer window.",
     )
-    snapshot_default = os.environ.get("PRRTC_G1_SNAPSHOT")
+    snapshot_default = os.environ.get("PATACON_G1_SNAPSHOT")
     parser.add_argument(
         "--snapshot",
         type=Path,
@@ -217,11 +217,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--snapshot-waypoint",
         type=int,
-        default=int(os.environ.get("PRRTC_G1_SNAPSHOT_WAYPOINT", "-1")),
+        default=int(os.environ.get("PATACON_G1_SNAPSHOT_WAYPOINT", "-1")),
         help="Waypoint to render; -1 selects the middle waypoint.",
     )
-    video_default = os.environ.get("PRRTC_G1_VIDEO") or os.environ.get(
-        "PRRTC_VIDEO"
+    video_default = os.environ.get("PATACON_G1_VIDEO") or os.environ.get(
+        "PATACON_VIDEO"
     )
     parser.add_argument(
         "--video",
@@ -229,26 +229,26 @@ def parse_args() -> argparse.Namespace:
         default=Path(video_default) if video_default else None,
         help=(
             "Render one start-to-goal replay directly to an MP4 instead of "
-            "opening a viewer. PRRTC_G1_VIDEO or PRRTC_VIDEO provides the "
+            "opening a viewer. PATACON_G1_VIDEO or PATACON_VIDEO provides the "
             "same option."
         ),
     )
     parser.add_argument(
         "--video-width",
         type=int,
-        default=os.environ.get("PRRTC_VIDEO_WIDTH", str(DEFAULT_VIDEO_WIDTH)),
+        default=os.environ.get("PATACON_VIDEO_WIDTH", str(DEFAULT_VIDEO_WIDTH)),
         help=(
             f"Recorded video width in pixels (default: {DEFAULT_VIDEO_WIDTH}; "
-            "PRRTC_VIDEO_WIDTH provides the same option)."
+            "PATACON_VIDEO_WIDTH provides the same option)."
         ),
     )
     parser.add_argument(
         "--video-height",
         type=int,
-        default=os.environ.get("PRRTC_VIDEO_HEIGHT", str(DEFAULT_VIDEO_HEIGHT)),
+        default=os.environ.get("PATACON_VIDEO_HEIGHT", str(DEFAULT_VIDEO_HEIGHT)),
         help=(
             f"Recorded video height in pixels (default: {DEFAULT_VIDEO_HEIGHT}; "
-            "PRRTC_VIDEO_HEIGHT provides the same option)."
+            "PATACON_VIDEO_HEIGHT provides the same option)."
         ),
     )
     add_video_view_argument(parser)
@@ -1775,7 +1775,7 @@ def main() -> int:
         )
         return 0
     validate_only = args.validate_only or os.environ.get(
-        "PRRTC_MUJOCO_VALIDATE_ONLY"
+        "PATACON_MUJOCO_VALIDATE_ONLY"
     ) == "1"
     if validate_only:
         import mujoco

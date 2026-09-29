@@ -17,7 +17,7 @@
 #include "src/collision/factory.hh"
 #include "src/planning/AORRTC.hh"
 #include "src/planning/Planners.hh"
-#include "src/planning/pRRTC_settings.hh"
+#include "src/planning/PATACON_settings.hh"
 #include "src/config/PlanningProblemJson.hh"
 #include "src/constraints/RobotConstraintAdapter.hh"
 #include "scripts/ffw_sg2_attached_object_collision.hh"
@@ -173,7 +173,7 @@ void visualize_g1_paths(const json &trajectories) {
     const auto timestamp = std::chrono::steady_clock::now()
         .time_since_epoch().count();
     const auto trajectory_path = std::filesystem::temp_directory_path()
-        / ("prrtc_g1_trajectories_" + std::to_string(timestamp) + ".json");
+        / ("patacon_g1_trajectories_" + std::to_string(timestamp) + ".json");
     {
         std::ofstream trajectory_file(trajectory_path);
         if (!trajectory_file) {
@@ -217,7 +217,7 @@ void visualize_franka_paths(
     const auto timestamp = std::chrono::steady_clock::now()
         .time_since_epoch().count();
     const auto trajectory_path = std::filesystem::temp_directory_path()
-        / ("prrtc_" + std::string(Robot::name) + "_trajectories_"
+        / ("patacon_" + std::string(Robot::name) + "_trajectories_"
            + std::to_string(timestamp) + ".json");
     {
         std::ofstream trajectory_file(trajectory_path);
@@ -241,7 +241,7 @@ void visualize_franka_paths(
         "python3 " + shell_quote(visualizer_path.string())
         + " --model " + shell_quote(model_path.string())
         + " --trajectory " + shell_quote(trajectory_path.string());
-    const char *validate_only = std::getenv("PRRTC_MUJOCO_VALIDATE_ONLY");
+    const char *validate_only = std::getenv("PATACON_MUJOCO_VALIDATE_ONLY");
     if (validate_only != nullptr && std::string(validate_only) == "1") {
         command += " --validate-only";
     }
@@ -289,7 +289,7 @@ void visualize_ffw_sg2_paths(
     const auto timestamp = std::chrono::steady_clock::now()
         .time_since_epoch().count();
     const auto trajectory_path = std::filesystem::temp_directory_path() /
-        ("prrtc_" + std::string(Robot::name) + "_trajectories_" +
+        ("patacon_" + std::string(Robot::name) + "_trajectories_" +
          std::to_string(timestamp) + ".json");
     {
         std::ofstream output(trajectory_path);
@@ -419,7 +419,7 @@ void print_csv_header(std::ofstream &outfile) {
 }
 
 template<typename Robot>
-void print_planner_result_to_file(PlannerResult<Robot> &result, pRRTC_settings &settings, std::string problem_name, int problem_idx, std::ofstream &outfile) {
+void print_planner_result_to_file(PlannerResult<Robot> &result, PATACON_settings &settings, std::string problem_name, int problem_idx, std::ofstream &outfile) {
     outfile << problem_name << ", ";
     outfile << problem_idx << ", ";
     outfile << result.solved << ", ";
@@ -723,9 +723,9 @@ void run_planning(
                 "format",
                 settings.aorrtc
                     ? "AORRTC_problem_set_results_v1"
-                    : "pRRTC_problem_set_results_v1"
+                    : "PATACON_problem_set_results_v1"
             },
-            {"planner", settings.aorrtc ? "AORRTC" : "pRRTC"},
+            {"planner", settings.aorrtc ? "AORRTC" : "PATACON"},
             {"robot", robot_name},
             {"run_name", run_name},
             {"problem_name", problem_set_name},

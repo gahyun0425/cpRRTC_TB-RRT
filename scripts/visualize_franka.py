@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate or replay a Franka single/dual cpRRTC trajectory in MuJoCo."""
+"""Validate or replay a Franka single/dual PATACON trajectory in MuJoCo."""
 
 from __future__ import annotations
 
@@ -86,7 +86,7 @@ def parse_args() -> argparse.Namespace:
         help="Maximum configuration-coordinate acceleration per second squared.",
     )
     parser.add_argument("--validate-only", action="store_true")
-    add_video_arguments(parser, "PRRTC_FRANKA_VIDEO")
+    add_video_arguments(parser, "PATACON_FRANKA_VIDEO")
     args = parser.parse_args()
     if (
         not math.isfinite(args.fps)

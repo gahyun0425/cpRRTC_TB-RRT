@@ -221,11 +221,11 @@ def continuous_trajectory_frames(
 def add_video_view_argument(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--video-views",
-        default=os.environ.get("PRRTC_VIDEO_VIEWS", "front"),
+        default=os.environ.get("PATACON_VIDEO_VIEWS", "front"),
         help=(
             "Comma-separated camera views: front, front_left, front_right, "
             "overhead, left, rear, right, or all (default: front). "
-            "PRRTC_VIDEO_VIEWS provides the same option."
+            "PATACON_VIDEO_VIEWS provides the same option."
         ),
     )
 
@@ -236,7 +236,7 @@ def add_video_arguments(
 ) -> None:
     """Add the common offscreen-video options to a visualizer parser."""
     video_default = os.environ.get(robot_environment_variable) or os.environ.get(
-        "PRRTC_VIDEO"
+        "PATACON_VIDEO"
     )
     parser.add_argument(
         "--video",
@@ -244,26 +244,26 @@ def add_video_arguments(
         default=Path(video_default) if video_default else None,
         help=(
             "Render one start-to-goal replay directly to an MP4 instead of "
-            f"opening a viewer. {robot_environment_variable} or PRRTC_VIDEO "
+            f"opening a viewer. {robot_environment_variable} or PATACON_VIDEO "
             "provides the same option."
         ),
     )
     parser.add_argument(
         "--video-width",
         type=int,
-        default=os.environ.get("PRRTC_VIDEO_WIDTH", str(DEFAULT_VIDEO_WIDTH)),
+        default=os.environ.get("PATACON_VIDEO_WIDTH", str(DEFAULT_VIDEO_WIDTH)),
         help=(
             f"Recorded video width in pixels (default: {DEFAULT_VIDEO_WIDTH}; "
-            "PRRTC_VIDEO_WIDTH provides the same option)."
+            "PATACON_VIDEO_WIDTH provides the same option)."
         ),
     )
     parser.add_argument(
         "--video-height",
         type=int,
-        default=os.environ.get("PRRTC_VIDEO_HEIGHT", str(DEFAULT_VIDEO_HEIGHT)),
+        default=os.environ.get("PATACON_VIDEO_HEIGHT", str(DEFAULT_VIDEO_HEIGHT)),
         help=(
             f"Recorded video height in pixels (default: {DEFAULT_VIDEO_HEIGHT}; "
-            "PRRTC_VIDEO_HEIGHT provides the same option)."
+            "PATACON_VIDEO_HEIGHT provides the same option)."
         ),
     )
     add_video_view_argument(parser)
@@ -361,15 +361,15 @@ def configure_camera(
 def configure_model_render_quality(model) -> int:
     """Apply the requested offscreen multisample count and return it."""
     raw_samples = os.environ.get(
-        "PRRTC_VIDEO_SAMPLES", str(DEFAULT_VIDEO_SAMPLES)
+        "PATACON_VIDEO_SAMPLES", str(DEFAULT_VIDEO_SAMPLES)
     )
     try:
         samples = int(raw_samples)
     except ValueError as error:
-        raise ValueError("PRRTC_VIDEO_SAMPLES must be an integer") from error
+        raise ValueError("PATACON_VIDEO_SAMPLES must be an integer") from error
     if samples not in (0, 2, 4, 8, 16):
         raise ValueError(
-            "PRRTC_VIDEO_SAMPLES must be one of: 0, 2, 4, 8, 16"
+            "PATACON_VIDEO_SAMPLES must be one of: 0, 2, 4, 8, 16"
         )
     model.vis.quality.offsamples = samples
     return samples
@@ -475,21 +475,21 @@ class FfmpegVideoWriter:
         self.width = width
         self.height = height
         self.frame_count = 0
-        raw_crf = os.environ.get("PRRTC_VIDEO_CRF", str(DEFAULT_VIDEO_CRF))
+        raw_crf = os.environ.get("PATACON_VIDEO_CRF", str(DEFAULT_VIDEO_CRF))
         try:
             crf = int(raw_crf)
         except ValueError as error:
-            raise ValueError("PRRTC_VIDEO_CRF must be an integer") from error
+            raise ValueError("PATACON_VIDEO_CRF must be an integer") from error
         if crf < 0 or crf > 51:
-            raise ValueError("PRRTC_VIDEO_CRF must be between 0 and 51")
-        preset = os.environ.get("PRRTC_VIDEO_PRESET", DEFAULT_VIDEO_PRESET)
+            raise ValueError("PATACON_VIDEO_CRF must be between 0 and 51")
+        preset = os.environ.get("PATACON_VIDEO_PRESET", DEFAULT_VIDEO_PRESET)
         supported_presets = {
             "ultrafast", "superfast", "veryfast", "faster", "fast",
             "medium", "slow", "slower", "veryslow",
         }
         if preset not in supported_presets:
             raise ValueError(
-                "PRRTC_VIDEO_PRESET must be a valid x264 preset"
+                "PATACON_VIDEO_PRESET must be a valid x264 preset"
             )
         self._process = subprocess.Popen(
             [

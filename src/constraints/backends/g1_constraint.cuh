@@ -1314,7 +1314,7 @@ __device__ __forceinline__ void g1_clamp_configuration(
 }
 
 // Compute one damped-least-squares task correction. This is the G1
-// counterpart of ffw_sg2_task_correction used by cpRRTC ParallelProject.
+// counterpart of ffw_sg2_task_correction used by PATACON ParallelProject.
 __device__ __forceinline__ bool g1_task_correction(
     const float q[G1_JOINT_DIM],
     const constraints::G1ConstraintParameters &parameters,

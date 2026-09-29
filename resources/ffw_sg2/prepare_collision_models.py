@@ -402,7 +402,7 @@ def build_metadata(
             "joint_flag_ints": joint_flag_ints,
             "transform_floats_for_two_slots": transform_floats,
         },
-        "current_prrtc_static_capacities": {
+        "current_patacon_static_capacities": {
             "fine_runtime_position_floats": 6000,
             "approximate_runtime_position_floats": 2500,
             "joint_flag_ints": 640,

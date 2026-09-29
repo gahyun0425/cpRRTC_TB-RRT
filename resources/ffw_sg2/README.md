@@ -1,7 +1,7 @@
 # FFW-SG2 planning model
 
 This directory contains the model inputs and reproducible generation support for
-the FFW-SG2 integration in pRRTC. Phases 1 and 2 create the planning and
+the FFW-SG2 integration in PATACON. Phases 1 and 2 create the planning and
 collision models; Phase 3 adds the generated CUDA implementation to the planner.
 
 ## Source and generated files
@@ -31,7 +31,7 @@ its collision box remains in the planning model.
 
 ## Canonical 15-DoF configuration
 
-The pRRTC configuration vector must use this exact order:
+The PATACON configuration vector must use this exact order:
 
 ```text
 [lift_joint,
@@ -54,7 +54,7 @@ upper = [ 0.0,
 
 The head, both grippers, and all wheel steering/drive joints are fixed at
 `q = 0`. This makes the planning model deterministic and prevents those joints
-from silently increasing the pRRTC state dimension.
+from silently increasing the PATACON state dimension.
 
 ## Self-collision policy
 
@@ -111,7 +111,7 @@ The following files configure Cricket code generation:
 - `../ffw_sg2_approx.json`
 - `../ffw_sg2_struct.json`
 
-All three use `batch_size: 16`, matching the required pRRTC edge granularity.
+All three use `batch_size: 16`, matching the required PATACON edge granularity.
 The selected end-effector is the left gripper base; this does not remove the
 other arm from the branched kinematic model.
 
@@ -119,7 +119,7 @@ The CUDA code was generated from CoMMALab/Cricket's `gpu-cc-early-exit` branch
 at commit `98582c35d81c6ed0d8c4badb7fdf78327523524c`. The raw combined header has
 SHA-256 `1d07485ad5763a55bcbc5a3baaf5ffc81a74cdb130a58dc098448b582bd31950`.
 After Cricket generates `ffw_sg2_fk.hh`, validate and reproduce the checked-in
-header from the pRRTC repository root with:
+header from the PATACON repository root with:
 
 ```bash
 python3 resources/ffw_sg2/postprocess_cricket_header.py \

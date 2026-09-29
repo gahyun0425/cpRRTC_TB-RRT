@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <robot name="ffw_sg2_follower">
-  <!-- Canonical pRRTC configuration order: lift, left arm, right arm. -->
+  <!-- Canonical PATACON configuration order: lift, left arm, right arm. -->
   <group name="ffw_sg2">
     <joint name="lift_joint"/>
     <joint name="arm_l_joint1"/>

@@ -10,7 +10,7 @@
 
 #include <nlohmann/json.hpp>
 
-#include "src/planning/pRRTC_settings.hh"
+#include "src/planning/PATACON_settings.hh"
 
 namespace ffw_sg2_attached_object_collision {
 
@@ -480,7 +480,7 @@ inline void parse_box_sphere_grid(
 
 inline void apply_from_problem(
     const json &problem,
-    pRRTC_settings &settings,
+    PATACON_settings &settings,
     int fine_sphere_count = kFfwSg2MobilityFineSphereCount,
     int approximate_sphere_count = kFfwSg2MobilityApproxSphereCount
 ) {

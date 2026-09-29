@@ -10,7 +10,7 @@
 
 #include "Robots.hh"
 #include "src/collision/environment.hh"
-#include "pRRTC_settings.hh"
+#include "PATACON_settings.hh"
 
 struct PlannerDiagnostics {
     std::array<int, 2> tangent_space_count = {0, 0};
@@ -160,41 +160,41 @@ namespace nRRT {
     PlannerResult<Robot> solve(typename Robot::Configuration &start, std::vector<typename Robot::Configuration> &goals, ppln::collision::Environment<float> &environment);
 }
 
-namespace pRRTC {
+namespace PATACON {
     void set_cuda_device_reset_enabled(bool enabled);
     void set_persistent_workspace_enabled(bool enabled);
     void release_persistent_workspace();
     void set_time_limit_seconds(double seconds);
     bool project_g1_configuration(
         ppln::robots::G1::Configuration &configuration,
-        const pRRTC_settings &settings
+        const PATACON_settings &settings
     );
 
     template <typename Robot>
-    PlannerResult<Robot> solve(typename Robot::Configuration &start, std::vector<typename Robot::Configuration> &goals, ppln::collision::Environment<float> &environment, pRRTC_settings &settings);
+    PlannerResult<Robot> solve(typename Robot::Configuration &start, std::vector<typename Robot::Configuration> &goals, ppln::collision::Environment<float> &environment, PATACON_settings &settings);
 
     template <typename Robot>
     PathSimplificationResult<Robot> simplify_path_for_visualization(
         const std::vector<typename Robot::Configuration> &path,
         ppln::collision::Environment<float> &environment,
-        pRRTC_settings &settings
+        PATACON_settings &settings
     );
 
     template <typename Robot>
     PathValidationResult validate_path_for_visualization(
         const std::vector<typename Robot::Configuration> &path,
         ppln::collision::Environment<float> &environment,
-        pRRTC_settings &settings,
+        PATACON_settings &settings,
         float projection_tolerance = 1.0e-5f
     );
 }
 
-namespace nRRTC {
+namespace nPATACON {
     template <typename Robot>
-    PlannerResult<Robot> solve(typename Robot::Configuration &start, std::vector<typename Robot::Configuration> &goals, ppln::collision::Environment<float> &environment, pRRTC_settings &settings);
+    PlannerResult<Robot> solve(typename Robot::Configuration &start, std::vector<typename Robot::Configuration> &goals, ppln::collision::Environment<float> &environment, PATACON_settings &settings);
 }
 
-namespace pwRRTC {
+namespace pwPATACON {
     template <typename Robot>
-    PlannerResult<Robot> solve(typename Robot::Configuration &start, std::vector<typename Robot::Configuration> &goals, ppln::collision::Environment<float> &environment, pRRTC_settings &settings);
+    PlannerResult<Robot> solve(typename Robot::Configuration &start, std::vector<typename Robot::Configuration> &goals, ppln::collision::Environment<float> &environment, PATACON_settings &settings);
 }

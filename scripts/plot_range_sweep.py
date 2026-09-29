@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Plot planning time measurements from pRRTC range-sweep JSON files."""
+"""Plot planning time measurements from PATACON range-sweep JSON files."""
 
 import argparse
 import csv
@@ -184,7 +184,7 @@ def plot(output_path: Path, datasets, title: str):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Plot range versus planning time from pRRTC range-sweep JSON files."
+        description="Plot range versus planning time from PATACON range-sweep JSON files."
     )
     parser.add_argument("sweep_dirs", type=Path, nargs="+")
     parser.add_argument(
@@ -233,7 +233,7 @@ def main():
     title = args.title or (
         "Range Sweep: Planning Time Comparison"
         if is_comparison
-        else "pRRTC Range Sweep: Planning Time"
+        else "PATACON Range Sweep: Planning Time"
     )
 
     output_path.parent.mkdir(parents=True, exist_ok=True)

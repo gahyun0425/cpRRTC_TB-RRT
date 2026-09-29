@@ -135,7 +135,7 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Load and validate without opening a viewer window.",
     )
-    add_video_arguments(parser, "PRRTC_IGRIS_C_VIDEO")
+    add_video_arguments(parser, "PATACON_IGRIS_C_VIDEO")
     args = parser.parse_args()
     if args.speed is None:
         args.speed = (
@@ -1082,7 +1082,7 @@ def main() -> int:
         model = mujoco.MjModel.from_xml_path(temporary_name)
         validate_joint_limits(mujoco, model, waypoints)
         validate_only = args.validate_only or os.environ.get(
-            "PRRTC_MUJOCO_VALIDATE_ONLY"
+            "PATACON_MUJOCO_VALIDATE_ONLY"
         ) == "1"
         if validate_only:
             data = mujoco.MjData(model)

@@ -14,7 +14,7 @@
 #include "src/collision/environment.hh"
 #include "src/planning/Planners.hh"
 #include "src/planning/AORRTC.hh"
-#include "src/planning/pRRTC_settings.hh"
+#include "src/planning/PATACON_settings.hh"
 
 namespace planner_result_json {
 
@@ -238,7 +238,7 @@ json tree_trace_to_json(const PlannerResult<Robot> &result) {
     };
 }
 
-inline json settings_to_json(const pRRTC_settings &settings) {
+inline json settings_to_json(const PATACON_settings &settings) {
     json output = {
         {"max_samples", settings.max_samples},
         {"max_tangent_spaces", settings.max_tangent_spaces},
@@ -408,7 +408,7 @@ inline json diagnostics_to_json(const PlannerDiagnostics &diagnostics) {
 
 inline json settings_to_json(const AORRTC_settings &settings) {
     json output = settings_to_json(
-        static_cast<const pRRTC_settings &>(settings)
+        static_cast<const PATACON_settings &>(settings)
     );
     output["aorrtc"] = settings.aorrtc;
     output["time_limit_sec"] = settings.time_limit_sec;
@@ -479,7 +479,7 @@ inline json environment_summary_json(
 template <typename Robot>
 json result_to_json(
     const PlannerResult<Robot> &result,
-    const pRRTC_settings &settings,
+    const PATACON_settings &settings,
     const ppln::collision::Environment<float> &environment,
     const typename Robot::Configuration &start,
     const std::vector<typename Robot::Configuration> &goals,
@@ -498,8 +498,8 @@ json result_to_json(
     }
 
     json payload = {
-        {"format", "pRRTC_result_v1"},
-        {"planner", "pRRTC"},
+        {"format", "PATACON_result_v1"},
+        {"planner", "PATACON"},
         {"robot", robot_name},
         {"problem_name", problem_name},
         {"problem_idx", problem_index},
@@ -547,7 +547,7 @@ json result_to_json(
 ) {
     json payload = result_to_json<Robot>(
         static_cast<const PlannerResult<Robot> &>(result),
-        static_cast<const pRRTC_settings &>(settings),
+        static_cast<const PATACON_settings &>(settings),
         environment,
         start,
         goals,

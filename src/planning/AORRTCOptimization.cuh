@@ -5,7 +5,7 @@
 
 
 /*
-Parallelized RRTC: Each block works to add a config to the tree (either start or goal depending on balance)
+PATACON: Each block works to add a config to the tree (either start or goal depending on balance)
 */
 
 
@@ -60,7 +60,7 @@ namespace AORRTC {
     constexpr int MAX_GRANULARITY = 16;
     constexpr int MAX_THREADS_PER_BLOCK = 4*MAX_GRANULARITY;
 
-    // cpRRTC projected motion shared buffer용
+    // PATACON projected motion shared buffer용
     constexpr int MAX_ROBOT_DIM = ppln::robots::G1::dimension;
     constexpr int FFW_SG2_TANGENT_DIM = 9; // 기본 constraint에 따른 tangent dim 15 - 6 = 9. 최대로 필요한 tangent 차원
     constexpr int MAX_TANGENT_DIM = ppln::collision::G1_TANGENT_DIM;
@@ -75,30 +75,30 @@ namespace AORRTC {
 
     // Shared initial-search primitives. AORRTC keeps only its cost-aware
     // state, parent resampling, and bounded-search implementation here.
-    using pRRTC::TangentSpaceTraits;
-    using pRRTC::HaltonState;
-    using pRRTC::cprrtc_active_tangent_dim;
-    using pRRTC::cprrtc_joint_distance_weight;
-    using pRRTC::cprrtc_sq_config_distance;
-    using pRRTC::cprrtc_config_distance;
-    using pRRTC::init_rng;
-    using pRRTC::init_halton;
-    using pRRTC::setup_environment_on_device;
-    using pRRTC::cleanup_environment_on_device;
-    using pRRTC::reset_to_unwritten_state;
-    using pRRTC::cprrtc_project_motion;
-    using pRRTC::cprrtc_store_tangent_basis;
-    using pRRTC::cprrtc_sample_tangent_config;
-    using pRRTC::cprrtc_constraint_error_norm;
-    using pRRTC::init_root_ts_banks;
-    using pRRTC::cprrtc_shared_config_distance;
-    using pRRTC::cprrtc_detailed_env_collision_check;
-    using pRRTC::cprrtc_detailed_self_collision_check;
-    using pRRTC::cprrtc_attached_object_collision_check_approx;
-    using pRRTC::cprrtc_attached_object_collision_check;
-    using pRRTC::cprrtc_reserve_slot;
-    using pRRTC::cprrtc_register_node_in_ts;
-    using pRRTC::cprrtc_project_target_direction_to_tangent;
+    using PATACON::TangentSpaceTraits;
+    using PATACON::HaltonState;
+    using PATACON::patacon_active_tangent_dim;
+    using PATACON::patacon_joint_distance_weight;
+    using PATACON::patacon_sq_config_distance;
+    using PATACON::patacon_config_distance;
+    using PATACON::init_rng;
+    using PATACON::init_halton;
+    using PATACON::setup_environment_on_device;
+    using PATACON::cleanup_environment_on_device;
+    using PATACON::reset_to_unwritten_state;
+    using PATACON::patacon_project_motion;
+    using PATACON::patacon_store_tangent_basis;
+    using PATACON::patacon_sample_tangent_config;
+    using PATACON::patacon_constraint_error_norm;
+    using PATACON::init_root_ts_banks;
+    using PATACON::patacon_shared_config_distance;
+    using PATACON::patacon_detailed_env_collision_check;
+    using PATACON::patacon_detailed_self_collision_check;
+    using PATACON::patacon_attached_object_collision_check_approx;
+    using PATACON::patacon_attached_object_collision_check;
+    using PATACON::patacon_reserve_slot;
+    using PATACON::patacon_register_node_in_ts;
+    using PATACON::patacon_project_target_direction_to_tangent;
 
     template <typename Robot>
     __device__ __forceinline__ float aorrtc_root_distance_lower_bound(
@@ -108,7 +108,7 @@ namespace AORRTC {
         const float *configuration
     ) {
         if (tree_id == 0) {
-            return cprrtc_config_distance<Robot>(
+            return patacon_config_distance<Robot>(
                 nodes[0],
                 configuration
             );
@@ -118,7 +118,7 @@ namespace AORRTC {
         for (int goal_index = 0; goal_index < num_goals; goal_index++) {
             minimum = fminf(
                 minimum,
-                cprrtc_config_distance<Robot>(
+                patacon_config_distance<Robot>(
                     &nodes[1][goal_index * Robot::dimension],
                     configuration
                 )
@@ -282,7 +282,7 @@ namespace AORRTC {
             bool valid = true;
             if constexpr (TangentSpaceTraits<Robot>::enabled) {
                 const float residual =
-                    cprrtc_constraint_error_norm<Robot>(interp_cfg);
+                    patacon_constraint_error_norm<Robot>(interp_cfg);
                 valid = isfinite(residual)
                     && residual <= d_settings.projection_task_tolerance;
             }
@@ -334,7 +334,7 @@ namespace AORRTC {
         );
 
         const bool attached_object_collision_approx =
-            not cprrtc_attached_object_collision_check_approx<Robot>(
+            not patacon_attached_object_collision_check_approx<Robot>(
                 interp_cfg,
                 sphere_pos_approx,
                 env,
@@ -358,7 +358,7 @@ namespace AORRTC {
             __syncthreads();
 
             const bool env_collision =
-                not cprrtc_detailed_env_collision_check<Robot>(
+                not patacon_detailed_env_collision_check<Robot>(
                     sphere_pos,
                     link_CC,
                     env,
@@ -371,7 +371,7 @@ namespace AORRTC {
             );
 
             const bool attached_object_collision =
-                not cprrtc_attached_object_collision_check<Robot>(
+                not patacon_attached_object_collision_check<Robot>(
                     interp_cfg,
                     sphere_pos,
                     env,
@@ -423,7 +423,7 @@ namespace AORRTC {
                 }
 
                 const bool self_collision =
-                    not cprrtc_detailed_self_collision_check<Robot>(
+                    not patacon_detailed_self_collision_check<Robot>(
                         sphere_pos,
                         link_CC,
                         tid,
@@ -481,7 +481,7 @@ namespace AORRTC {
             *shared_parent = initial_parent;
             *shared_parent_cost =
                 tree_costs[initial_parent]
-                + cprrtc_config_distance<Robot>(
+                + patacon_config_distance<Robot>(
                     &tree_nodes[initial_parent * Robot::dimension],
                     x_new
                 );
@@ -532,7 +532,7 @@ namespace AORRTC {
                 while (node_idx >= 0) {
                     if (tree_ready[node_idx] != 0) {
                         const float distance =
-                            cprrtc_config_distance<Robot>(
+                            patacon_config_distance<Robot>(
                                 &tree_nodes[node_idx * Robot::dimension],
                                 x_new
                             );
@@ -566,7 +566,7 @@ namespace AORRTC {
                         continue;
                     }
                     const float distance =
-                        cprrtc_config_distance<Robot>(
+                        patacon_config_distance<Robot>(
                             &tree_nodes[node_idx * Robot::dimension],
                             x_new
                         );
@@ -641,7 +641,7 @@ namespace AORRTC {
                     *shared_parent = candidate_parent;
                     *shared_parent_cost =
                         tree_costs[candidate_parent]
-                        + cprrtc_config_distance<Robot>(
+                        + patacon_config_distance<Robot>(
                             &tree_nodes[
                                 candidate_parent * Robot::dimension
                             ],
@@ -663,7 +663,7 @@ namespace AORRTC {
     template <typename Robot, bool TraceTrees, bool AORRTC>
     __global__ void
     // __launch_bounds__(128, 8)
-    rrtc(
+    patacon(
         float **nodes,
         int **parents,
         float **node_costs,
@@ -766,7 +766,7 @@ namespace AORRTC {
         __shared__ bool aorrtc_sample_valid;
         __shared__ float aorrtc_sample_cost;
         __shared__ float aorrtc_best_cost_snapshot;
-        // cpRRTC CONNECT state
+        // PATACON CONNECT state
         // projection 전 target까지 거리
         __shared__ float connect_distance_before;
         // projection 후 target까지 거리
@@ -788,7 +788,7 @@ namespace AORRTC {
         // 새 TB-RRT CONNECT 상태
         __shared__ bool connect_failed;
         __shared__ bool connect_reached;
-        // cpRRTC parallel projection shared memory
+        // PATACON parallel projection shared memory
         __align__(16) __shared__ volatile float motion_segment[(MAX_GRANULARITY + 1) * MAX_ROBOT_DIM];
         __align__(16) __shared__ volatile float motion_segment_next[(MAX_GRANULARITY + 1) * MAX_ROBOT_DIM];
         __shared__ volatile unsigned char motion_projection_valid[MAX_GRANULARITY + 1];
@@ -813,7 +813,7 @@ namespace AORRTC {
                 }
 
                 // Tree selection. During the first persistent search, use
-                // the same in-kernel balance logic as pRRTC. After the first
+                // the same in-kernel balance logic as PATACON. After the first
                 // solution, each AORRTC launch performs one iteration, so the
                 // previous per-block tree choice is preserved in block_tree_ids.
                 if constexpr (AORRTC) {
@@ -1017,7 +1017,7 @@ namespace AORRTC {
                     }
 
                     // 2. 현재 constraint의 tangent dimension
-                    const int active_tangent_dim = cprrtc_active_tangent_dim<Robot>();
+                    const int active_tangent_dim = patacon_active_tangent_dim<Robot>();
 
                     // 3. Tangent Space 안에서 random direction 생성
                     float coeff_norm2 = 0.0f;
@@ -1099,7 +1099,7 @@ namespace AORRTC {
 
             // q_rand 생성 생성
             if constexpr (TangentSpaceTraits<Robot>::enabled) {
-                cprrtc_sample_tangent_config<Robot>(
+                patacon_sample_tangent_config<Robot>(
                     t_nodes, 
                     t_ts_bases, // node별 basis가 아니라 TSBank
                     t_ts_root_node_idx,
@@ -1183,7 +1183,7 @@ namespace AORRTC {
                     if (t_node_ready[node_idx] != 0) { // 사용할 수 있는 node인지 확인
                         // 현재 node와 q_rand 사이의 거리 계산 (거리 제곱 반환)
                         const float candidate_dist =
-                            cprrtc_sq_config_distance<Robot>(
+                            patacon_sq_config_distance<Robot>(
                                 (float *)&t_node_ts_q[node_idx * dim],
                                 (float *)config
                             );
@@ -1192,7 +1192,7 @@ namespace AORRTC {
                         if constexpr (AORRTC) {
                             if (aorrtc_bound_active) {
                                 const float actual_distance =
-                                    cprrtc_config_distance<Robot>(
+                                    patacon_config_distance<Robot>(
                                         &t_nodes[node_idx * dim],
                                         (float *)config
                                     );
@@ -1229,7 +1229,7 @@ namespace AORRTC {
                     }
 
                     const float candidate_dist =
-                        cprrtc_sq_config_distance<Robot>(
+                        patacon_sq_config_distance<Robot>(
                             (float *)&t_nodes[i * dim],
                             (float *)config
                         );
@@ -1290,13 +1290,13 @@ namespace AORRTC {
                     if constexpr (AORRTC) {
                         if (aorrtc_bound_active) {
                             if constexpr (TangentSpaceTraits<Robot>::enabled) {
-                                q_rand_dist = cprrtc_config_distance<Robot>(
+                                q_rand_dist = patacon_config_distance<Robot>(
                                     &t_node_ts_q[sindex[0] * dim],
                                     (float *)config
                                 );
                             }
                             else {
-                                q_rand_dist = cprrtc_config_distance<Robot>(
+                                q_rand_dist = patacon_config_distance<Robot>(
                                     &t_nodes[sindex[0] * dim],
                                     (float *)config
                                 );
@@ -1378,7 +1378,7 @@ namespace AORRTC {
 
                     // EM 계산은 thread 0 하나만 수행
                     if (tid == 0) {
-                        const float em_error =cprrtc_constraint_error_norm<Robot>(concon_probe); // constraint residual 검사
+                        const float em_error =patacon_constraint_error_norm<Robot>(concon_probe); // constraint residual 검사
 
                         // 먼저 현재 candidate를 포함한다.
                         concon_count = step;
@@ -1453,11 +1453,11 @@ namespace AORRTC {
                 }
                 __syncthreads();
 
-                // cpRRTC EXTEND
+                // PATACON EXTEND
                 // 1. q_near -> q_steer straight-line motion 생성
                 // 2. FFW SG2는 analytic-Jacobian ParallelProject 수행
                 // 3. projected waypoint들에 대해 기존 collision check 수행
-                const bool projection_good = cprrtc_project_motion<Robot>(
+                const bool projection_good = patacon_project_motion<Robot>(
                     config,
                     delta,
                     motion_segment,
@@ -1517,7 +1517,7 @@ namespace AORRTC {
                     // 여러 thread의 충돌 검사 결과를 하나의 공유 결과로 합치는 코드
                     atomicOr((unsigned int *)&local_cc_result[0],config_in_collision2_approx ? 1u : 0u);
 
-                    bool attached_object_collision_approx = not cprrtc_attached_object_collision_check_approx<Robot>(
+                    bool attached_object_collision_approx = not patacon_attached_object_collision_check_approx<Robot>(
                             interp_cfg,
                             sphere_pos_approx,
                             env,
@@ -1547,7 +1547,7 @@ namespace AORRTC {
                         __syncthreads();
 
                         // 정밀 충돌 검사
-                        bool config_in_collision2 = not cprrtc_detailed_env_collision_check<Robot>(
+                        bool config_in_collision2 = not patacon_detailed_env_collision_check<Robot>(
                                 sphere_pos,
                                 link_CC,
                                 env,
@@ -1558,7 +1558,7 @@ namespace AORRTC {
                         // 각 thread 검사 합치기
                         atomicOr((unsigned int *)&local_cc_result[0],config_in_collision2 ? 1u : 0u);
 
-                        bool attached_object_collision = not cprrtc_attached_object_collision_check<Robot>(
+                        bool attached_object_collision = not patacon_attached_object_collision_check<Robot>(
                                 interp_cfg,
                                 sphere_pos,
                                 env,
@@ -1616,7 +1616,7 @@ namespace AORRTC {
                                 __syncthreads();
                             }
 
-                            bool config_in_collision =not cprrtc_detailed_self_collision_check<Robot>(
+                            bool config_in_collision =not patacon_detailed_self_collision_check<Robot>(
                                     sphere_pos,
                                     link_CC,
                                     tid,
@@ -1701,7 +1701,7 @@ namespace AORRTC {
                     // grow tree
                     if (tid == 0) {
                         if constexpr (AORRTC) {
-                            index = cprrtc_reserve_slot(
+                            index = patacon_reserve_slot(
                                 &atomic_free_index[t_tree_id],
                                 d_settings.max_samples
                             );
@@ -1766,7 +1766,7 @@ namespace AORRTC {
                         if (tid == 0) {
                             t_node_costs[index] =
                                 t_node_costs[concon_parent_idx]
-                                + cprrtc_config_distance<Robot>(
+                                + patacon_config_distance<Robot>(
                                     &t_nodes[concon_parent_idx * dim],
                                     &t_nodes[index * dim]
                                 );
@@ -1793,7 +1793,7 @@ namespace AORRTC {
                             // 여기서 새로운 Tangent Space 생성
                             else {
                                 // 새 TS 번호 하나 확보
-                                new_ts_id =cprrtc_reserve_slot(&ts_count[t_tree_id],d_settings.max_tangent_spaces);
+                                new_ts_id =patacon_reserve_slot(&ts_count[t_tree_id],d_settings.max_tangent_spaces);
 
                                 // TSBank 공간 부족
                                 if (new_ts_id < 0) {
@@ -1815,7 +1815,7 @@ namespace AORRTC {
                                     // projected actual q에서 Jacobian 계산
                                     // → null space basis 생성
                                     // → TSBank에 저장
-                                    new_ts_basis_ok =cprrtc_store_tangent_basis<Robot>(&t_nodes[index * dim],t_ts_bases,new_ts_id);
+                                    new_ts_basis_ok =patacon_store_tangent_basis<Robot>(&t_nodes[index * dim],t_ts_bases,new_ts_id);
 
                                     if (new_ts_basis_ok) {
                                         // Record the chart ancestry used by
@@ -1896,7 +1896,7 @@ namespace AORRTC {
                         if (tid == 0) {
                             const int assigned_ts_id =t_node_ts_id[index];
 
-                            cprrtc_register_node_in_ts<MAX_THREADS_PER_BLOCK>(index,assigned_ts_id,t_ts_node_count,t_ts_lane_head,t_node_next_in_ts);
+                            patacon_register_node_in_ts<MAX_THREADS_PER_BLOCK>(index,assigned_ts_id,t_ts_node_count,t_ts_lane_head,t_node_next_in_ts);
                         }
                     }
                     __syncthreads();
@@ -1947,7 +1947,7 @@ namespace AORRTC {
                     if (o_node_ready[i] == 0) {
                         continue;
                     }
-                    dist = cprrtc_sq_config_distance<Robot>(
+                    dist = patacon_sq_config_distance<Robot>(
                         &o_nodes[i * dim],
                         config
                     );
@@ -2016,7 +2016,7 @@ namespace AORRTC {
                     if constexpr (AORRTC) {
                         if (aorrtc_solution_found != 0) {
                             connect_total_distance =
-                                cprrtc_config_distance<Robot>(
+                                patacon_config_distance<Robot>(
                                     config,
                                     connect_target_node
                                 );
@@ -2067,7 +2067,7 @@ namespace AORRTC {
                         }
                     }
 
-                    const float chunk_start_target_distance =cprrtc_shared_config_distance<Robot>(
+                    const float chunk_start_target_distance =patacon_shared_config_distance<Robot>(
                             config,
                             connect_target_node,
                             sdata,
@@ -2133,7 +2133,7 @@ namespace AORRTC {
                     float connect_tangent_dist = 0.0f;
 
                     if (!connect_failed) {
-                        connect_tangent_dist = cprrtc_project_target_direction_to_tangent<Robot>(
+                        connect_tangent_dist = patacon_project_target_direction_to_tangent<Robot>(
                                 config,
                                 connect_target_node,
                                 connect_basis,
@@ -2175,7 +2175,7 @@ namespace AORRTC {
 
                             // 기존과 동일하게 EM 검사
                             if (tid == 0) {
-                                const float em_error =cprrtc_constraint_error_norm<Robot>(concon_probe);
+                                const float em_error =patacon_constraint_error_norm<Robot>(concon_probe);
                                 concon_count = step;
                                 if (em_error >d_settings.em_threshold) {
                                     concon_em_stop = true;
@@ -2258,7 +2258,7 @@ namespace AORRTC {
                         __syncthreads();
 
                         // 4. ParallelProject
-                        const bool extension_projection_good = cprrtc_project_motion<Robot>(
+                        const bool extension_projection_good = patacon_project_motion<Robot>(
                                 config,
                                 delta,
                                 motion_segment,
@@ -2278,14 +2278,14 @@ namespace AORRTC {
                         }
                         __syncthreads();
 
-                        const float distance_before_value = cprrtc_shared_config_distance<Robot>(
+                        const float distance_before_value = patacon_shared_config_distance<Robot>(
                             config,
                             connect_target_node,
                             sdata,
                             tid
                         );
 
-                    const float distance_after_value = cprrtc_shared_config_distance<Robot>(
+                    const float distance_after_value = patacon_shared_config_distance<Robot>(
                             &motion_segment[d_settings.granularity * dim],
                             connect_target_node,
                             sdata,
@@ -2339,7 +2339,7 @@ namespace AORRTC {
 
                             atomicOr((unsigned int *)&local_cc_result[0],config_in_collision2_approx ? 1u : 0u);
 
-                            bool attached_object_collision_approx = not cprrtc_attached_object_collision_check_approx<Robot>(
+                            bool attached_object_collision_approx = not patacon_attached_object_collision_check_approx<Robot>(
                                     interp_cfg,
                                     sphere_pos_approx,
                                     env,
@@ -2370,11 +2370,11 @@ namespace AORRTC {
 
                                 __syncthreads();
 
-                                bool config_in_collision2 = not cprrtc_detailed_env_collision_check<Robot>(sphere_pos,link_CC,env,tid,local_cc_result);
+                                bool config_in_collision2 = not patacon_detailed_env_collision_check<Robot>(sphere_pos,link_CC,env,tid,local_cc_result);
 
                                 atomicOr((unsigned int *)&local_cc_result[0],config_in_collision2 ? 1u : 0u);
 
-                                bool attached_object_collision = not cprrtc_attached_object_collision_check<Robot>(
+                                bool attached_object_collision = not patacon_attached_object_collision_check<Robot>(
                                         interp_cfg,
                                         sphere_pos,
                                         env,
@@ -2428,7 +2428,7 @@ namespace AORRTC {
                                     }
 
 
-                                    bool config_in_collision =not cprrtc_detailed_self_collision_check<Robot>(sphere_pos,link_CC,tid,local_cc_result);
+                                    bool config_in_collision =not patacon_detailed_self_collision_check<Robot>(sphere_pos,link_CC,tid,local_cc_result);
 
                                     atomicOr((unsigned int *)&local_cc_result[0],config_in_collision ? 1u : 0u);
 
@@ -2499,7 +2499,7 @@ namespace AORRTC {
                         // CONNECT node slot 확보
                         if (tid == 0) {
                             if constexpr (AORRTC) {
-                                index = cprrtc_reserve_slot(
+                                index = patacon_reserve_slot(
                                     &atomic_free_index[t_tree_id],
                                     d_settings.max_samples
                                 );
@@ -2543,7 +2543,7 @@ namespace AORRTC {
                             if (tid == 0) {
                                 t_node_costs[index] =
                                     t_node_costs[concon_parent_idx]
-                                    + cprrtc_config_distance<Robot>(
+                                    + patacon_config_distance<Robot>(
                                         &t_nodes[concon_parent_idx * dim],
                                         &t_nodes[index * dim]
                                     );
@@ -2568,7 +2568,7 @@ namespace AORRTC {
                                 // EM boundary node
                                 // → 실제 projected node에서 새 TS 생성
                                 else {
-                                    new_ts_id =cprrtc_reserve_slot(
+                                    new_ts_id =patacon_reserve_slot(
                                         &ts_count[t_tree_id],
                                         d_settings.max_tangent_spaces
                                     );
@@ -2591,7 +2591,7 @@ namespace AORRTC {
 
                                         // 실제 projected configuration에서
                                         // Jacobian/null-space basis 생성
-                                        new_ts_basis_ok =cprrtc_store_tangent_basis<Robot>(
+                                        new_ts_basis_ok =patacon_store_tangent_basis<Robot>(
                                                 &t_nodes[index * dim],
                                                 t_ts_bases,
                                                 new_ts_id
@@ -2669,7 +2669,7 @@ namespace AORRTC {
                             if (tid == 0) {
                                 const int assigned_ts_id =t_node_ts_id[index];
 
-                                cprrtc_register_node_in_ts<MAX_THREADS_PER_BLOCK>(index,assigned_ts_id,t_ts_node_count,t_ts_lane_head,t_node_next_in_ts);
+                                patacon_register_node_in_ts<MAX_THREADS_PER_BLOCK>(index,assigned_ts_id,t_ts_node_count,t_ts_lane_head,t_node_next_in_ts);
                             }
                         }
                         __syncthreads();
@@ -2704,7 +2704,7 @@ namespace AORRTC {
                         }
                         __syncthreads();
 
-                        const float current_target_distance = cprrtc_shared_config_distance<Robot>(config,connect_target_node,sdata,tid);
+                        const float current_target_distance = patacon_shared_config_distance<Robot>(config,connect_target_node,sdata,tid);
 
                         if (tid == 0) {
                             connect_reached =current_target_distance<=d_settings.connect_reached_tolerance;
@@ -2741,7 +2741,7 @@ namespace AORRTC {
                 }
 
                 const float final_connection_distance =
-                    cprrtc_shared_config_distance<Robot>(
+                    patacon_shared_config_distance<Robot>(
                         config,
                         connect_target_node,
                         sdata,
@@ -2784,7 +2784,7 @@ namespace AORRTC {
                             int o_path_size = 0;
                             while (t_parents[current] != current) { // 현재 노드가 현재 tree의 root가 아닐 때까지 부모를 따라감
                                 parent = t_parents[current];
-                                cost += cprrtc_config_distance<Robot>(
+                                cost += patacon_config_distance<Robot>(
                                     (float *)&t_nodes[current * dim],
                                     (float *)&t_nodes[parent * dim]
                                 );
@@ -2797,7 +2797,7 @@ namespace AORRTC {
                             current = connect_target_idx; // 반대편 tree의 CONNECT 목표 노드에서 역추적 시작
                             while(o_parents[current] != current) { // 반대편 tree의 root에 도달할 때까지 부모 node 따라감
                                 parent = o_parents[current];
-                                cost += cprrtc_config_distance<Robot>(
+                                cost += patacon_config_distance<Robot>(
                                     (float *)&t_nodes[current * dim],
                                     (float *)&t_nodes[parent * dim]
                                 );
@@ -2833,7 +2833,7 @@ namespace AORRTC {
         __syncthreads();
 
         if constexpr (AORRTC) {
-            // Before the first solution, behave like pRRTC: keep the CUDA
+            // Before the first solution, behave like PATACON: keep the CUDA
             // kernel alive and execute the next RRT-Connect iteration here.
             // A solution or fatal capacity/TS condition sets stop_requested.
             if (aorrtc_stop_requested != 0) {
@@ -3030,7 +3030,7 @@ namespace AORRTC {
         }
         if (settings.granularity != Collision::batch_size) {
             throw std::invalid_argument(
-                "pRRTC granularity must match the selected robot's collision batch size"
+                "PATACON granularity must match the selected robot's collision batch size"
             );
         }
         if (goals.empty()) {
@@ -3053,47 +3053,47 @@ namespace AORRTC {
         // AORRTC starts from the exact same first-feasible-path search as the
         // default planner. Keep the total --time budget across both phases.
         const bool saved_cuda_device_reset_enabled =
-            pRRTC::cuda_device_reset_enabled;
+            PATACON::cuda_device_reset_enabled;
         const bool saved_persistent_workspace_enabled =
-            pRRTC::persistent_workspace_enabled;
-        const double saved_time_limit_seconds = pRRTC::time_limit_seconds;
+            PATACON::persistent_workspace_enabled;
+        const double saved_time_limit_seconds = PATACON::time_limit_seconds;
         const bool saved_time_limit_counts_kernel_only =
-            pRRTC::time_limit_counts_kernel_only;
+            PATACON::time_limit_counts_kernel_only;
 
-        pRRTC::set_cuda_device_reset_enabled(false);
-        pRRTC::set_persistent_workspace_enabled(false);
-        pRRTC::set_time_limit_seconds(settings.time_limit_sec);
-        pRRTC::time_limit_counts_kernel_only = true;
+        PATACON::set_cuda_device_reset_enabled(false);
+        PATACON::set_persistent_workspace_enabled(false);
+        PATACON::set_time_limit_seconds(settings.time_limit_sec);
+        PATACON::time_limit_counts_kernel_only = true;
 
         PlannerResult<Robot> initial_result;
         try {
-            initial_result = pRRTC::solve<Robot>(
+            initial_result = PATACON::solve<Robot>(
                 start,
                 goals,
                 h_environment,
-                static_cast<pRRTC_settings &>(settings)
+                static_cast<PATACON_settings &>(settings)
             );
         }
         catch (...) {
-            pRRTC::set_time_limit_seconds(saved_time_limit_seconds);
-            pRRTC::time_limit_counts_kernel_only =
+            PATACON::set_time_limit_seconds(saved_time_limit_seconds);
+            PATACON::time_limit_counts_kernel_only =
                 saved_time_limit_counts_kernel_only;
-            pRRTC::set_persistent_workspace_enabled(
+            PATACON::set_persistent_workspace_enabled(
                 saved_persistent_workspace_enabled
             );
-            pRRTC::set_cuda_device_reset_enabled(
+            PATACON::set_cuda_device_reset_enabled(
                 saved_cuda_device_reset_enabled
             );
             throw;
         }
 
-        pRRTC::set_time_limit_seconds(saved_time_limit_seconds);
-        pRRTC::time_limit_counts_kernel_only =
+        PATACON::set_time_limit_seconds(saved_time_limit_seconds);
+        PATACON::time_limit_counts_kernel_only =
             saved_time_limit_counts_kernel_only;
-        pRRTC::set_persistent_workspace_enabled(
+        PATACON::set_persistent_workspace_enabled(
             saved_persistent_workspace_enabled
         );
-        pRRTC::set_cuda_device_reset_enabled(
+        PATACON::set_cuda_device_reset_enabled(
             saved_cuda_device_reset_enabled
         );
 
@@ -3158,9 +3158,9 @@ namespace AORRTC {
         // AORRTC owns independent device symbols in this translation unit.
         reset_device_variables();
         cudaMemcpyToSymbol(d_settings, &settings, sizeof(settings));
-        const pRRTC_settings common_settings = settings;
+        const PATACON_settings common_settings = settings;
         cudaMemcpyToSymbol(
-            pRRTC::d_settings,
+            PATACON::d_settings,
             &common_settings,
             sizeof(common_settings)
         );
@@ -3654,7 +3654,7 @@ namespace AORRTC {
 
             const auto kernel_start = std::chrono::steady_clock::now();
             if (settings.trace_trees) {
-                rrtc<Robot, true, true>
+                patacon<Robot, true, true>
                     <<<settings.num_new_configs,
                        4 * settings.granularity>>>(
                         d_nodes,
@@ -3682,7 +3682,7 @@ namespace AORRTC {
                     );
             }
             else {
-                rrtc<Robot, false, true>
+                patacon<Robot, false, true>
                     <<<settings.num_new_configs,
                        4 * settings.granularity>>>(
                         d_nodes,
@@ -3814,7 +3814,7 @@ namespace AORRTC {
                 snapshot.cost = evaluated_cost;
 
                 if (settings.trace_trees) {
-                    pRRTC::copy_tree_trace_to_result<Robot>(
+                    PATACON::copy_tree_trace_to_result<Robot>(
                         static_cast<PlannerResult<Robot> &>(snapshot),
                         nodes,
                         parents,
@@ -3822,7 +3822,7 @@ namespace AORRTC {
                         current_samples,
                         1
                     );
-                    pRRTC::fill_solution_trace<Robot>(
+                    PATACON::fill_solution_trace<Robot>(
                         static_cast<PlannerResult<Robot> &>(snapshot)
                     );
                 }
@@ -3992,11 +3992,11 @@ namespace PATACON {
         }
 
         AORRTCResult<Robot> result;
-        static_cast<PlannerResult<Robot> &>(result) = pRRTC::solve<Robot>(
+        static_cast<PlannerResult<Robot> &>(result) = PATACON::solve<Robot>(
             start,
             goals,
             environment,
-            static_cast<pRRTC_settings &>(settings)
+            static_cast<PATACON_settings &>(settings)
         );
         return result;
     }

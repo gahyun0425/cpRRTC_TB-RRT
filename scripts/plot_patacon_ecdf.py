@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Plot cumulative successful pRRTC runs against planning time."""
+"""Plot cumulative successful PATACON runs against planning time."""
 
 from __future__ import annotations
 
@@ -68,7 +68,7 @@ def load_runs(path: Path) -> tuple[list[tuple[float, bool]], dict[str, Any]]:
 
 
 def inferred_title(metadata: dict[str, Any]) -> str:
-    planner = str(metadata.get("planner", "pRRTC"))
+    planner = str(metadata.get("planner", "PATACON"))
     robot = metadata.get("robot")
     problem = metadata.get("problem_name")
     problem_idx = metadata.get("problem_idx")
@@ -109,7 +109,7 @@ def plot_ecdf(
         where="post",
         linewidth=3.0,
         color="#2a9d8f",
-        label="pRRTC",
+        label="PATACON",
     )
     axis.set_xscale("log")
     axis.set_xlim(x_min, x_max)
@@ -137,7 +137,7 @@ def plot_ecdf(
 def main() -> int:
     parser = argparse.ArgumentParser(
         description=(
-            "Plot the cumulative number of successful pRRTC runs against "
+            "Plot the cumulative number of successful PATACON runs against "
             "their kernel planning time."
         )
     )

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Replay a 15-DoF, mobile-base, or right-arm-only pRRTC FFW-SG2 trajectory."""
+"""Replay a 15-DoF, mobile-base, or right-arm-only PATACON FFW-SG2 trajectory."""
 
 from __future__ import annotations
 
@@ -120,7 +120,7 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Load and validate without opening a viewer window.",
     )
-    add_video_arguments(parser, "PRRTC_FFW_SG2_VIDEO")
+    add_video_arguments(parser, "PATACON_FFW_SG2_VIDEO")
     args = parser.parse_args()
     if (
         not math.isfinite(args.fps)
@@ -835,7 +835,7 @@ def main() -> int:
 
     joint_names, trajectories = load_trajectories(trajectory_path)
     validate_only = args.validate_only or os.environ.get(
-        "PRRTC_MUJOCO_VALIDATE_ONLY"
+        "PATACON_MUJOCO_VALIDATE_ONLY"
     ) == "1"
     if validate_only:
         import mujoco

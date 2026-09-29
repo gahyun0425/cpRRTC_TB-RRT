@@ -3,7 +3,7 @@
 #include "RobotCollisionTraits.hh"
 #include "JointLimits.cuh"
 #include "utils.cuh"
-#include "pRRTC_settings.hh"
+#include "PATACON_settings.hh"
 #include "src/collision/environment.hh"
 #include "src/robots/panda.cuh"
 #include "src/robots/franka_collision.cuh"
@@ -39,11 +39,11 @@
 
 
 /*
-Parallelized RRTC: Each block works to add a config to the tree (either start or goal depending on balance)
+PATACON: Each block works to add a config to the tree (either start or goal depending on balance)
 */
 
 
-namespace pRRTC {
+namespace PATACON {
     using namespace ppln;
 
     __global__ void project_g1_configuration_kernel(
@@ -108,7 +108,7 @@ namespace pRRTC {
 
     bool project_g1_configuration(
         robots::G1::Configuration &configuration,
-        const pRRTC_settings &settings
+        const PATACON_settings &settings
     ) {
         float *device_configuration = nullptr;
         bool *device_success = nullptr;
@@ -256,8 +256,8 @@ namespace pRRTC {
     __device__ int connection_other_tree_id = -1;
     __device__ int connection_other_node_idx = -1;
     __device__ int solved_iters = 0; // value of iters in the block that solves the problem
-    __constant__ pRRTC_settings d_settings;
-    __constant__ unsigned long long p_rrtc_time_limit_ns;
+    __constant__ PATACON_settings d_settings;
+    __constant__ unsigned long long patacon_time_limit_ns;
 
     __device__ __forceinline__ unsigned long long global_timer_ns() {
         unsigned long long value;
@@ -306,7 +306,7 @@ namespace pRRTC {
     constexpr int MAX_THREADS_PER_BLOCK =
         CONCON_COLLISION_THREADS_PER_EDGE * MAX_PARALLEL_CONCON_EDGES;
 
-    // cpRRTC projected motion shared buffer용
+    // PATACON projected motion shared buffer용
     constexpr int MAX_ROBOT_DIM = ppln::robots::G1::dimension;
     constexpr int CONCON_MOTION_SEGMENT_STRIDE =
         (MAX_GRANULARITY + 1) * MAX_ROBOT_DIM;
@@ -378,7 +378,7 @@ namespace pRRTC {
     };
 
     template <typename Robot>
-    __device__ __forceinline__ int cprrtc_active_tangent_dim() {
+    __device__ __forceinline__ int patacon_active_tangent_dim() {
         if constexpr (std::is_same_v<Robot, robots::FfwSg2>) {
             return d_settings.rigid_orientation ? 7 : FFW_SG2_TANGENT_DIM;
         } else if constexpr (std::is_same_v<Robot, robots::FfwSg2Mobility>) {
@@ -398,7 +398,7 @@ namespace pRRTC {
 
     // 일반 로봇은 모든 관절 가중치가 1
     template <typename Robot>
-    __device__ __forceinline__ float cprrtc_joint_distance_weight(
+    __device__ __forceinline__ float patacon_joint_distance_weight(
         int joint_index
     ) {
         return 1.0f;
@@ -408,7 +408,7 @@ namespace pRRTC {
     // FFW-SG2의 0번 좌표는 lift_joint
     template <>
     __device__ __forceinline__ float
-    cprrtc_joint_distance_weight<robots::FfwSg2>(
+    patacon_joint_distance_weight<robots::FfwSg2>(
         int joint_index
     ) {
         return joint_index == 0
@@ -419,7 +419,7 @@ namespace pRRTC {
 
     template <>
     __device__ __forceinline__ float
-    cprrtc_joint_distance_weight<robots::FfwSg2Mobility>(
+    patacon_joint_distance_weight<robots::FfwSg2Mobility>(
         int joint_index
     ) {
         return joint_index == 3
@@ -428,7 +428,7 @@ namespace pRRTC {
     }
 
     template <typename Robot>
-    __device__ __forceinline__ float cprrtc_sq_config_distance(
+    __device__ __forceinline__ float patacon_sq_config_distance(
         const float* q_a,
         const float* q_b
     ) {
@@ -437,7 +437,7 @@ namespace pRRTC {
         #pragma unroll
         for (int i = 0; i < Robot::dimension; i++) {
             const float weight =
-                cprrtc_joint_distance_weight<Robot>(i);
+                patacon_joint_distance_weight<Robot>(i);
 
             const float weighted_diff =
                 weight * (q_a[i] - q_b[i]);
@@ -450,12 +450,12 @@ namespace pRRTC {
 
 
     template <typename Robot>
-    __device__ __forceinline__ float cprrtc_config_distance(
+    __device__ __forceinline__ float patacon_config_distance(
         const float* q_a,
         const float* q_b
     ) {
         return sqrtf(
-            cprrtc_sq_config_distance<Robot>(q_a, q_b)
+            patacon_sq_config_distance<Robot>(q_a, q_b)
         );
     }
 
@@ -972,12 +972,12 @@ namespace pRRTC {
         __syncthreads();
     }
 
-    // cpRRTC motion generation / projection wrapper
+    // PATACON motion generation / projection wrapper
     // Generic robot: straight-line motion만 생성하고 projection은 하지 않는다.
     // FfwSg2: straight-line motion 생성 후 analytic-Jacobian ParallelProject 수행.
 
     template <typename Robot>
-    __device__ __forceinline__ bool cprrtc_project_motion(
+    __device__ __forceinline__ bool patacon_project_motion(
         volatile const float *q_start,
         volatile const float *q_step,
         volatile float *motion_segment,
@@ -991,7 +991,7 @@ namespace pRRTC {
 
         static_assert(
             dim <= MAX_ROBOT_DIM,
-            "Robot dimension exceeds cpRRTC motion segment buffer"
+            "Robot dimension exceeds PATACON motion segment buffer"
         );
 
         // q0 = 시작 configuration
@@ -1017,7 +1017,7 @@ namespace pRRTC {
 
     // ffw-sg2 specializatoin
     template <>
-    __device__ __forceinline__ bool cprrtc_project_motion<ppln::robots::FfwSg2>(
+    __device__ __forceinline__ bool patacon_project_motion<ppln::robots::FfwSg2>(
         volatile const float *q_start,
         volatile const float *q_step,
         volatile float *motion_segment,
@@ -1073,7 +1073,7 @@ namespace pRRTC {
     }
 
     template <>
-    __device__ __forceinline__ bool cprrtc_project_motion<ppln::robots::FfwSg2Mobility>(
+    __device__ __forceinline__ bool patacon_project_motion<ppln::robots::FfwSg2Mobility>(
         volatile const float *q_start,
         volatile const float *q_step,
         volatile float *motion_segment,
@@ -1143,7 +1143,7 @@ namespace pRRTC {
     }
 
     template <>
-    __device__ __forceinline__ bool cprrtc_project_motion<ppln::robots::G1>(
+    __device__ __forceinline__ bool patacon_project_motion<ppln::robots::G1>(
         volatile const float *q_start,
         volatile const float *q_step,
         volatile float *motion_segment,
@@ -1192,7 +1192,7 @@ namespace pRRTC {
     }
 
     template <>
-    __device__ __forceinline__ bool cprrtc_project_motion<ppln::robots::IgrisC>(
+    __device__ __forceinline__ bool patacon_project_motion<ppln::robots::IgrisC>(
         volatile const float *q_start,
         volatile const float *q_step,
         volatile float *motion_segment,
@@ -1240,7 +1240,7 @@ namespace pRRTC {
     }
 
     template <>
-    __device__ __forceinline__ bool cprrtc_project_motion<ppln::robots::FrankaSingle>(
+    __device__ __forceinline__ bool patacon_project_motion<ppln::robots::FrankaSingle>(
         volatile const float *q_start,
         volatile const float *q_step,
         volatile float *motion_segment,
@@ -1283,7 +1283,7 @@ namespace pRRTC {
     }
 
     template <>
-    __device__ __forceinline__ bool cprrtc_project_motion<ppln::robots::Franka>(
+    __device__ __forceinline__ bool patacon_project_motion<ppln::robots::Franka>(
         volatile const float *q_start,
         volatile const float *q_step,
         volatile float *motion_segment,
@@ -1326,7 +1326,7 @@ namespace pRRTC {
     }
 
     template <typename Robot>
-    __device__ __forceinline__ float cprrtc_config_distance_from_volatile(
+    __device__ __forceinline__ float patacon_config_distance_from_volatile(
         volatile const float *q_a,
         const float *q_b
     ) {
@@ -1335,7 +1335,7 @@ namespace pRRTC {
         #pragma unroll
         for (int joint = 0; joint < Robot::dimension; joint++) {
             const float weight =
-                cprrtc_joint_distance_weight<Robot>(joint);
+                patacon_joint_distance_weight<Robot>(joint);
             const float weighted_diff =
                 weight * (q_a[joint] - q_b[joint]);
             result += weighted_diff * weighted_diff;
@@ -1345,7 +1345,7 @@ namespace pRRTC {
     }
 
     template <typename Robot>
-    __device__ __noinline__ bool cprrtc_project_prebuilt_motion(
+    __device__ __noinline__ bool patacon_project_prebuilt_motion(
         volatile float *motion_segment,
         volatile float *motion_segment_next,
         int waypoint_count,
@@ -1529,7 +1529,7 @@ namespace pRRTC {
 
     template <typename Robot>
     __device__ __noinline__ bool
-    cprrtc_project_concon_node_anchors(
+    patacon_project_concon_node_anchors(
         volatile const float *q_start,
         const float *node_nominal_targets,
         int edge_count,
@@ -1544,7 +1544,7 @@ namespace pRRTC {
 
         static_assert(
             dim <= MAX_ROBOT_DIM,
-            "Robot dimension exceeds cpRRTC node motion buffer"
+            "Robot dimension exceeds PATACON node motion buffer"
         );
 
         if (edge_count <= 0) {
@@ -1577,7 +1577,7 @@ namespace pRRTC {
         const float node_smoothness_threshold =
             static_cast<float>(d_settings.granularity) *
             d_settings.projection_smoothness_threshold;
-        return cprrtc_project_prebuilt_motion<Robot>(
+        return patacon_project_prebuilt_motion<Robot>(
             node_motion,
             node_motion_next,
             edge_count,
@@ -1592,7 +1592,7 @@ namespace pRRTC {
 
     template <typename Robot>
     __device__ __noinline__ void
-    cprrtc_project_concon_edge_segments_from_node_anchors(
+    patacon_project_concon_edge_segments_from_node_anchors(
         int edge_count,
         volatile const float *node_anchors,
         volatile float *edge_motion_segments,
@@ -1649,7 +1649,7 @@ namespace pRRTC {
         }
         __syncthreads();
 
-        const bool projection_good = cprrtc_project_prebuilt_motion<Robot>(
+        const bool projection_good = patacon_project_prebuilt_motion<Robot>(
             prefix_motion,
             prefix_motion_next,
             total_waypoint_count,
@@ -1727,7 +1727,7 @@ namespace pRRTC {
     }
 
     template <typename Robot>
-    __device__ __forceinline__ bool cprrtc_store_tangent_basis(
+    __device__ __forceinline__ bool patacon_store_tangent_basis(
         const float *q,
         float *tree_tangent_bases,
         int node_idx
@@ -1796,7 +1796,7 @@ namespace pRRTC {
     }
 
     template <typename Robot>
-    __device__ __forceinline__ void cprrtc_sample_tangent_config(
+    __device__ __forceinline__ void patacon_sample_tangent_config(
         float *tree_nodes,
         float *ts_bases,
         const int *ts_root_node_indices,
@@ -1817,7 +1817,7 @@ namespace pRRTC {
                 TangentSpaceTraits<Robot>::max_tangent_dim;
             static constexpr int basis_size =
                 TangentSpaceTraits<Robot>::basis_size;
-            const int active_tangent_dim = cprrtc_active_tangent_dim<Robot>();
+            const int active_tangent_dim = patacon_active_tangent_dim<Robot>();
 
             // 선택된 Tangent Space의 root configuration
             const float *base_q =&tree_nodes[ts_root_node_idx * dim];
@@ -1934,7 +1934,7 @@ namespace pRRTC {
     }
 
     template <typename Robot>
-    __device__ __forceinline__ float cprrtc_constraint_error_norm(const float *q)
+    __device__ __forceinline__ float patacon_constraint_error_norm(const float *q)
     {
         if constexpr (std::is_same_v<Robot, robots::FfwSg2>) {
             float h[FFW_SG2_MAX_RESIDUAL_DIM];
@@ -2014,7 +2014,7 @@ namespace pRRTC {
                 ts_parent_id[tree][ts_idx] = -1;
 
                 // root q에서 tangent basis 계산
-                const bool basis_ok =cprrtc_store_tangent_basis<Robot>(&nodes[tree][node_idx * Robot::dimension],ts_bases[tree],ts_idx);
+                const bool basis_ok =patacon_store_tangent_basis<Robot>(&nodes[tree][node_idx * Robot::dimension],ts_bases[tree],ts_idx);
 
                 if (basis_ok) {
 
@@ -2053,7 +2053,7 @@ namespace pRRTC {
     }
 
     template <typename Robot>
-    __device__ __forceinline__ float cprrtc_shared_config_distance(
+    __device__ __forceinline__ float patacon_shared_config_distance(
         volatile const float *q_a,
         volatile const float *q_b,
         float *sdata,
@@ -2066,7 +2066,7 @@ namespace pRRTC {
         // 각 thread가 joint dimension 하나의 거리 제곱을 계산
         if (tid < dim) {
             const float weight =
-                cprrtc_joint_distance_weight<Robot>(tid);
+                patacon_joint_distance_weight<Robot>(tid);
 
             const float weighted_diff =
                 weight * (q_a[tid] - q_b[tid]);
@@ -2092,7 +2092,7 @@ namespace pRRTC {
     }
 
     template <typename Robot>
-    __device__ __forceinline__ bool cprrtc_detailed_env_collision_check(
+    __device__ __forceinline__ bool patacon_detailed_env_collision_check(
         volatile float *sphere_pos,
         volatile int *link_CC,
         ppln::collision::Environment<float> *env,
@@ -2110,7 +2110,7 @@ namespace pRRTC {
 
 
     template <>
-    __device__ __forceinline__ bool cprrtc_detailed_env_collision_check<ppln::robots::FfwSg2>(
+    __device__ __forceinline__ bool patacon_detailed_env_collision_check<ppln::robots::FfwSg2>(
         volatile float *sphere_pos,
         volatile int *link_CC,
         ppln::collision::Environment<float> *env,
@@ -2128,7 +2128,7 @@ namespace pRRTC {
     }
 
     template <>
-    __device__ __forceinline__ bool cprrtc_detailed_env_collision_check<ppln::robots::FfwSg2Mobility>(
+    __device__ __forceinline__ bool patacon_detailed_env_collision_check<ppln::robots::FfwSg2Mobility>(
         volatile float *sphere_pos,
         volatile int *link_CC,
         ppln::collision::Environment<float> *env,
@@ -2146,7 +2146,7 @@ namespace pRRTC {
     }
 
     template <typename Robot>
-    __device__ __forceinline__ bool cprrtc_detailed_self_collision_check(
+    __device__ __forceinline__ bool patacon_detailed_self_collision_check(
         volatile float *sphere_pos,
         volatile int *link_CC,
         int tid,
@@ -2162,7 +2162,7 @@ namespace pRRTC {
 
 
     template <>
-    __device__ __forceinline__ bool cprrtc_detailed_self_collision_check<ppln::robots::FfwSg2>(
+    __device__ __forceinline__ bool patacon_detailed_self_collision_check<ppln::robots::FfwSg2>(
         volatile float *sphere_pos,
         volatile int *link_CC,
         int tid,
@@ -2178,7 +2178,7 @@ namespace pRRTC {
     }
 
     template <>
-    __device__ __forceinline__ bool cprrtc_detailed_self_collision_check<ppln::robots::FfwSg2Mobility>(
+    __device__ __forceinline__ bool patacon_detailed_self_collision_check<ppln::robots::FfwSg2Mobility>(
         volatile float *sphere_pos,
         volatile int *link_CC,
         int tid,
@@ -2194,7 +2194,7 @@ namespace pRRTC {
     }
 
     template <typename Robot>
-    __device__ __forceinline__ bool cprrtc_attached_object_collision_check_approx(
+    __device__ __forceinline__ bool patacon_attached_object_collision_check_approx(
         const float *q,
         volatile float *sphere_pos_approx,
         ppln::collision::Environment<float> *env,
@@ -2228,7 +2228,7 @@ namespace pRRTC {
 
     template <>
     __device__ __forceinline__ bool
-    cprrtc_attached_object_collision_check_approx<ppln::robots::FfwSg2Mobility>(
+    patacon_attached_object_collision_check_approx<ppln::robots::FfwSg2Mobility>(
         const float *q,
         volatile float *sphere_pos_approx,
         ppln::collision::Environment<float> *env,
@@ -2246,7 +2246,7 @@ namespace pRRTC {
     }
 
     template <typename Robot>
-    __device__ __forceinline__ bool cprrtc_attached_object_collision_check(
+    __device__ __forceinline__ bool patacon_attached_object_collision_check(
         const float *q,
         volatile float *sphere_pos,
         ppln::collision::Environment<float> *env,
@@ -2280,7 +2280,7 @@ namespace pRRTC {
 
     template <>
     __device__ __forceinline__ bool
-    cprrtc_attached_object_collision_check<ppln::robots::FfwSg2Mobility>(
+    patacon_attached_object_collision_check<ppln::robots::FfwSg2Mobility>(
         const float *q,
         volatile float *sphere_pos,
         ppln::collision::Environment<float> *env,
@@ -2299,7 +2299,7 @@ namespace pRRTC {
 
     template <typename Robot>
     __device__ __forceinline__ void
-    cprrtc_check_projected_edges_collision_parallel(
+    patacon_check_projected_edges_collision_parallel(
         int edge_count,
         volatile float *edge_motion_segments,
         volatile float *sphere_pos_scratch,
@@ -2397,7 +2397,7 @@ namespace pRRTC {
             );
 
             const bool attached_object_collision_approx =
-                not cprrtc_attached_object_collision_check_approx<Robot>(
+                not patacon_attached_object_collision_check_approx<Robot>(
                     interp_cfg,
                     edge_sphere_pos_approx,
                     env,
@@ -2444,7 +2444,7 @@ namespace pRRTC {
             edge_run_detailed_env_check[edge_slot]
         ) {
             const bool env_collision =
-                not cprrtc_detailed_env_collision_check<Robot>(
+                not patacon_detailed_env_collision_check<Robot>(
                     edge_sphere_pos,
                     edge_link_cc,
                     env,
@@ -2457,7 +2457,7 @@ namespace pRRTC {
             );
 
             const bool attached_object_collision =
-                not cprrtc_attached_object_collision_check<Robot>(
+                not patacon_attached_object_collision_check<Robot>(
                     interp_cfg,
                     edge_sphere_pos,
                     env,
@@ -2545,7 +2545,7 @@ namespace pRRTC {
             edge_run_detailed_self_check[edge_slot]
         ) {
             const bool self_collision =
-                not cprrtc_detailed_self_collision_check<Robot>(
+                not patacon_detailed_self_collision_check<Robot>(
                     edge_sphere_pos,
                     edge_link_cc,
                     edge_tid,
@@ -2569,7 +2569,7 @@ namespace pRRTC {
     }
 
     template <typename Robot>
-    __global__ void cprrtc_validate_visualization_shortcut_edge(
+    __global__ void patacon_validate_visualization_shortcut_edge(
         const float *node_anchors,
         volatile float *edge_motion_segments,
         volatile float *edge_motion_segment_next,
@@ -2639,7 +2639,7 @@ namespace pRRTC {
         }
         __syncthreads();
 
-        cprrtc_project_concon_edge_segments_from_node_anchors<Robot>(
+        patacon_project_concon_edge_segments_from_node_anchors<Robot>(
             1,
             node_anchors,
             edge_motion_segments,
@@ -2697,7 +2697,7 @@ namespace pRRTC {
             first_projection_failure_edge[0] >= 1 &&
             joint_limits_good != 0
         ) {
-            cprrtc_check_projected_edges_collision_parallel<Robot>(
+            patacon_check_projected_edges_collision_parallel<Robot>(
                 1,
                 edge_motion_segments,
                 sphere_pos_scratch,
@@ -2726,7 +2726,7 @@ namespace pRRTC {
     }
 
     template <typename Robot>
-    __global__ void cprrtc_validate_visualization_nominal_edge(
+    __global__ void patacon_validate_visualization_nominal_edge(
         const float *node_anchors,
         volatile float *edge_motion_segments,
         volatile float *sphere_pos_scratch,
@@ -2801,7 +2801,7 @@ namespace pRRTC {
         __syncthreads();
 
         if (joint_limits_good != 0) {
-            cprrtc_check_projected_edges_collision_parallel<Robot>(
+            patacon_check_projected_edges_collision_parallel<Robot>(
                 1,
                 edge_motion_segments,
                 sphere_pos_scratch,
@@ -2828,7 +2828,7 @@ namespace pRRTC {
     }
 
     __device__ __forceinline__
-    int cprrtc_reserve_slot(volatile int *counter,int capacity){
+    int patacon_reserve_slot(volatile int *counter,int capacity){
         int current =atomicAdd((int *)counter,0);
 
         while (current < capacity) {
@@ -2846,7 +2846,7 @@ namespace pRRTC {
 
     template <int LaneStride = MAX_THREADS_PER_BLOCK>
     __device__ __forceinline__
-    void cprrtc_register_node_in_ts(
+    void patacon_register_node_in_ts(
         int node_idx,
         int ts_id,
         int *ts_node_count,
@@ -2884,7 +2884,7 @@ namespace pRRTC {
     }
 
     template <typename Robot>
-    __device__ __forceinline__ float cprrtc_project_target_direction_to_tangent(
+    __device__ __forceinline__ float patacon_project_target_direction_to_tangent(
         const float *q_current,
         const float *q_target,
         const float *basis,
@@ -2898,7 +2898,7 @@ namespace pRRTC {
             static constexpr int basis_stride =
                 TangentSpaceTraits<Robot>::max_tangent_dim;
 
-            const int active_tangent_dim = cprrtc_active_tangent_dim<Robot>();
+            const int active_tangent_dim = patacon_active_tangent_dim<Robot>();
 
             // 1. q_current -> q_target 방향을 Tangent basis 좌표계의 coefficient로 변환
             // ts_coeff = B^T * (q_target - q_current)
@@ -2931,7 +2931,7 @@ namespace pRRTC {
             // 3. projected direction의 norm 계산 준비
             if (tid < dim) {
                 const float weight =
-                    cprrtc_joint_distance_weight<Robot>(tid);
+                    patacon_joint_distance_weight<Robot>(tid);
 
                 const float weighted_component =
                     weight * projected_component;
@@ -2978,7 +2978,7 @@ namespace pRRTC {
     template <typename Robot, bool TraceTrees>
     __global__ void
     // __launch_bounds__(128, 8)
-    rrtc(
+    patacon(
         float **nodes,
         int **parents,
         int **node_ready,
@@ -3067,7 +3067,7 @@ namespace pRRTC {
         __shared__ int extend_edge_count;
         __shared__ int index;
         __shared__ bool should_skip;
-        // cpRRTC CONNECT state
+        // PATACON CONNECT state
         // target 도달 여부
         __shared__ bool connection_reached_shared;
         __shared__ unsigned int n_extensions;
@@ -3078,7 +3078,7 @@ namespace pRRTC {
         // 새 TB-RRT CONNECT 상태
         __shared__ bool connect_failed;
         __shared__ bool connect_reached;
-        // cpRRTC parallel projection shared memory
+        // PATACON parallel projection shared memory
         __align__(16) __shared__ volatile float motion_segment[
             MAX_CONCON_NODE_ANCHORS * MAX_ROBOT_DIM
         ];
@@ -3125,9 +3125,9 @@ namespace pRRTC {
                 // printf("tree size: %d\n", atomic_free_index[0]);
                 iter++;
                 const bool time_limit_reached =
-                    p_rrtc_time_limit_ns > 0 &&
+                    patacon_time_limit_ns > 0 &&
                     global_timer_ns() - block_start_time_ns >=
-                        p_rrtc_time_limit_ns;
+                        patacon_time_limit_ns;
                 if (iter > d_settings.max_iters || time_limit_reached) {
                     atomicCAS((int *)&solved, 0, -1);
                 }
@@ -3210,7 +3210,7 @@ namespace pRRTC {
                     }
 
                     // 2. 현재 constraint의 tangent dimension
-                    const int active_tangent_dim = cprrtc_active_tangent_dim<Robot>();
+                    const int active_tangent_dim = patacon_active_tangent_dim<Robot>();
 
                     // 3. Tangent Space 안에서 random direction 생성
                     float coeff_norm2 = 0.0f;
@@ -3273,7 +3273,7 @@ namespace pRRTC {
 
             // q_rand 생성 생성
             if constexpr (TangentSpaceTraits<Robot>::enabled) {
-                cprrtc_sample_tangent_config<Robot>(
+                patacon_sample_tangent_config<Robot>(
                     t_nodes, 
                     t_ts_bases, // node별 basis가 아니라 TSBank
                     t_ts_root_node_idx,
@@ -3303,7 +3303,7 @@ namespace pRRTC {
                         == current_search_generation) { // 이번 요청의 node인지 확인
                         // 현재 node와 q_rand 사이의 거리 계산 (거리 제곱 반환)
                         const float candidate_dist =
-                            cprrtc_sq_config_distance<Robot>(
+                            patacon_sq_config_distance<Robot>(
                                 (float *)&t_node_ts_q[node_idx * dim],
                                 (float *)config
                             );
@@ -3327,7 +3327,7 @@ namespace pRRTC {
                     }
 
                     const float candidate_dist =
-                        cprrtc_sq_config_distance<Robot>(
+                        patacon_sq_config_distance<Robot>(
                             (float *)&t_nodes[i * dim],
                             (float *)config
                         );
@@ -3431,7 +3431,7 @@ namespace pRRTC {
 
                     // EM 계산은 thread 0 하나만 수행
                     if (tid == 0) {
-                        const float em_error =cprrtc_constraint_error_norm<Robot>(concon_probe); // constraint residual 검사
+                        const float em_error =patacon_constraint_error_norm<Robot>(concon_probe); // constraint residual 검사
 
                         // 먼저 현재 candidate를 포함한다.
                         concon_count = step;
@@ -3514,7 +3514,7 @@ namespace pRRTC {
             }
 
             const bool projection_good =
-                cprrtc_project_concon_node_anchors<Robot>(
+                patacon_project_concon_node_anchors<Robot>(
                     config,
                     concon_nominal_targets,
                     extend_edge_count,
@@ -3547,7 +3547,7 @@ namespace pRRTC {
             }
             __syncthreads();
 
-            cprrtc_project_concon_edge_segments_from_node_anchors<Robot>(
+            patacon_project_concon_edge_segments_from_node_anchors<Robot>(
                 concon_projected_edge_count,
                 motion_segment,
                 concon_motion_segments,
@@ -3574,7 +3574,7 @@ namespace pRRTC {
             }
             __syncthreads();
 
-            cprrtc_check_projected_edges_collision_parallel<Robot>(
+            patacon_check_projected_edges_collision_parallel<Robot>(
                 concon_projected_edge_count,
                 concon_motion_segments,
                 &concon_sphere_pos_scratch[
@@ -3646,7 +3646,7 @@ namespace pRRTC {
 
                     // grow tree
                     if (tid == 0) {
-                        index = cprrtc_reserve_slot(
+                        index = patacon_reserve_slot(
                             &atomic_free_index[t_tree_id],
                             d_settings.max_samples
                         );
@@ -3715,7 +3715,7 @@ namespace pRRTC {
                             // 여기서 새로운 Tangent Space 생성
                             else {
                                 // 새 TS 번호 하나 확보
-                                new_ts_id =cprrtc_reserve_slot(&ts_count[t_tree_id],d_settings.max_tangent_spaces);
+                                new_ts_id =patacon_reserve_slot(&ts_count[t_tree_id],d_settings.max_tangent_spaces);
 
                                 // TSBank 공간 부족
                                 if (new_ts_id < 0) {
@@ -3747,7 +3747,7 @@ namespace pRRTC {
                                     // projected actual q에서 Jacobian 계산
                                     // → null space basis 생성
                                     // → TSBank에 저장
-                                    new_ts_basis_ok =cprrtc_store_tangent_basis<Robot>(&t_nodes[index * dim],t_ts_bases,new_ts_id);
+                                    new_ts_basis_ok =patacon_store_tangent_basis<Robot>(&t_nodes[index * dim],t_ts_bases,new_ts_id);
 
                                     if (new_ts_basis_ok) {
                                         // 논문 3.5.1의 forward half-space를 구성할
@@ -3815,7 +3815,7 @@ namespace pRRTC {
                         if (tid == 0) {
                             const int assigned_ts_id =t_node_ts_id[index];
 
-                            cprrtc_register_node_in_ts(index,assigned_ts_id,t_ts_node_count,t_ts_lane_head,t_node_next_in_ts);
+                            patacon_register_node_in_ts(index,assigned_ts_id,t_ts_node_count,t_ts_lane_head,t_node_next_in_ts);
                         }
                     }
                     __syncthreads();
@@ -3874,7 +3874,7 @@ namespace pRRTC {
                     if (o_node_ready[i] != current_search_generation) {
                         continue;
                     }
-                    dist = cprrtc_sq_config_distance<Robot>(
+                    dist = patacon_sq_config_distance<Robot>(
                         &o_nodes[i * dim],
                         config
                     );
@@ -3942,7 +3942,7 @@ namespace pRRTC {
                         }
                     }
 
-                    const float chunk_start_target_distance =cprrtc_shared_config_distance<Robot>(
+                    const float chunk_start_target_distance =patacon_shared_config_distance<Robot>(
                             config,
                             connect_target_node,
                             sdata,
@@ -4001,7 +4001,7 @@ namespace pRRTC {
                         __syncthreads();
 
                         if (!connect_failed) {
-                            connect_tangent_dist = cprrtc_project_target_direction_to_tangent<Robot>(
+                            connect_tangent_dist = patacon_project_target_direction_to_tangent<Robot>(
                                     config,
                                     connect_target_node,
                                     connect_basis,
@@ -4046,7 +4046,7 @@ namespace pRRTC {
 
                                 // 기존과 동일하게 EM 검사
                                 if (tid == 0) {
-                                    const float em_error =cprrtc_constraint_error_norm<Robot>(concon_probe);
+                                    const float em_error =patacon_constraint_error_norm<Robot>(concon_probe);
                                     concon_count = step;
                                     if (em_error >d_settings.em_threshold) {
                                         concon_em_stop = true;
@@ -4158,7 +4158,7 @@ namespace pRRTC {
                     }
 
                     const bool extension_projection_good =
-                        cprrtc_project_concon_node_anchors<Robot>(
+                        patacon_project_concon_node_anchors<Robot>(
                                 config,
                                 concon_nominal_targets,
                                 concon_count,
@@ -4190,14 +4190,14 @@ namespace pRRTC {
 
                         for (int edge_step = 1; edge_step <= valid_edges; edge_step++) {
                             const float distance_before =
-                                cprrtc_config_distance_from_volatile<Robot>(
+                                patacon_config_distance_from_volatile<Robot>(
                                     &motion_segment[
                                         (edge_step - 1) * dim
                                     ],
                                     connect_target_node
                                 );
                             const float distance_after =
-                                cprrtc_config_distance_from_volatile<Robot>(
+                                patacon_config_distance_from_volatile<Robot>(
                                     &motion_segment[
                                         edge_step * dim
                                     ],
@@ -4221,7 +4221,7 @@ namespace pRRTC {
                     }
                     __syncthreads();
 
-                    cprrtc_project_concon_edge_segments_from_node_anchors<Robot>(
+                    patacon_project_concon_edge_segments_from_node_anchors<Robot>(
                         concon_projected_edge_count,
                         motion_segment,
                         concon_motion_segments,
@@ -4259,12 +4259,12 @@ namespace pRRTC {
                                     CONCON_MOTION_SEGMENT_STRIDE
                                 ];
                             const float distance_before =
-                                cprrtc_config_distance_from_volatile<Robot>(
+                                patacon_config_distance_from_volatile<Robot>(
                                     projected_edge,
                                     connect_target_node
                                 );
                             const float distance_after =
-                                cprrtc_config_distance_from_volatile<Robot>(
+                                patacon_config_distance_from_volatile<Robot>(
                                     &projected_edge[
                                         d_settings.granularity * dim
                                     ],
@@ -4286,7 +4286,7 @@ namespace pRRTC {
                     }
                     __syncthreads();
 
-                    cprrtc_check_projected_edges_collision_parallel<Robot>(
+                    patacon_check_projected_edges_collision_parallel<Robot>(
                         concon_projected_edge_count,
                         concon_motion_segments,
                         &concon_sphere_pos_scratch[
@@ -4364,7 +4364,7 @@ namespace pRRTC {
 
                         // CONNECT node slot 확보
                         if (tid == 0) {
-                            index = cprrtc_reserve_slot(
+                            index = patacon_reserve_slot(
                                 &atomic_free_index[t_tree_id],
                                 d_settings.max_samples
                             );
@@ -4415,7 +4415,7 @@ namespace pRRTC {
                                 // EM boundary node
                                 // → 실제 projected node에서 새 TS 생성
                                 else {
-                                    new_ts_id =cprrtc_reserve_slot(
+                                    new_ts_id =patacon_reserve_slot(
                                         &ts_count[t_tree_id],
                                         d_settings.max_tangent_spaces
                                     );
@@ -4449,7 +4449,7 @@ namespace pRRTC {
 
                                         // 실제 projected configuration에서
                                         // Jacobian/null-space basis 생성
-                                        new_ts_basis_ok =cprrtc_store_tangent_basis<Robot>(
+                                        new_ts_basis_ok =patacon_store_tangent_basis<Robot>(
                                                 &t_nodes[index * dim],
                                                 t_ts_bases,
                                                 new_ts_id
@@ -4515,7 +4515,7 @@ namespace pRRTC {
                             if (tid == 0) {
                                 const int assigned_ts_id =t_node_ts_id[index];
 
-                                cprrtc_register_node_in_ts(index,assigned_ts_id,t_ts_node_count,t_ts_lane_head,t_node_next_in_ts);
+                                patacon_register_node_in_ts(index,assigned_ts_id,t_ts_node_count,t_ts_lane_head,t_node_next_in_ts);
                             }
                         }
                         __syncthreads();
@@ -4551,7 +4551,7 @@ namespace pRRTC {
                         }
                         __syncthreads();
 
-                        const float current_target_distance = cprrtc_shared_config_distance<Robot>(config,connect_target_node,sdata,tid);
+                        const float current_target_distance = patacon_shared_config_distance<Robot>(config,connect_target_node,sdata,tid);
 
                         if (tid == 0) {
                             connect_reached =current_target_distance<=d_settings.connect_reached_tolerance;
@@ -4588,7 +4588,7 @@ namespace pRRTC {
                 }
 
                 const float final_connection_distance =
-                    cprrtc_shared_config_distance<Robot>(
+                    patacon_shared_config_distance<Robot>(
                         config,
                         connect_target_node,
                         sdata,
@@ -4639,7 +4639,7 @@ namespace pRRTC {
                                 break;
                             }
 
-                            cost += cprrtc_config_distance<Robot>(
+                            cost += patacon_config_distance<Robot>(
                                 (float *)&t_nodes[current * dim],
                                 (float *)&t_nodes[parent * dim]
                             );
@@ -4671,7 +4671,7 @@ namespace pRRTC {
                                 break;
                             }
 
-                            cost += cprrtc_config_distance<Robot>(
+                            cost += patacon_config_distance<Robot>(
                                 &o_nodes[current * dim],
                                 &o_nodes[parent * dim]
                             );
@@ -4841,7 +4841,7 @@ namespace pRRTC {
     float visualization_shortcut_distance(
         const typename Robot::Configuration &a,
         const typename Robot::Configuration &b,
-        const pRRTC_settings &settings,
+        const PATACON_settings &settings,
         bool use_planner_weights
     ) {
         double squared_distance = 0.0;
@@ -4869,7 +4869,7 @@ namespace pRRTC {
     }
 
     inline float visualization_shortcut_maximum_chunk_length(
-        const pRRTC_settings &settings
+        const PATACON_settings &settings
     ) {
         float maximum_chunk_length = settings.range;
         if (
@@ -5038,7 +5038,7 @@ namespace pRRTC {
     bool validate_visualization_shortcut_edge(
         const typename Robot::Configuration &source,
         const typename Robot::Configuration &target,
-        const pRRTC_settings &settings,
+        const PATACON_settings &settings,
         VisualizationShortcutWorkspace<Robot> &workspace,
         std::vector<typename Robot::Configuration> &projected_edge
     ) {
@@ -5059,7 +5059,7 @@ namespace pRRTC {
             "node-anchor upload"
         );
 
-        cprrtc_validate_visualization_shortcut_edge<Robot>
+        patacon_validate_visualization_shortcut_edge<Robot>
             <<<1, CONCON_COLLISION_THREADS_PER_EDGE>>>(
                 workspace.device_node_anchors,
                 workspace.device_edge_motion_segments,
@@ -5145,7 +5145,7 @@ namespace pRRTC {
             "nominal path-validation anchor upload"
         );
 
-        cprrtc_validate_visualization_nominal_edge<Robot>
+        patacon_validate_visualization_nominal_edge<Robot>
             <<<1, CONCON_COLLISION_THREADS_PER_EDGE>>>(
                 workspace.device_node_anchors,
                 workspace.device_edge_motion_segments,
@@ -5182,7 +5182,7 @@ namespace pRRTC {
     bool build_visualization_shortcut(
         const typename Robot::Configuration &source,
         const typename Robot::Configuration &target,
-        const pRRTC_settings &settings,
+        const PATACON_settings &settings,
         VisualizationShortcutWorkspace<Robot> &workspace,
         std::vector<typename Robot::Configuration> &shortcut
     ) {
@@ -5292,7 +5292,7 @@ namespace pRRTC {
     PathSimplificationResult<Robot> simplify_path_for_visualization(
         const std::vector<typename Robot::Configuration> &path,
         ppln::collision::Environment<float> &h_environment,
-        pRRTC_settings &settings
+        PATACON_settings &settings
     ) {
         using Configuration = typename Robot::Configuration;
         using Collision = robots::CollisionTraits<Robot>;
@@ -5493,7 +5493,7 @@ namespace pRRTC {
     PathValidationResult validate_path_for_visualization(
         const std::vector<typename Robot::Configuration> &path,
         ppln::collision::Environment<float> &h_environment,
-        pRRTC_settings &settings,
+        PATACON_settings &settings,
         float projection_tolerance
     ) {
         using Collision = robots::CollisionTraits<Robot>;
@@ -5595,7 +5595,7 @@ namespace pRRTC {
 
         const unsigned int cuda_edge_count =
             static_cast<unsigned int>(edge_count);
-        cprrtc_validate_visualization_shortcut_edge<Robot>
+        patacon_validate_visualization_shortcut_edge<Robot>
             <<<cuda_edge_count, CONCON_COLLISION_THREADS_PER_EDGE>>>(
                 workspace.device_node_anchors,
                 workspace.device_edge_motion_segments,
@@ -5613,7 +5613,7 @@ namespace pRRTC {
             "batched projected path-validation kernel launch"
         );
 
-        cprrtc_validate_visualization_nominal_edge<Robot>
+        patacon_validate_visualization_nominal_edge<Robot>
             <<<cuda_edge_count, CONCON_COLLISION_THREADS_PER_EDGE>>>(
                 workspace.device_node_anchors,
                 workspace.device_edge_motion_segments,
@@ -5695,7 +5695,7 @@ namespace pRRTC {
         static constexpr int dim = Robot::dimension;
         using Collision = robots::CollisionTraits<Robot>;
 
-        explicit SolveWorkspace(const pRRTC_settings &settings)
+        explicit SolveWorkspace(const PATACON_settings &settings)
             : max_samples(settings.max_samples),
               max_tangent_spaces(settings.max_tangent_spaces),
               num_new_configs(settings.num_new_configs),
@@ -5710,7 +5710,7 @@ namespace pRRTC {
             release();
         }
 
-        bool matches(const pRRTC_settings &settings) const {
+        bool matches(const PATACON_settings &settings) const {
             return max_samples == settings.max_samples
                 && max_tangent_spaces == settings.max_tangent_spaces
                 && num_new_configs == settings.num_new_configs
@@ -5995,7 +5995,7 @@ namespace pRRTC {
         typename Robot::Configuration &start,
         std::vector<typename Robot::Configuration> &goals,
         ppln::collision::Environment<float> &h_environment,
-        pRRTC_settings &settings
+        PATACON_settings &settings
     ) 
     {
         auto start_time = std::chrono::steady_clock::now();
@@ -6003,22 +6003,22 @@ namespace pRRTC {
         using Collision = robots::CollisionTraits<Robot>;
         if (settings.granularity != Collision::batch_size) {
             throw std::invalid_argument(
-                "pRRTC granularity must match the selected robot's collision batch size"
+                "PATACON granularity must match the selected robot's collision batch size"
             );
         }
         if (settings.granularity > MAX_GRANULARITY) {
             throw std::invalid_argument(
-                "pRRTC prefix ConCon projection supports granularity up to 16"
+                "PATACON prefix ConCon projection supports granularity up to 16"
             );
         }
         if (settings.max_concon_nodes <= 0) {
             throw std::invalid_argument(
-                "pRRTC max_concon_nodes must be positive"
+                "PATACON max_concon_nodes must be positive"
             );
         }
         if (settings.max_concon_nodes > MAX_PARALLEL_CONCON_EDGES) {
             throw std::invalid_argument(
-                "pRRTC parallel ConCon collision check supports up to 5 edges"
+                "PATACON parallel ConCon collision check supports up to 5 edges"
             );
         }
         if constexpr (TangentSpaceTraits<Robot>::enabled) {
@@ -6457,7 +6457,7 @@ namespace pRRTC {
             }
         }
         cudaMemcpyToSymbol(
-            p_rrtc_time_limit_ns,
+            patacon_time_limit_ns,
             &kernel_time_limit_ns,
             sizeof(kernel_time_limit_ns)
         );
@@ -6466,7 +6466,7 @@ namespace pRRTC {
         const int concon_threads_per_block =
             CONCON_COLLISION_THREADS_PER_EDGE * settings.max_concon_nodes;
         if (settings.trace_trees) {
-            rrtc<Robot, true><<<settings.num_new_configs, concon_threads_per_block>>> (
+            patacon<Robot, true><<<settings.num_new_configs, concon_threads_per_block>>> (
                 d_nodes,
                 d_parents,
                 d_node_ready,
@@ -6493,7 +6493,7 @@ namespace pRRTC {
                 concon_transform_scratch
             );
         } else {
-            rrtc<Robot, false><<<settings.num_new_configs, concon_threads_per_block>>> (
+            patacon<Robot, false><<<settings.num_new_configs, concon_threads_per_block>>> (
                 d_nodes,
                 d_parents,
                 d_node_ready,
@@ -6613,7 +6613,7 @@ namespace pRRTC {
                 if (h_path_size[tree] < 0
                     || h_path_size[tree] > MAX_PATH_NODES) {
                     throw std::runtime_error(
-                        "pRRTC device path size is outside its valid range"
+                        "PATACON device path size is outside its valid range"
                     );
                 }
                 h_paths[tree].resize(
@@ -6778,28 +6778,28 @@ namespace pRRTC {
         return res;
     }
 
-    //template PlannerResult<typename ppln::robots::Sphere> solve<ppln::robots::Sphere>(std::array<float, 3>&, std::vector<std::array<float, 3>>&, ppln::collision::Environment<float>&, pRRTC_settings&);
-    template PlannerResult<typename ppln::robots::FrankaSingle> solve<ppln::robots::FrankaSingle>(std::array<float, 7>&, std::vector<std::array<float, 7>>&, ppln::collision::Environment<float>&, pRRTC_settings&);
-    template PlannerResult<typename ppln::robots::Franka> solve<ppln::robots::Franka>(std::array<float, 14>&, std::vector<std::array<float, 14>>&, ppln::collision::Environment<float>&, pRRTC_settings&);
-    template PlannerResult<typename ppln::robots::FfwSg2> solve<ppln::robots::FfwSg2>(std::array<float, 15>&, std::vector<std::array<float, 15>>&, ppln::collision::Environment<float>&, pRRTC_settings&);
-    template PlannerResult<typename ppln::robots::FfwSg2Mobility> solve<ppln::robots::FfwSg2Mobility>(std::array<float, 18>&, std::vector<std::array<float, 18>>&, ppln::collision::Environment<float>&, pRRTC_settings&);
-    template PlannerResult<typename ppln::robots::G1> solve<ppln::robots::G1>(std::array<float, 35>&, std::vector<std::array<float, 35>>&, ppln::collision::Environment<float>&, pRRTC_settings&);
-    template PlannerResult<typename ppln::robots::IgrisC> solve<ppln::robots::IgrisC>(std::array<float, 35>&, std::vector<std::array<float, 35>>&, ppln::collision::Environment<float>&, pRRTC_settings&);
+    //template PlannerResult<typename ppln::robots::Sphere> solve<ppln::robots::Sphere>(std::array<float, 3>&, std::vector<std::array<float, 3>>&, ppln::collision::Environment<float>&, PATACON_settings&);
+    template PlannerResult<typename ppln::robots::FrankaSingle> solve<ppln::robots::FrankaSingle>(std::array<float, 7>&, std::vector<std::array<float, 7>>&, ppln::collision::Environment<float>&, PATACON_settings&);
+    template PlannerResult<typename ppln::robots::Franka> solve<ppln::robots::Franka>(std::array<float, 14>&, std::vector<std::array<float, 14>>&, ppln::collision::Environment<float>&, PATACON_settings&);
+    template PlannerResult<typename ppln::robots::FfwSg2> solve<ppln::robots::FfwSg2>(std::array<float, 15>&, std::vector<std::array<float, 15>>&, ppln::collision::Environment<float>&, PATACON_settings&);
+    template PlannerResult<typename ppln::robots::FfwSg2Mobility> solve<ppln::robots::FfwSg2Mobility>(std::array<float, 18>&, std::vector<std::array<float, 18>>&, ppln::collision::Environment<float>&, PATACON_settings&);
+    template PlannerResult<typename ppln::robots::G1> solve<ppln::robots::G1>(std::array<float, 35>&, std::vector<std::array<float, 35>>&, ppln::collision::Environment<float>&, PATACON_settings&);
+    template PlannerResult<typename ppln::robots::IgrisC> solve<ppln::robots::IgrisC>(std::array<float, 35>&, std::vector<std::array<float, 35>>&, ppln::collision::Environment<float>&, PATACON_settings&);
 
 
-    template PathSimplificationResult<ppln::robots::FrankaSingle> simplify_path_for_visualization<ppln::robots::FrankaSingle>(const std::vector<std::array<float, 7>>&, ppln::collision::Environment<float>&, pRRTC_settings&);
-    template PathSimplificationResult<ppln::robots::Franka> simplify_path_for_visualization<ppln::robots::Franka>(const std::vector<std::array<float, 14>>&, ppln::collision::Environment<float>&, pRRTC_settings&);
-    template PathSimplificationResult<ppln::robots::FfwSg2> simplify_path_for_visualization<ppln::robots::FfwSg2>(const std::vector<std::array<float, 15>>&, ppln::collision::Environment<float>&, pRRTC_settings&);
-    template PathSimplificationResult<ppln::robots::FfwSg2Mobility> simplify_path_for_visualization<ppln::robots::FfwSg2Mobility>(const std::vector<std::array<float, 18>>&, ppln::collision::Environment<float>&, pRRTC_settings&);
-    template PathSimplificationResult<ppln::robots::G1> simplify_path_for_visualization<ppln::robots::G1>(const std::vector<std::array<float, 35>>&, ppln::collision::Environment<float>&, pRRTC_settings&);
-    template PathSimplificationResult<ppln::robots::IgrisC> simplify_path_for_visualization<ppln::robots::IgrisC>(const std::vector<std::array<float, 35>>&, ppln::collision::Environment<float>&, pRRTC_settings&);
+    template PathSimplificationResult<ppln::robots::FrankaSingle> simplify_path_for_visualization<ppln::robots::FrankaSingle>(const std::vector<std::array<float, 7>>&, ppln::collision::Environment<float>&, PATACON_settings&);
+    template PathSimplificationResult<ppln::robots::Franka> simplify_path_for_visualization<ppln::robots::Franka>(const std::vector<std::array<float, 14>>&, ppln::collision::Environment<float>&, PATACON_settings&);
+    template PathSimplificationResult<ppln::robots::FfwSg2> simplify_path_for_visualization<ppln::robots::FfwSg2>(const std::vector<std::array<float, 15>>&, ppln::collision::Environment<float>&, PATACON_settings&);
+    template PathSimplificationResult<ppln::robots::FfwSg2Mobility> simplify_path_for_visualization<ppln::robots::FfwSg2Mobility>(const std::vector<std::array<float, 18>>&, ppln::collision::Environment<float>&, PATACON_settings&);
+    template PathSimplificationResult<ppln::robots::G1> simplify_path_for_visualization<ppln::robots::G1>(const std::vector<std::array<float, 35>>&, ppln::collision::Environment<float>&, PATACON_settings&);
+    template PathSimplificationResult<ppln::robots::IgrisC> simplify_path_for_visualization<ppln::robots::IgrisC>(const std::vector<std::array<float, 35>>&, ppln::collision::Environment<float>&, PATACON_settings&);
 
-    template PathValidationResult validate_path_for_visualization<ppln::robots::FrankaSingle>(const std::vector<std::array<float, 7>>&, ppln::collision::Environment<float>&, pRRTC_settings&, float);
-    template PathValidationResult validate_path_for_visualization<ppln::robots::Franka>(const std::vector<std::array<float, 14>>&, ppln::collision::Environment<float>&, pRRTC_settings&, float);
-    template PathValidationResult validate_path_for_visualization<ppln::robots::FfwSg2>(const std::vector<std::array<float, 15>>&, ppln::collision::Environment<float>&, pRRTC_settings&, float);
-    template PathValidationResult validate_path_for_visualization<ppln::robots::FfwSg2Mobility>(const std::vector<std::array<float, 18>>&, ppln::collision::Environment<float>&, pRRTC_settings&, float);
-    template PathValidationResult validate_path_for_visualization<ppln::robots::G1>(const std::vector<std::array<float, 35>>&, ppln::collision::Environment<float>&, pRRTC_settings&, float);
-    template PathValidationResult validate_path_for_visualization<ppln::robots::IgrisC>(const std::vector<std::array<float, 35>>&, ppln::collision::Environment<float>&, pRRTC_settings&, float);
+    template PathValidationResult validate_path_for_visualization<ppln::robots::FrankaSingle>(const std::vector<std::array<float, 7>>&, ppln::collision::Environment<float>&, PATACON_settings&, float);
+    template PathValidationResult validate_path_for_visualization<ppln::robots::Franka>(const std::vector<std::array<float, 14>>&, ppln::collision::Environment<float>&, PATACON_settings&, float);
+    template PathValidationResult validate_path_for_visualization<ppln::robots::FfwSg2>(const std::vector<std::array<float, 15>>&, ppln::collision::Environment<float>&, PATACON_settings&, float);
+    template PathValidationResult validate_path_for_visualization<ppln::robots::FfwSg2Mobility>(const std::vector<std::array<float, 18>>&, ppln::collision::Environment<float>&, PATACON_settings&, float);
+    template PathValidationResult validate_path_for_visualization<ppln::robots::G1>(const std::vector<std::array<float, 35>>&, ppln::collision::Environment<float>&, PATACON_settings&, float);
+    template PathValidationResult validate_path_for_visualization<ppln::robots::IgrisC>(const std::vector<std::array<float, 35>>&, ppln::collision::Environment<float>&, PATACON_settings&, float);
 
 }
 

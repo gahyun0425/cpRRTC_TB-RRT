@@ -189,7 +189,7 @@ __global__ void validate_node_smoothness_kernel(
     }
     __syncthreads();
 
-    // Exact cpRRTC_TB-RRT node-anchor policy: for granularity=16 and base
+    // Exact PATACON_TB-RRT node-anchor policy: for granularity=16 and base
     // threshold=0.03, the adjacent-node threshold is 16 * 0.03 = 0.48.
     const bool projected = ppln::collision::igris_c_project_motion(
         motion,

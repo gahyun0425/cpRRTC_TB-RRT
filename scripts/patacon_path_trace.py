@@ -382,7 +382,7 @@ def tree_trace_graphml_text(
         max_tree_nodes,
     )
 
-    data(graph, GRAPH_KEYS["planner"], str(result.get("planner", "pRRTC")))
+    data(graph, GRAPH_KEYS["planner"], str(result.get("planner", "PATACON")))
     data(graph, GRAPH_KEYS["trace_level"], "nodes")
     data(graph, GRAPH_KEYS["dimension"], dimension)
     data(graph, GRAPH_KEYS["max_grow_step"], max_step)
@@ -665,7 +665,7 @@ def graphml_text(result: dict[str, Any], path: list[list[float]]) -> str:
         for idx in range(1, len(path))
     ]
 
-    data(graph, GRAPH_KEYS["planner"], str(result.get("planner", "pRRTC")))
+    data(graph, GRAPH_KEYS["planner"], str(result.get("planner", "PATACON")))
     data(graph, GRAPH_KEYS["trace_level"], "nodes")
     data(graph, GRAPH_KEYS["dimension"], dimension)
     data(graph, GRAPH_KEYS["max_grow_step"], max_step)
@@ -792,7 +792,7 @@ def generated_paths_graphml_text(
     solution_order: list[str] = []
     slot_steps: list[dict[str, Any]] = []
 
-    data(graph, GRAPH_KEYS["planner"], str(result.get("planner", "pRRTC")))
+    data(graph, GRAPH_KEYS["planner"], str(result.get("planner", "PATACON")))
     data(graph, GRAPH_KEYS["trace_level"], "nodes")
     data(graph, GRAPH_KEYS["dimension"], dimension)
     data(graph, GRAPH_KEYS["max_grow_step"], max_display_step)
@@ -1046,7 +1046,7 @@ def add_aorrtc_history_visibility(html_path: Path) -> None:
     final/best tree extent.
     """
     html = html_path.read_text(encoding="utf-8")
-    patch_marker = "/* cpRRTC AORRTC history visibility */"
+    patch_marker = "/* PATACON AORRTC history visibility */"
 
     # The base PATACON viewer only creates startTree/goalTree checkboxes.
     # Synthetic history nodes use tree="history". Without this guard,
@@ -1076,7 +1076,7 @@ def add_aorrtc_history_visibility(html_path: Path) -> None:
             "PATACON HTML viewer is incompatible with AORRTC history visibility"
         )
 
-    replacement = r'''/* cpRRTC AORRTC history visibility */
+    replacement = r'''/* PATACON AORRTC history visibility */
 function visibleEdge(e) {
   const a = nodeById.get(e.source);
   const b = nodeById.get(e.target);
@@ -1125,7 +1125,7 @@ def add_pca_3d_layout(html_path: Path) -> None:
     zoom, grid, axes, depth sorting, and explained-variance readout.
     """
     html = html_path.read_text(encoding="utf-8")
-    patch_marker = "/* cpRRTC PCA 3D perspective viewer */"
+    patch_marker = "/* PATACON PCA 3D perspective viewer */"
     if patch_marker in html:
         return
 
@@ -1148,8 +1148,8 @@ def add_pca_3d_layout(html_path: Path) -> None:
     )
 
     pca3d_compute_script = r'''
-/* cpRRTC PCA 3D perspective viewer */
-const cpRrtcPca3dStats = {
+/* PATACON PCA 3D perspective viewer */
+const pataconPca3dStats = {
   eigenvalues: [0, 0, 0],
   explained: [0, 0, 0],
   radius: 1,
@@ -1242,8 +1242,8 @@ function computePca3d(nodes) {
     }
   }
   const safeTotal = Math.max(totalVariance, 1.0e-12);
-  cpRrtcPca3dStats.eigenvalues = [l1, l2, l3];
-  cpRrtcPca3dStats.explained = [l1 / safeTotal, l2 / safeTotal, l3 / safeTotal];
+  pataconPca3dStats.eigenvalues = [l1, l2, l3];
+  pataconPca3dStats.explained = [l1 / safeTotal, l2 / safeTotal, l3 / safeTotal];
 
   let radius = 0;
   for (const n of nodes) {
@@ -1255,7 +1255,7 @@ function computePca3d(nodes) {
     n.pca3d = [dot(centered, v1), dot(centered, v2), dot(centered, v3)];
     radius = Math.max(radius, Math.hypot(...n.pca3d));
   }
-  cpRrtcPca3dStats.radius = Math.max(radius, 1.0e-9);
+  pataconPca3dStats.radius = Math.max(radius, 1.0e-9);
 }
 '''
 
@@ -1291,7 +1291,7 @@ function computePca3d(nodes) {
   }
 
   function normalizedWorld(raw) {
-    const radius = Math.max(cpRrtcPca3dStats.radius, 1.0e-9);
+    const radius = Math.max(pataconPca3dStats.radius, 1.0e-9);
     return [raw[0] / radius, raw[1] / radius, raw[2] / radius];
   }
 
@@ -1460,8 +1460,8 @@ function computePca3d(nodes) {
       screenNodes.push({n, x:p.x, y:p.y, r:hitRadius});
     }
 
-    const e = cpRrtcPca3dStats.explained.map(value => (100 * value).toFixed(1));
-    const p123 = 100 * cpRrtcPca3dStats.explained.reduce((a,b) => a+b, 0);
+    const e = pataconPca3dStats.explained.map(value => (100 * value).toFixed(1));
+    const p123 = 100 * pataconPca3dStats.explained.reduce((a,b) => a+b, 0);
     ctx.globalAlpha = 1;
     ctx.fillStyle = "rgba(255,255,255,.90)";
     ctx.fillRect(14, 14, 300, 72);
@@ -1606,7 +1606,7 @@ def add_white_canvas_theme(html_path: Path) -> None:
     optional. The CSS canvas override is sufficient for the base theme.
     """
     html = html_path.read_text(encoding="utf-8")
-    theme_marker = "/* cpRRTC white trace canvas */"
+    theme_marker = "/* PATACON white trace canvas */"
     if theme_marker in html:
         return
 
@@ -1739,7 +1739,7 @@ def print_missing_result_help(result_json: Path, trace_mode: str = "auto") -> No
 def main() -> int:
     repo_root = Path(__file__).resolve().parents[1]
     parser = argparse.ArgumentParser(
-        description="Convert a saved pRRTC path JSON into PATACON-style GraphML/HTML trace files."
+        description="Convert a saved PATACON path JSON into GraphML/HTML trace files."
     )
     parser.add_argument("result_json", type=Path)
     parser.add_argument("--result-index", type=int, default=0)
@@ -1821,7 +1821,7 @@ def main() -> int:
     if not args.no_html:
         html_path = (args.html or default_output_path(result_json, "_trace.html")).expanduser()
         title = args.title or (
-            f"pRRTC {result.get('robot', '')} {result.get('problem_name', '')} path trace"
+            f"PATACON {result.get('robot', '')} {result.get('problem_name', '')} path trace"
         ).strip()
         if args.html_trace_mode == "path":
             if use_paths_trace:

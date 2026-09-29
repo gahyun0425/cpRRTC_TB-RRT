@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Replay a 35-DoF pRRTC G1 trajectory with its planning obstacles."""
+"""Replay a 35-DoF PATACON G1 trajectory with its planning obstacles."""
 
 from __future__ import annotations
 
@@ -229,7 +229,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--control-mode",
         choices=("ctrl", "qpos"),
-        default=os.environ.get("PRRTC_G1_CONTROL_MODE", "qpos"),
+        default=os.environ.get("PATACON_G1_CONTROL_MODE", "qpos"),
         help=(
             "qpos directly replays the planned configurations (default); "
             "ctrl uses torque-PD actuators and physics"
@@ -254,7 +254,7 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Load and validate without opening a viewer window.",
     )
-    snapshot_default = os.environ.get("PRRTC_G1_SNAPSHOT")
+    snapshot_default = os.environ.get("PATACON_G1_SNAPSHOT")
     parser.add_argument(
         "--snapshot",
         type=Path,
@@ -264,10 +264,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--snapshot-waypoint",
         type=int,
-        default=int(os.environ.get("PRRTC_G1_SNAPSHOT_WAYPOINT", "-1")),
+        default=int(os.environ.get("PATACON_G1_SNAPSHOT_WAYPOINT", "-1")),
         help="Waypoint to render; -1 selects the middle waypoint.",
     )
-    add_video_arguments(parser, "PRRTC_G1_VIDEO")
+    add_video_arguments(parser, "PATACON_G1_VIDEO")
     args = parser.parse_args()
     if args.control_mode not in ("ctrl", "qpos"):
         parser.error("--control-mode must be ctrl or qpos")
@@ -3573,7 +3573,7 @@ def main() -> int:
         )
         return 0
     validate_only = args.validate_only or os.environ.get(
-        "PRRTC_MUJOCO_VALIDATE_ONLY"
+        "PATACON_MUJOCO_VALIDATE_ONLY"
     ) == "1"
     if validate_only:
         import mujoco

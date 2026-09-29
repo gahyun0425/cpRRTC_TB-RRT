@@ -162,7 +162,7 @@ GPU에서 검사한다.
 
 기존 planner 알고리즘과 공통 실행 흐름은 유지하고 IGRIS용 타입 dispatch만
 추가했다. `RobotCollisionTraits`, constraint parameter 전달, tangent/projection
-hook, 35축 Halton 순서와 explicit template instantiation이 pRRTC/AORRTC에
+hook, 35축 Halton 순서와 explicit template instantiation이 PATACON/AORRTC에
 등록되어 있다.
 
 ```bash
@@ -182,4 +182,4 @@ site의 중점과 왼손 frame 방향을 따라간다. 선반과 5 cm support po
 같은 live viewer에 표시한다.
 
 GUI 없이 viewer 입력만 검사할 때는 planner가 만든 trajectory JSON에 대해
-`PRRTC_MUJOCO_VALIDATE_ONLY=1`을 설정하면 된다.
+`PATACON_MUJOCO_VALIDATE_ONLY=1`을 설정하면 된다.

@@ -1,4 +1,4 @@
-# AORRTC integration for cpRRTC / TB-RRT
+# AORRTC integration for PATACON / TB-RRT
 
 ## Run
 
@@ -24,7 +24,7 @@ Set another total AORRTC planning budget:
 
 ## Algorithm mapping
 
-The implementation uses the repository's current bidirectional cpRRTC/TB-RRT search as the satisficing search inside AORRTC. Its Tangent-Space sampling, ConCon expansion, projection, collision checking, Dynamic Domain and balanced tree-selection logic are retained.
+The implementation uses the repository's current bidirectional PATACON/TB-RRT search as the satisficing search inside AORRTC. Its Tangent-Space sampling, ConCon expansion, projection, collision checking, Dynamic Domain and balanced tree-selection logic are retained.
 
 AORRTC-specific behavior is isolated in
 `src/planning/AORRTCOptimization.cuh`, which is included by
