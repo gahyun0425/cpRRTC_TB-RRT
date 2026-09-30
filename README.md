@@ -1,19 +1,108 @@
-# PATACON: GPU-Parallel RRT-Connect
+# PATACON: GPU-Parallel Tangent-Bundle RRT-Connect for Constrained Motion Planning
 
-[![arXiv Paper](https://img.shields.io/badge/arXiv-2503.06757-b31b1b.svg)](https://arxiv.org/abs/2503.06757)
+PATACON (PArallel TAngent-bundle RRT-CONnect) is a GPU-parallel,
+bidirectional constrained motion planner. It combines local tangent-space
+guidance with RRT-Connect-style tree growth so candidate motions follow the
+constraint manifold before numerical projection. Its main algorithmic
+components are:
 
-PATACON is a GPU-parallel RRT-Connect motion planner for constrained robotic
-manipulation. Its main features are:
-
-- concurrent sampling and bidirectional tree expansion on the GPU;
-- SIMT-optimized edge and collision validation;
-- constrained projection and tangent-space planning;
-- optional AORRTC anytime cost optimization;
+- Tangent-Guided Sampling (TGS) with tree-specific shared tangent-space banks;
+- Tangent-Guided Multi-Edge Projection (TGMP), which generates several
+  consecutive candidate edges from one sample and nearest-neighbor query;
+- concurrent projection and collision validation of TGMP candidate edges;
+- insertion of only the longest consecutively valid candidate prefix;
+- target-directed CONNECT using the same EXTEND operation;
+- optional AO-PATACON anytime cost optimization based on AORRTC;
 - MuJoCo replay, continuous G1 replanning, and multi-view video export.
 
-The associated ICRA 2026 evaluation reports a 10x average speedup, a 5.4x
-reduction in solution-time standard deviation, and a 1.4x improvement in
-initial path cost over the compared planners.
+The accompanying paper evaluates eight constrained-planning regimes from
+7-DoF manipulation to 35-DoF humanoid whole-body planning. It reports that
+the advantage over cpRRTC increases with configuration-space dimension and
+constraint restrictiveness, reaching up to an 11.25x speedup with a 100%
+success rate.
+
+## Algorithm overview
+
+PATACON maintains a start tree and a goal tree, together with a separate
+tangent-space bank for each tree. Every stored tree node has a projected
+manifold configuration, a parent, a tangent-space index, and a local
+tangent-space representation. CUDA blocks explore these shared trees and
+tangent-space banks concurrently.
+
+### Algorithm 1: PATACON search
+
+The top-level search follows the paper's pseudocode in this order:
+
+```text
+initialize start/goal trees and their root tangent spaces
+
+for each CUDA block in parallel:
+    choose the grow tree and opposite tree using tree balancing
+    select a ready tangent space from the grow tree's bank
+    sample q_rand in that tangent space
+    find q_near among nodes associated with that tangent space
+    EXTEND the grow tree using q_rand - q_near
+
+    if EXTEND advanced:
+        select the closest node q_tar in the opposite tree
+        CHECK_CONNECTION(q_end, q_tar)
+
+        while not connected and the CONNECT limit is not reached:
+            project q_tar - q_cur onto q_cur's tangent space
+            EXTEND toward that fixed target
+            CHECK_CONNECTION(q_end, q_tar)
+
+        if connected:
+            trace both parent chains and return the solution path
+```
+
+Tree balancing selects the smaller tree when the size imbalance exceeds the
+configured threshold and otherwise distributes blocks between the two trees.
+A block dynamically scans its selected tree's tangent-space bank until it
+finds a fully initialized entry; tangent spaces are not permanently assigned
+to individual blocks.
+
+TGS samples a block-local Halton direction in the selected tangent space and
+performs a tangent-space-local nearest-neighbor query. For every non-root
+tangent space, the frontend enables the paper's backtracking-prevention rule:
+a sampled direction pointing toward the parent tangent-space region is
+reversed into the forward half-space.
+
+### Algorithm 2: EXTEND with TGMP
+
+Exploration and CONNECT both call the same EXTEND operation. Given a tangent
+direction, EXTEND:
+
+1. normalizes the direction and generates up to `Kmax` consecutive tangent
+   candidates at step size `xi`;
+2. stops candidate generation after including the first candidate whose
+   constraint residual `EM` exceeds `epsilon_M`;
+3. projects and collision-checks the candidate edges;
+4. inserts only the longest valid prefix, returning `Trapped` when the first
+   edge is invalid and `Advanced` otherwise;
+5. creates a new tangent space only when the complete candidate batch is
+   accepted and its last tangent candidate crosses the renewal threshold.
+
+Different TGMP candidate edges are processed concurrently by cooperative GPU
+thread groups. Within one edge, discretized waypoints are projected in their
+original sequential order because each projection starts from the preceding
+projected waypoint. Joint limits, constraint convergence, self-collision, and
+environment collision are checked before a projected edge can be inserted.
+During CONNECT, an edge must additionally reduce the distance to the fixed
+opposite-tree target by at least `epsilon_prog`.
+
+### Algorithm 3: connection and bridge validation
+
+The paper defines `CHECK_CONNECTION` as follows: first require the two selected
+nodes to be within `epsilon_con`, then project and validate the remaining bridge
+motion, and only then trace the two parent chains and report `Connected`.
+
+The current repository intentionally retains the earlier compatibility rule in
+`ConnectionCheck.cuh`: it reports `Connected` using only the
+`epsilon_con` distance test and does not project or collision-check a separate
+bridge segment. The control-flow placement of `CHECK_CONNECTION` matches the
+paper—once after exploratory EXTEND and after every successful CONNECT
+EXTEND—but this final bridge-validation detail is not yet paper-equivalent.
 
 ## Supported robots
 
@@ -105,21 +194,21 @@ Shared types, adapters, and CUDA implementation boundaries are kept out of
 | `src/planning/PlannerResult.hh` | Planner result and validation data types |
 | `src/io/PlannerResultJson.hh` | Versioned planner-result serialization |
 | `src/planning/PATACON.cu` | Pseudocode-shaped PATACON search flow, public `solve()` facade, and PATACON template instantiations |
-| `src/planning/AORRTCOptimization.cu` | Independent AORRTC CUDA translation-unit entry and its PATACON device-helper boundary |
-| `src/planning/AORRTCOptimization.cuh` | AORRTC cost-aware search and optimization implementation |
+| `src/planning/AORRTCOptimization.cu` | Independent AO-PATACON CUDA translation-unit entry and its PATACON device-helper boundary |
+| `src/planning/AORRTCOptimization.cuh` | AORRTC-based cost-bounded restart and anytime optimization implementation |
 | `src/planning/patacon/RuntimeControl.cpp` | Host-owned device-reset, workspace-reuse, and time-budget state |
 | `src/planning/patacon/GpuRuntime.cuh` | Device globals, diagnostics, distance helpers, and random/Halton sampling |
 | `src/planning/patacon/DeviceEnvironment.cuh` | Device primitive ownership, reuse, cleanup, and request reset |
-| `src/planning/patacon/Projection.cuh` | Robot-specific projection, tangent bases, and constrained sampling |
-| `src/planning/patacon/CollisionValidation.cuh` | Tangent-space initialization and projected-edge collision validation |
+| `src/planning/patacon/Projection.cuh` | Robot-specific waypoint projection, tangent-basis construction, and tangent-space sampling primitives |
+| `src/planning/patacon/CollisionValidation.cuh` | Tangent-space initialization and projected-edge feasibility/collision validation |
 | `src/planning/patacon/SearchContext.cuh` | Kernel argument view, block-local shared state, and step-result types |
 | `src/planning/patacon/TreeOperations.cuh` | Tree and tangent-space bookkeeping helpers |
 | `src/planning/patacon/TreeSelection.cuh` | Existing tree balancing and tangent-space selection policy |
-| `src/planning/patacon/Exploration.cuh` | `q_rand` sampling, tangent-space-local nearest-neighbor selection, and `v_ext` preparation |
+| `src/planning/patacon/Exploration.cuh` | TGS `q_rand` sampling, tangent-space-local nearest-neighbor selection, and `v_ext` preparation |
 | `src/planning/patacon/Extend.cuh` | Pseudocode-shaped shared Algorithm 2 EXTEND entry point |
-| `src/planning/patacon/ExtendStages.cuh` | Mode-preserving candidate preparation, TGMP projection, collision validation, and node insertion stages used by EXTEND |
-| `src/planning/patacon/ConnectionCheck.cuh` | Pseudocode-shaped CHECK_CONNECTION using the existing distance-tolerance connection rule |
-| `src/planning/patacon/Connect.cuh` | Fixed-target selection and repeated target-directed EXTEND orchestration |
+| `src/planning/patacon/ExtendStages.cuh` | TGMP candidate generation, parallel projection/validation, valid-prefix insertion, and tangent-space renewal stages used by EXTEND |
+| `src/planning/patacon/ConnectionCheck.cuh` | CHECK_CONNECTION placement from Algorithm 3 with the current distance-only compatibility rule |
+| `src/planning/patacon/Connect.cuh` | Algorithm 1 fixed-target selection and repeated target-directed EXTEND orchestration |
 | `src/planning/patacon/PathExtraction.cuh` | Device-side solution claiming and parent-chain extraction into two path segments |
 | `src/planning/patacon/PathAssembly.cuh` | Host-side download and assembly of device path segments into the planner result |
 | `src/planning/patacon/PathPostprocessing.cuh` | Solution tracing plus visualization path simplification and validation |
@@ -135,9 +224,11 @@ internal headers, not independent backend APIs. `PATACON.cu` owns the standard
 planner state and includes the full flow. `AORRTCOptimization.cu` compiles the
 shared device primitives it needs into a separate, self-contained CUDA object
 and calls PATACON's public host API for its initial feasible-path search. The
-search kernel in `PATACON.cu` reads in algorithm order: tree selection,
-tangent-space selection and sampling, EXTEND, CONNECT, and path extraction.
-Allocation and low-level CUDA details stay in the internal headers.
+search kernel in `PATACON.cu` reads in Algorithm 1 order: tree balancing,
+tangent-space selection, TGS sampling and nearest-neighbor selection, TGMP
+EXTEND, the pre-CONNECT connection check, repeated CONNECT EXTEND calls, and
+path extraction. Allocation and low-level CUDA details stay in the internal
+headers.
 
 ## Run the planner
 
@@ -270,17 +361,23 @@ The default seed is `1`; repeated runs use consecutive seeds. Without
 `--aorrtc`, `--plot` writes a log-scale ECDF of cumulative solved runs versus
 planner kernel time.
 
-### AORRTC anytime optimization
+### AO-PATACON anytime optimization
 
 ```bash
 ./build_patacon/single_mbm ffw_sg2 tray_lift 1 \
   --aorrtc --time 10 --no-print-path
 ```
 
-The default AORRTC budget is five seconds. PATACON first finds a feasible path,
-then performs fresh-tree cost-bounded searches until the budget expires. A GPU
-expansion round cannot be interrupted, so wall time can slightly exceed the
-requested budget. See `AORRTC_IMPLEMENTATION.md` for the algorithm-to-code
+The paper calls this anytime planner AO-PATACON. The current CLI and source API
+retain the `--aorrtc` and `AORRTC` names because AO-PATACON embeds PATACON in
+an AORRTC-based optimization framework. PATACON first finds a feasible path,
+uses its configuration-space path length as the incumbent cost bound, and then
+restarts fresh-tree cost-bounded searches. Each improved solution tightens the
+bound and starts another search. The paper evaluates a 10-second optimization
+budget; the executable default is five seconds unless `--time` overrides it.
+
+A GPU expansion round cannot be interrupted, so wall time can slightly exceed
+the requested budget. See `AORRTC_IMPLEMENTATION.md` for the algorithm-to-code
 mapping and output fields.
 
 Both frontends report end-to-end timing statistics and solved-path length/cost
@@ -620,18 +717,24 @@ retaining the full JSON and GraphML tree; zero embeds every node.
 
 ### Planner configuration
 
-The main compile-time settings are defined in the planning settings and robot
-backends.
+The main settings are defined in `PATACON_settings.hh`. The paper notation maps
+to the implementation as follows.
 
-| Setting | Meaning |
-| --- | --- |
-| `max_samples` | Maximum total tree samples. |
-| `max_iters` | Maximum planning iterations. |
-| `num_new_configs` | Samples generated per iteration. |
-| `range` | Maximum RRT-Connect extension length. |
-| `granularity` | Discretized collision checks per edge. Must match the robot collision kernel batch size. |
-| `balance` | `0`: none, `1`: distributed, `2`: single-sided tree balancing. |
-| `tree_ratio` | Smaller-tree threshold; normally `0.5` for balance mode 1 and `1` for mode 2. |
+| Setting | Paper symbol | Meaning |
+| --- | --- | --- |
+| `max_samples` | — | Maximum node capacity per search tree. |
+| `max_tangent_spaces` | — | Maximum tangent-space capacity per tree. |
+| `max_iters` | `Imax` | Maximum planning iterations executed by a CUDA block. |
+| `num_new_configs` | `Nblk` | Number of CUDA blocks, and therefore concurrent tree-expansion attempts. |
+| `range` | `xi` | Step length between consecutive TGMP tangent candidates. |
+| `max_concon_nodes` | `Kmax` | Maximum candidate edges generated by one EXTEND call. |
+| `em_threshold` | `epsilon_M` | Constraint-residual threshold that stops candidate generation and requests tangent-space renewal. |
+| `granularity` | `G` | Projected waypoints per candidate edge; must match the robot collision kernel batch size. |
+| `max_connect_concon_chunks` | `Jmax` | Maximum target-directed EXTEND calls in one CONNECT attempt. |
+| `connect_progress_epsilon` | `epsilon_prog` | Minimum target-distance reduction required from a CONNECT edge. |
+| `connect_reached_tolerance` | `epsilon_con` | Distance threshold that triggers CHECK_CONNECTION. |
+| `balance` | — | `0`: none, `1`: distributed, `2`: single-sided tree balancing. |
+| `tree_ratio` | — | Smaller-tree threshold; normally `0.5` for balance mode 1 and `1` for mode 2. |
 
 MotionBenchMaker-compatible problem JSON files can be generated following the
 [upstream resource workflow](https://github.com/KavrakiLab/vamp/blob/35080be604aabd4373cc7db8608297afaa446878/resources/README.md#motionbenchmaker-problems).
