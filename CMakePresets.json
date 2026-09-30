@@ -31,5 +31,18 @@
       "targets": ["evaluate_mbm"],
       "jobs": 2
     }
+  ],
+  "testPresets": [
+    {
+      "name": "patacon",
+      "displayName": "PATACON behavior contracts",
+      "configurePreset": "patacon",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "noTestsAction": "error"
+      }
+    }
   ]
 }

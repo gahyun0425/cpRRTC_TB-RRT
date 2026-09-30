@@ -8,26 +8,21 @@
 #include <utility>
 
 #include "src/constraints/json/ConstraintSetJson.hh"
+#include "src/config/RobotRegistry.hh"
 
 namespace ppln::config {
 
 using Json = nlohmann::json;
 
-struct SelectedPlanningProblem {
+struct PlanningProblem {
     std::string robot_name;
     std::string problem_name;
     int problem_index = 1;
     Json data;
 };
 
-inline int compiled_robot_dimension(const std::string &robot_name) {
-    if (robot_name == "franka_single") return 7;
-    if (robot_name == "franka") return 14;
-    if (robot_name == "ffw_sg2") return 15;
-    if (robot_name == "ffw_sg2_mobility") return 18;
-    if (robot_name == "g1" || robot_name == "igris_c") return 35;
-    return -1;
-}
+// Compatibility name retained while frontends migrate to the common model.
+using SelectedPlanningProblem = PlanningProblem;
 
 inline Json read_json_file(const std::string &path) {
     std::ifstream input(path);

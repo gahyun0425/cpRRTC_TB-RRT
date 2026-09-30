@@ -370,7 +370,7 @@ __device__ __forceinline__ void igris_c_cross(
 
 // Computes every link pose and each active joint's world origin/axis once.
 // The generated joint table is topologically ordered from the world link.
-__device__ __noinline__ void igris_c_forward_model(
+inline __device__ __noinline__ void igris_c_forward_model(
     const float q[IGRIS_C_DIM],
     IgrisCTransform link_poses[IGRIS_C_LINK_COUNT],
     float joint_origins[IGRIS_C_DIM][3],
@@ -495,7 +495,7 @@ __device__ __forceinline__ void igris_c_frame_kinematics_from_model(
     }
 }
 
-__device__ __noinline__ void igris_c_task_frame_kinematics(
+inline __device__ __noinline__ void igris_c_task_frame_kinematics(
     const float q[IGRIS_C_DIM],
     int task_frame,
     IgrisCTransform &pose,
@@ -585,7 +585,7 @@ __device__ __forceinline__ void igris_c_center_of_mass_from_model(
     }
 }
 
-__device__ __noinline__ void igris_c_center_of_mass_kinematics(
+inline __device__ __noinline__ void igris_c_center_of_mass_kinematics(
     const float q[IGRIS_C_DIM],
     float center_of_mass[3],
     float jacobian[3 * IGRIS_C_DIM]
@@ -695,7 +695,7 @@ __device__ __forceinline__ void igris_c_bimanual_from_model(
     }
 }
 
-__device__ __noinline__ void igris_c_bimanual_kinematics(
+inline __device__ __noinline__ void igris_c_bimanual_kinematics(
     const float q[IGRIS_C_DIM],
     IgrisCTransform &relative_pose,
     float position_jacobian[3 * IGRIS_C_DIM],

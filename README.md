@@ -61,7 +61,6 @@ python3 resources/franka/prepare_description.py --check
 python3 resources/g1/prepare_description.py --check
 python3 resources/ffw_sg2/prepare_planning_urdf.py
 python3 resources/ffw_sg2/prepare_collision_models.py
-python3 resources/ffw_sg2/prepare_mujoco_scenes.py
 
 cmake --preset patacon
 cmake --build --preset patacon
@@ -76,10 +75,13 @@ cmake --build --preset patacon-single
 cmake --build --preset patacon-evaluate
 ```
 
-`src/planning/PATACON.cu` is the shared CUDA translation unit for the standard
-planner and AORRTC. The resulting `patacon_planners` library is linked into
-both frontends. Reuse `build_patacon`; deleting it forces an expensive clean
-CUDA build.
+The standard planner and AORRTC are separate CUDA translation units:
+`src/planning/PATACON.cu` and
+`src/planning/AORRTCOptimization.cu`. Both objects are archived in the
+`patacon_planners` library linked by the frontends. A PATACON-only source
+change therefore reuses the compiled AORRTC object, and an AORRTC-only change
+reuses the PATACON object. Reuse `build_patacon`; deleting it still forces an
+expensive clean CUDA build of both objects.
 
 CUDA split compilation reduces clean-build time but increases peak memory
 usage. Disable it on a lower-memory machine with:
@@ -88,6 +90,54 @@ usage. Disable it on a lower-memory machine with:
 cmake --preset patacon -DPATACON_CUDA_SPLIT_COMPILE=OFF
 cmake --build --preset patacon
 ```
+
+### Source boundaries
+
+Shared types, adapters, and CUDA implementation boundaries are kept out of
+`scripts/`:
+
+| Path | Responsibility |
+| --- | --- |
+| `src/config/PlanningProblemJson.hh` | Normalized planning-problem model and JSON loading |
+| `src/config/RobotRegistry.hh` | CUDA-independent robot names, dimensions, and default problem files |
+| `src/config/PrimitiveEnvironmentJson.hh` | JSON primitives to collision-environment conversion |
+| `src/planning/RobotDispatch.hh` | CLI robot name to compiled backend dispatch |
+| `src/planning/PlannerResult.hh` | Planner result and validation data types |
+| `src/io/PlannerResultJson.hh` | Versioned planner-result serialization |
+| `src/planning/PATACON.cu` | Pseudocode-shaped PATACON search flow, public `solve()` facade, and PATACON template instantiations |
+| `src/planning/AORRTCOptimization.cu` | Independent AORRTC CUDA translation-unit entry and its PATACON device-helper boundary |
+| `src/planning/AORRTCOptimization.cuh` | AORRTC cost-aware search and optimization implementation |
+| `src/planning/patacon/RuntimeControl.cpp` | Host-owned device-reset, workspace-reuse, and time-budget state |
+| `src/planning/patacon/GpuRuntime.cuh` | Device globals, diagnostics, distance helpers, and random/Halton sampling |
+| `src/planning/patacon/DeviceEnvironment.cuh` | Device primitive ownership, reuse, cleanup, and request reset |
+| `src/planning/patacon/Projection.cuh` | Robot-specific projection, tangent bases, and constrained sampling |
+| `src/planning/patacon/CollisionValidation.cuh` | Tangent-space initialization and projected-edge collision validation |
+| `src/planning/patacon/SearchContext.cuh` | Kernel argument view, block-local shared state, and step-result types |
+| `src/planning/patacon/TreeOperations.cuh` | Tree and tangent-space bookkeeping helpers |
+| `src/planning/patacon/TreeSelection.cuh` | Existing tree balancing and tangent-space selection policy |
+| `src/planning/patacon/Exploration.cuh` | `q_rand` sampling, tangent-space-local nearest-neighbor selection, and `v_ext` preparation |
+| `src/planning/patacon/Extend.cuh` | Pseudocode-shaped shared Algorithm 2 EXTEND entry point |
+| `src/planning/patacon/ExtendStages.cuh` | Mode-preserving candidate preparation, TGMP projection, collision validation, and node insertion stages used by EXTEND |
+| `src/planning/patacon/ConnectionCheck.cuh` | Pseudocode-shaped CHECK_CONNECTION using the existing distance-tolerance connection rule |
+| `src/planning/patacon/Connect.cuh` | Fixed-target selection and repeated target-directed EXTEND orchestration |
+| `src/planning/patacon/PathExtraction.cuh` | Device-side solution claiming and parent-chain extraction into two path segments |
+| `src/planning/patacon/PathAssembly.cuh` | Host-side download and assembly of device path segments into the planner result |
+| `src/planning/patacon/PathPostprocessing.cuh` | Solution tracing plus visualization path simplification and validation |
+| `src/planning/patacon/SolveWorkspace.cuh` | Reusable solver workspace allocation, ownership, and cleanup |
+| `src/planning/patacon/SolveStages.cuh` | Host-side validation, CUDA setup, launch, result collection, and cleanup implementation stages |
+| `src/planning/patacon/Solve.cuh` | Pseudocode-shaped host solve orchestration over the implementation stages |
+| `src/planning/patacon/ExplicitInstantiations.cuh` | Compiled robot and visualization template instantiations |
+
+`single_mbm` and `evaluate_mbm` remain application frontends. The compatibility
+header `scripts/planner_result_json.hh` forwards to the new IO location so
+existing local tools do not break. The CUDA implementation fragments above are
+internal headers, not independent backend APIs. `PATACON.cu` owns the standard
+planner state and includes the full flow. `AORRTCOptimization.cu` compiles the
+shared device primitives it needs into a separate, self-contained CUDA object
+and calls PATACON's public host API for its initial feasible-path search. The
+search kernel in `PATACON.cu` reads in algorithm order: tree selection,
+tangent-space selection and sampling, EXTEND, CONNECT, and path extraction.
+Allocation and low-level CUDA details stay in the internal headers.
 
 ## Run the planner
 
@@ -461,6 +511,27 @@ fallback. `PATACON_G1_VELOCITY_SCALE` scales replay speed.
 
 ## Validation
 
+Configure, build, and run the complete pre-refactor behavior contract with:
+
+```bash
+python3 -m pip install -r requirements-test.txt
+cmake --preset patacon
+cmake --build --preset patacon
+ctest --preset patacon
+```
+
+CTest runs one deterministic solved planning case for every supported robot
+backend, validates each saved result against
+`schemas/planner-result-v1.schema.json`, and checks configuration dimensions,
+finite values, path counts, and start/goal endpoints. Separate contract tests
+cover AORRTC, repeated-run bundles, and `evaluate_mbm` problem-set output.
+CUDA tests share a CTest resource lock so `ctest -j` does not run multiple
+planner kernels concurrently on the same GPU.
+
+The version-1 result contracts are documented in `schemas/README.md`. Breaking
+changes require a new `format` value and schema version rather than modifying
+the meaning of an existing version.
+
 Build all robot-specific validation executables:
 
 ```bash
@@ -495,6 +566,19 @@ Run the validators:
 `validate_franka_collision` accepts `franka_single` or `franka` as its first
 argument and an optional problem JSON as its second. The G1 collision validator
 requires the problem path before `--axis`.
+
+`validate_ffw_sg2_projection` is registered as
+`validation.ffw_sg2.projection_known_failure` but disabled: before this test
+suite was introduced, its configuration checks passed while only 1 of 3
+motion-segment checks passed. This known failure is recorded explicitly instead
+of being treated as a successful baseline.
+
+The pre-refactor performance record is
+`benchmarks/baseline-rtx5090-2026-09-30.json`. It contains 20 runs per bundled
+robot case, seeds 1 through 20, hardware/build metadata, solved rates, and
+kernel-time distributions. See `benchmarks/README.md` for the reproduction
+command and comparison policy; performance timing is not a hardware-independent
+CTest pass/fail condition.
 
 ## Advanced features
 
@@ -548,10 +632,6 @@ backends.
 | `granularity` | Discretized collision checks per edge. Must match the robot collision kernel batch size. |
 | `balance` | `0`: none, `1`: distributed, `2`: single-sided tree balancing. |
 | `tree_ratio` | Smaller-tree threshold; normally `0.5` for balance mode 1 and `1` for mode 2. |
-| `dynamic_domain` | Enable dynamic-domain sampling. |
-| `dd_alpha` | Dynamic-domain radius update factor. |
-| `dd_radius` | Initial dynamic-domain radius. |
-| `dd_min_radius` | Minimum dynamic-domain radius. |
 
 MotionBenchMaker-compatible problem JSON files can be generated following the
 [upstream resource workflow](https://github.com/KavrakiLab/vamp/blob/35080be604aabd4373cc7db8608297afaa446878/resources/README.md#motionbenchmaker-problems).

@@ -1,0 +1,558 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/gahyun0425/cpRRTC_TB-RRT/schemas/planner-result-v1.schema.json",
+  "title": "PATACON planner result version 1",
+  "description": "Stable schema for single-query PATACON/AORRTC results and repeated-run result bundles.",
+  "oneOf": [
+    { "$ref": "#/$defs/pataconResult" },
+    { "$ref": "#/$defs/aorrtcResult" },
+    { "$ref": "#/$defs/pataconRunResults" },
+    { "$ref": "#/$defs/aorrtcRunResults" }
+  ],
+  "$defs": {
+    "nonNegativeInteger": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "nullableNumber": {
+      "type": ["number", "null"]
+    },
+    "configuration": {
+      "type": "array",
+      "items": { "type": "number" }
+    },
+    "path": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/configuration" }
+    },
+    "vec3": {
+      "type": "array",
+      "prefixItems": [
+        { "type": "number" },
+        { "type": "number" },
+        { "type": "number" }
+      ],
+      "items": false
+    },
+    "vec4": {
+      "type": "array",
+      "prefixItems": [
+        { "type": "number" },
+        { "type": "number" },
+        { "type": "number" },
+        { "type": "number" }
+      ],
+      "items": false
+    },
+    "ffwAttachedObject": {
+      "type": "object",
+      "required": [
+        "enabled",
+        "sphere_count",
+        "world_offset",
+        "ignored_robot_sphere_count",
+        "ignored_robot_approx_sphere_count",
+        "spheres",
+        "ignored_robot_spheres",
+        "ignored_robot_approx_spheres"
+      ],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "sphere_count": { "$ref": "#/$defs/nonNegativeInteger" },
+        "world_offset": { "$ref": "#/$defs/vec3" },
+        "ignored_robot_sphere_count": { "$ref": "#/$defs/nonNegativeInteger" },
+        "ignored_robot_approx_sphere_count": { "$ref": "#/$defs/nonNegativeInteger" },
+        "spheres": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/vec4" }
+        },
+        "ignored_robot_spheres": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/nonNegativeInteger" }
+        },
+        "ignored_robot_approx_spheres": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/nonNegativeInteger" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "g1AttachedObject": {
+      "type": "object",
+      "required": [
+        "enabled",
+        "sphere_count",
+        "left_hand_center_offset",
+        "ignored_robot_sphere_count",
+        "spheres",
+        "ignored_robot_spheres"
+      ],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "sphere_count": { "$ref": "#/$defs/nonNegativeInteger" },
+        "left_hand_center_offset": { "$ref": "#/$defs/vec3" },
+        "ignored_robot_sphere_count": { "$ref": "#/$defs/nonNegativeInteger" },
+        "spheres": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/vec4" }
+        },
+        "ignored_robot_spheres": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/nonNegativeInteger" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "baseSettings": {
+      "type": "object",
+      "required": [
+        "max_samples",
+        "max_tangent_spaces",
+        "max_iters",
+        "num_new_configs",
+        "granularity",
+        "range",
+        "random_seed",
+        "lift_distance_weight",
+        "axis",
+        "g1_support_margin_m",
+        "ffw_sg2_enable_com_constraint",
+        "ffw_sg2_support_margin_m",
+        "ffw_sg2_object_mass_kg",
+        "balance",
+        "tree_ratio",
+        "prevent_ts_backtracking",
+        "trace_trees",
+        "collect_diagnostics",
+        "ffw_sg2_attached_object_collision",
+        "g1_attached_object_collision"
+      ],
+      "properties": {
+        "max_samples": { "$ref": "#/$defs/nonNegativeInteger" },
+        "max_tangent_spaces": { "$ref": "#/$defs/nonNegativeInteger" },
+        "max_iters": { "$ref": "#/$defs/nonNegativeInteger" },
+        "num_new_configs": { "$ref": "#/$defs/nonNegativeInteger" },
+        "granularity": { "$ref": "#/$defs/nonNegativeInteger" },
+        "range": { "type": "number", "exclusiveMinimum": 0 },
+        "random_seed": { "$ref": "#/$defs/nonNegativeInteger" },
+        "lift_distance_weight": { "type": "number" },
+        "axis": { "type": "boolean" },
+        "g1_support_margin_m": { "type": "number", "minimum": 0 },
+        "ffw_sg2_enable_com_constraint": { "type": "boolean" },
+        "ffw_sg2_support_margin_m": { "type": "number", "minimum": 0 },
+        "ffw_sg2_object_mass_kg": { "type": "number", "minimum": 0 },
+        "balance": { "type": "integer" },
+        "tree_ratio": { "type": "number" },
+        "prevent_ts_backtracking": { "type": "boolean" },
+        "trace_trees": { "type": "boolean" },
+        "collect_diagnostics": { "type": "boolean" },
+        "ffw_sg2_attached_object_collision": { "$ref": "#/$defs/ffwAttachedObject" },
+        "g1_attached_object_collision": { "$ref": "#/$defs/g1AttachedObject" }
+      }
+    },
+    "pataconSettings": {
+      "allOf": [
+        { "$ref": "#/$defs/baseSettings" }
+      ],
+      "unevaluatedProperties": false
+    },
+    "aorrtcSettings": {
+      "allOf": [
+        { "$ref": "#/$defs/baseSettings" },
+        {
+          "type": "object",
+          "required": [
+            "aorrtc",
+            "time_limit_sec",
+            "aorrtc_config_weight",
+            "aorrtc_cost_weight",
+            "cost_improvement_epsilon",
+            "aorrtc_max_parent_resamples",
+            "path_simplification"
+          ],
+          "properties": {
+            "aorrtc": { "const": true },
+            "time_limit_sec": { "type": "number", "exclusiveMinimum": 0 },
+            "aorrtc_config_weight": { "type": "number" },
+            "aorrtc_cost_weight": { "type": "number" },
+            "cost_improvement_epsilon": { "type": "number", "minimum": 0 },
+            "aorrtc_max_parent_resamples": { "$ref": "#/$defs/nonNegativeInteger" },
+            "path_simplification": { "type": "boolean" }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "evaluationSettings": {
+      "allOf": [
+        { "$ref": "#/$defs/baseSettings" },
+        {
+          "type": "object",
+          "required": [
+            "aorrtc",
+            "time_limit_sec",
+            "aorrtc_config_weight",
+            "aorrtc_cost_weight",
+            "cost_improvement_epsilon",
+            "aorrtc_max_parent_resamples",
+            "path_simplification"
+          ],
+          "properties": {
+            "aorrtc": { "type": "boolean" },
+            "time_limit_sec": { "type": "number", "exclusiveMinimum": 0 },
+            "aorrtc_config_weight": { "type": "number" },
+            "aorrtc_cost_weight": { "type": "number" },
+            "cost_improvement_epsilon": { "type": "number", "minimum": 0 },
+            "aorrtc_max_parent_resamples": { "$ref": "#/$defs/nonNegativeInteger" },
+            "path_simplification": { "type": "boolean" }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "environment": {
+      "type": "object",
+      "required": ["num_spheres", "num_capsules", "num_cuboids"],
+      "properties": {
+        "num_spheres": { "$ref": "#/$defs/nonNegativeInteger" },
+        "num_capsules": { "$ref": "#/$defs/nonNegativeInteger" },
+        "num_cuboids": { "$ref": "#/$defs/nonNegativeInteger" }
+      },
+      "additionalProperties": false
+    },
+    "diagnostics": {
+      "type": "object",
+      "required": [
+        "tangent_space_count",
+        "extend_attempts",
+        "extend_backtracking_flips",
+        "extend_em_stops",
+        "extend_anchor_projection_stops",
+        "extend_edge_projection_stops",
+        "extend_collision_stops",
+        "extend_full_successes",
+        "connect_attempts",
+        "connect_chunks",
+        "connect_invalid_tangent_spaces",
+        "connect_tangent_direction_stops",
+        "connect_em_stops",
+        "connect_anchor_projection_stops",
+        "connect_edge_projection_stops",
+        "connect_progress_stops",
+        "connect_collision_stops",
+        "connect_successes",
+        "connect_failures"
+      ],
+      "properties": {
+        "tangent_space_count": {
+          "type": "object",
+          "required": ["start", "goal", "total"],
+          "properties": {
+            "start": { "$ref": "#/$defs/nonNegativeInteger" },
+            "goal": { "$ref": "#/$defs/nonNegativeInteger" },
+            "total": { "$ref": "#/$defs/nonNegativeInteger" }
+          },
+          "additionalProperties": false
+        },
+        "extend_attempts": { "$ref": "#/$defs/nonNegativeInteger" },
+        "extend_backtracking_flips": { "$ref": "#/$defs/nonNegativeInteger" },
+        "extend_em_stops": { "$ref": "#/$defs/nonNegativeInteger" },
+        "extend_anchor_projection_stops": { "$ref": "#/$defs/nonNegativeInteger" },
+        "extend_edge_projection_stops": { "$ref": "#/$defs/nonNegativeInteger" },
+        "extend_collision_stops": { "$ref": "#/$defs/nonNegativeInteger" },
+        "extend_full_successes": { "$ref": "#/$defs/nonNegativeInteger" },
+        "connect_attempts": { "$ref": "#/$defs/nonNegativeInteger" },
+        "connect_chunks": { "$ref": "#/$defs/nonNegativeInteger" },
+        "connect_invalid_tangent_spaces": { "$ref": "#/$defs/nonNegativeInteger" },
+        "connect_tangent_direction_stops": { "$ref": "#/$defs/nonNegativeInteger" },
+        "connect_em_stops": { "$ref": "#/$defs/nonNegativeInteger" },
+        "connect_anchor_projection_stops": { "$ref": "#/$defs/nonNegativeInteger" },
+        "connect_edge_projection_stops": { "$ref": "#/$defs/nonNegativeInteger" },
+        "connect_progress_stops": { "$ref": "#/$defs/nonNegativeInteger" },
+        "connect_collision_stops": { "$ref": "#/$defs/nonNegativeInteger" },
+        "connect_successes": { "$ref": "#/$defs/nonNegativeInteger" },
+        "connect_failures": { "$ref": "#/$defs/nonNegativeInteger" }
+      },
+      "additionalProperties": false
+    },
+    "treeTraceNode": {
+      "type": "object",
+      "required": ["idx", "parent_idx", "ready", "solution", "solution_order", "q"],
+      "properties": {
+        "idx": { "$ref": "#/$defs/nonNegativeInteger" },
+        "parent_idx": { "type": "integer", "minimum": -1 },
+        "ready": { "const": true },
+        "solution": { "type": "boolean" },
+        "solution_order": { "type": "integer", "minimum": -1 },
+        "q": { "$ref": "#/$defs/configuration" }
+      },
+      "additionalProperties": false
+    },
+    "solutionOrderNode": {
+      "type": "object",
+      "required": ["order", "tree_id", "tree", "idx"],
+      "properties": {
+        "order": { "$ref": "#/$defs/nonNegativeInteger" },
+        "tree_id": { "type": "integer", "enum": [0, 1] },
+        "tree": { "type": "string", "enum": ["start", "goal"] },
+        "idx": { "$ref": "#/$defs/nonNegativeInteger" }
+      },
+      "additionalProperties": false
+    },
+    "treeTrace": {
+      "type": "object",
+      "required": ["trees", "connection", "solution_order"],
+      "properties": {
+        "trees": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": {
+            "type": "object",
+            "required": ["tree_id", "name", "allocated_size", "ready_size", "nodes"],
+            "properties": {
+              "tree_id": { "type": "integer", "enum": [0, 1] },
+              "name": { "type": "string", "enum": ["start", "goal"] },
+              "allocated_size": { "$ref": "#/$defs/nonNegativeInteger" },
+              "ready_size": { "$ref": "#/$defs/nonNegativeInteger" },
+              "nodes": {
+                "type": "array",
+                "items": { "$ref": "#/$defs/treeTraceNode" }
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "connection": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "required": [
+                "source_tree_id", "source_tree", "source_idx",
+                "target_tree_id", "target_tree", "target_idx"
+              ],
+              "properties": {
+                "source_tree_id": { "type": "integer", "enum": [0, 1] },
+                "source_tree": { "type": "string", "enum": ["start", "goal"] },
+                "source_idx": { "$ref": "#/$defs/nonNegativeInteger" },
+                "target_tree_id": { "type": "integer", "enum": [0, 1] },
+                "target_tree": { "type": "string", "enum": ["start", "goal"] },
+                "target_idx": { "$ref": "#/$defs/nonNegativeInteger" }
+              },
+              "additionalProperties": false
+            }
+          ]
+        },
+        "solution_order": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/solutionOrderNode" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "commonResult": {
+      "type": "object",
+      "required": [
+        "format",
+        "planner",
+        "robot",
+        "problem_name",
+        "problem_idx",
+        "seed",
+        "dimension",
+        "joint_names",
+        "solved",
+        "cost",
+        "path_length",
+        "path_waypoint_count",
+        "path_edge_count",
+        "start_tree_size",
+        "goal_tree_size",
+        "iters",
+        "wall_ns",
+        "kernel_ns",
+        "copy_ns",
+        "path_orientation",
+        "path",
+        "path_start_to_goal",
+        "start",
+        "goals",
+        "settings",
+        "environment"
+      ],
+      "properties": {
+        "format": { "type": "string" },
+        "planner": { "type": "string" },
+        "robot": {
+          "type": "string",
+          "enum": ["franka_single", "franka", "ffw_sg2", "ffw_sg2_mobility", "g1", "igris_c"]
+        },
+        "problem_name": { "type": "string", "minLength": 1 },
+        "problem_idx": { "type": "integer", "minimum": 1 },
+        "seed": { "$ref": "#/$defs/nonNegativeInteger" },
+        "dimension": { "type": "integer", "minimum": 1 },
+        "joint_names": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "solved": { "type": "boolean" },
+        "cost": { "$ref": "#/$defs/nullableNumber" },
+        "path_length": { "$ref": "#/$defs/nonNegativeInteger" },
+        "path_waypoint_count": { "$ref": "#/$defs/nonNegativeInteger" },
+        "path_edge_count": { "$ref": "#/$defs/nonNegativeInteger" },
+        "start_tree_size": { "$ref": "#/$defs/nonNegativeInteger" },
+        "goal_tree_size": { "$ref": "#/$defs/nonNegativeInteger" },
+        "iters": { "$ref": "#/$defs/nonNegativeInteger" },
+        "wall_ns": { "$ref": "#/$defs/nonNegativeInteger" },
+        "kernel_ns": { "$ref": "#/$defs/nonNegativeInteger" },
+        "copy_ns": { "$ref": "#/$defs/nonNegativeInteger" },
+        "path_orientation": {
+          "type": "string",
+          "enum": ["start_to_goal", "goal_to_start", "unknown"]
+        },
+        "path": { "$ref": "#/$defs/path" },
+        "path_start_to_goal": { "$ref": "#/$defs/path" },
+        "start": { "$ref": "#/$defs/configuration" },
+        "goals": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/configuration" }
+        },
+        "settings": { "type": "object" },
+        "environment": { "$ref": "#/$defs/environment" },
+        "run_idx": { "type": "integer", "minimum": 1 },
+        "run_count": { "type": "integer", "minimum": 1 },
+        "tree_trace": { "$ref": "#/$defs/treeTrace" },
+        "diagnostics": { "$ref": "#/$defs/diagnostics" }
+      }
+    },
+    "pataconResult": {
+      "allOf": [
+        { "$ref": "#/$defs/commonResult" },
+        {
+          "type": "object",
+          "properties": {
+            "format": { "const": "PATACON_result_v1" },
+            "planner": { "const": "PATACON" },
+            "settings": { "$ref": "#/$defs/pataconSettings" }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "aorrtcHistoryEntry": {
+      "type": "object",
+      "required": [
+        "update_index", "iteration", "cost", "found_ns", "found_sec",
+        "source_tree_id", "source_tree", "source_idx",
+        "target_tree_id", "target_tree", "target_idx",
+        "path_waypoint_count", "path_edge_count", "path_start_to_goal",
+        "solution_order"
+      ],
+      "properties": {
+        "update_index": { "$ref": "#/$defs/nonNegativeInteger" },
+        "iteration": { "$ref": "#/$defs/nonNegativeInteger" },
+        "cost": { "type": "number" },
+        "found_ns": { "$ref": "#/$defs/nonNegativeInteger" },
+        "found_sec": { "type": "number", "minimum": 0 },
+        "source_tree_id": { "type": "integer", "enum": [-1, 0, 1] },
+        "source_tree": { "type": "string", "enum": ["start", "goal"] },
+        "source_idx": { "type": "integer", "minimum": -1 },
+        "target_tree_id": { "type": "integer", "enum": [-1, 0, 1] },
+        "target_tree": { "type": "string", "enum": ["start", "goal"] },
+        "target_idx": { "type": "integer", "minimum": -1 },
+        "path_waypoint_count": { "$ref": "#/$defs/nonNegativeInteger" },
+        "path_edge_count": { "$ref": "#/$defs/nonNegativeInteger" },
+        "path_start_to_goal": { "$ref": "#/$defs/path" },
+        "solution_order": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/solutionOrderNode" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "aorrtcResult": {
+      "allOf": [
+        { "$ref": "#/$defs/commonResult" },
+        {
+          "type": "object",
+          "required": [
+            "initial_cost",
+            "planning_ns",
+            "planning_sec",
+            "initial_solution_ns",
+            "initial_solution_sec",
+            "best_solution_ns",
+            "best_solution_sec",
+            "solution_updates",
+            "search_restarts",
+            "solution_history_overflow",
+            "solution_history"
+          ],
+          "properties": {
+            "format": { "const": "AORRTC_result_v1" },
+            "planner": { "const": "AORRTC" },
+            "settings": { "$ref": "#/$defs/aorrtcSettings" },
+            "initial_cost": { "$ref": "#/$defs/nullableNumber" },
+            "planning_ns": { "$ref": "#/$defs/nonNegativeInteger" },
+            "planning_sec": { "type": "number", "minimum": 0 },
+            "initial_solution_ns": { "$ref": "#/$defs/nonNegativeInteger" },
+            "initial_solution_sec": { "type": "number", "minimum": 0 },
+            "best_solution_ns": { "$ref": "#/$defs/nonNegativeInteger" },
+            "best_solution_sec": { "type": "number", "minimum": 0 },
+            "solution_updates": { "$ref": "#/$defs/nonNegativeInteger" },
+            "search_restarts": { "$ref": "#/$defs/nonNegativeInteger" },
+            "solution_history_overflow": { "type": "boolean" },
+            "solution_history": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/aorrtcHistoryEntry" }
+            }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "pataconRunResults": {
+      "type": "object",
+      "required": [
+        "format", "planner", "robot", "problem_name", "problem_idx",
+        "runs", "solved_runs", "results"
+      ],
+      "properties": {
+        "format": { "const": "PATACON_run_results_v1" },
+        "planner": { "const": "PATACON" },
+        "robot": { "type": "string" },
+        "problem_name": { "type": "string" },
+        "problem_idx": { "type": "integer", "minimum": 1 },
+        "runs": { "type": "integer", "minimum": 1 },
+        "solved_runs": { "$ref": "#/$defs/nonNegativeInteger" },
+        "results": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/pataconResult" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "aorrtcRunResults": {
+      "type": "object",
+      "required": [
+        "format", "planner", "robot", "problem_name", "problem_idx",
+        "runs", "solved_runs", "results"
+      ],
+      "properties": {
+        "format": { "const": "AORRTC_run_results_v1" },
+        "planner": { "const": "AORRTC" },
+        "robot": { "type": "string" },
+        "problem_name": { "type": "string" },
+        "problem_idx": { "type": "integer", "minimum": 1 },
+        "runs": { "type": "integer", "minimum": 1 },
+        "solved_runs": { "$ref": "#/$defs/nonNegativeInteger" },
+        "results": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/aorrtcResult" }
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

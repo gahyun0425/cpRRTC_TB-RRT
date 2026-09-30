@@ -22,9 +22,9 @@ official `ai_worker` repository, checked out as a submodule inside PATACON.
 - Collision-model metadata: `collision_model_metadata.json` (generated)
 - Collision-model generator: `prepare_collision_models.py`
 - PATACON-only MuJoCo task overlays: `mujoco/*.xml`
-- MuJoCo task-scene generator: `prepare_mujoco_scenes.py`
-- Generated task scenes: `../../ffw_lift/ffw_sg2_lift.xml` and
-  `../../ffw_lift/ffw_sg2_rack_upper_to_lower.xml`
+- Runtime MuJoCo task-scene compositor:
+  `../../scripts/ffw_sg2_mujoco_scene.py`
+- Optional standalone task-scene exporter: `prepare_mujoco_scenes.py`
 - Cricket output validator/postprocessor: `postprocess_cricket_header.py`
 - Integrated CUDA collision implementation: `../../src/robots/ffw_sg2.cuh`
 
@@ -35,23 +35,30 @@ from the repository root with:
 git submodule update --init ai_worker
 python3 resources/ffw_sg2/prepare_planning_urdf.py
 python3 resources/ffw_sg2/prepare_collision_models.py
-python3 resources/ffw_sg2/prepare_mujoco_scenes.py
 ```
 
 The planning generator removes visual and inertial elements, keeps collision
 geometry, removes Gazebo/transmission/control data, changes robot mesh paths to
 paths inside PATACON, and fixes non-planning joints at their URDF zero pose. The
-MuJoCo generator combines the official robot with PATACON's task-only overlays:
-the visualization floor, attached object, and optional CoM markers. No FFW-SG2
-generation step reads `cptbrrt_pkg`, VAMP, or another workspace.
+MuJoCo visualizers combine the official robot with PATACON's task-only overlays
+at runtime: the visualization floor, attached object, and optional CoM markers.
+The temporary composed XML is removed after MuJoCo compiles it. To inspect or
+export the composed scenes explicitly, run:
+
+```bash
+python3 resources/ffw_sg2/prepare_mujoco_scenes.py \
+    --output-dir /tmp/patacon-ffw-sg2-scenes
+```
+
+No FFW-SG2 generation step reads `cptbrrt_pkg`, VAMP, or another workspace.
 
 FFW-SG2 world geometry has one source of truth: the selected planning problem's
 `sphere`, `cylinder`, and `box` arrays. Both planner frontends copy these arrays
 into the replay document. The standard replay and real-dynamics simulator use
 the shared `scripts/mujoco_primitive_environment.py` adapter to validate and
-insert the primitives into MuJoCo at runtime. The generated XML files contain
-no hardcoded kitchen furniture or racks. Evaluation replay requires every
-bundled trajectory to use the same primitive environment.
+insert the primitives into MuJoCo at runtime. The composed XML contains no
+hardcoded kitchen furniture or racks. Evaluation replay requires every bundled
+trajectory to use the same primitive environment.
 
 ## Canonical 15-DoF configuration
 

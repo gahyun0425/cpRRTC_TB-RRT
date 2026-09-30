@@ -681,7 +681,6 @@ namespace AORRTC {
         int **ts_node_count,
         int **ts_lane_head,
         int **node_next_in_ts,
-        float **radii,
         HaltonState<Robot> *halton_states,
         curandState *rng_states,
         int *block_tree_ids,
@@ -1330,9 +1329,7 @@ namespace AORRTC {
                                 scale = 0.0f;
                             }
                         }
-                    // 기존 Dynamic Domain 설정 그대로 사용
-                    const bool outside_dynamic_domain =d_settings.dynamic_domain&&radii[t_tree_id][sindex[0]]<q_rand_dist;
-                    should_skip =zero_direction||outside_dynamic_domain;
+                    should_skip = zero_direction;
                 }
             }
             __syncthreads();
@@ -1731,27 +1728,6 @@ namespace AORRTC {
                     // index가 정상이라는 것이 확정된 뒤에만 tree metadata를 기록
                     if (tid == 0) {
                         t_parents[index] =concon_parent_idx;
-
-                        if (d_settings.dynamic_domain) {
-                            radii[t_tree_id][index] =FLT_MAX;
-
-                            volatile float *radius_ptr =&radii[t_tree_id][concon_parent_idx];
-                            float old_radius;
-                            float new_radius;
-                            int expected;
-                            int desired;
-
-                            do {old_radius =*radius_ptr;
-                                if (old_radius == FLT_MAX) {
-                                    break;
-                                }
-
-                                new_radius = old_radius*(1+d_settings.dd_alpha);
-                                expected =__float_as_int(old_radius);
-                                desired =__float_as_int(new_radius);
-
-                            } while (atomicCAS((int *)radius_ptr,expected,desired)!= expected);
-                        }
                     }
                     __syncthreads();
 
@@ -2528,7 +2504,6 @@ namespace AORRTC {
                         // CONNECT node metadata
                         if (tid == 0) {
                             t_parents[index] =concon_parent_idx;
-                            radii[t_tree_id][index] =FLT_MAX;
                         }
                         __syncthreads();
 
@@ -2813,22 +2788,6 @@ namespace AORRTC {
                     }
                     __syncthreads();
                 }
-            } 
-            else if (d_settings.dynamic_domain && tid == 0) {      
-                // printf("no config added\n");
-                volatile float *radius_ptr = &radii[t_tree_id][sindex[0]];
-                float old_radius, new_radius;
-                int expected, desired;
-                do {
-                    old_radius = *radius_ptr;
-                    if (old_radius == FLT_MAX) {
-                        new_radius = d_settings.dd_radius;
-                    } else {
-                        new_radius = fmaxf(old_radius * (1.f - d_settings.dd_alpha), d_settings.dd_min_radius);
-                    }
-                    expected = __float_as_int(old_radius);
-                    desired = __float_as_int(new_radius);
-                } while (atomicCAS((int *)radius_ptr, expected, desired) != expected);
             }
         __syncthreads();
 
@@ -3052,18 +3011,17 @@ namespace AORRTC {
 
         // AORRTC starts from the exact same first-feasible-path search as the
         // default planner. Keep the total --time budget across both phases.
+        const PATACON::RuntimeControlState saved_runtime_control =
+            PATACON::runtime_control_state();
         const bool saved_cuda_device_reset_enabled =
-            PATACON::cuda_device_reset_enabled;
-        const bool saved_persistent_workspace_enabled =
-            PATACON::persistent_workspace_enabled;
-        const double saved_time_limit_seconds = PATACON::time_limit_seconds;
-        const bool saved_time_limit_counts_kernel_only =
-            PATACON::time_limit_counts_kernel_only;
+            saved_runtime_control.cuda_device_reset_enabled;
 
-        PATACON::set_cuda_device_reset_enabled(false);
-        PATACON::set_persistent_workspace_enabled(false);
-        PATACON::set_time_limit_seconds(settings.time_limit_sec);
-        PATACON::time_limit_counts_kernel_only = true;
+        PATACON::set_runtime_control_state(PATACON::RuntimeControlState{
+            false,
+            false,
+            settings.time_limit_sec,
+            true
+        });
 
         PlannerResult<Robot> initial_result;
         try {
@@ -3075,27 +3033,11 @@ namespace AORRTC {
             );
         }
         catch (...) {
-            PATACON::set_time_limit_seconds(saved_time_limit_seconds);
-            PATACON::time_limit_counts_kernel_only =
-                saved_time_limit_counts_kernel_only;
-            PATACON::set_persistent_workspace_enabled(
-                saved_persistent_workspace_enabled
-            );
-            PATACON::set_cuda_device_reset_enabled(
-                saved_cuda_device_reset_enabled
-            );
+            PATACON::set_runtime_control_state(saved_runtime_control);
             throw;
         }
 
-        PATACON::set_time_limit_seconds(saved_time_limit_seconds);
-        PATACON::time_limit_counts_kernel_only =
-            saved_time_limit_counts_kernel_only;
-        PATACON::set_persistent_workspace_enabled(
-            saved_persistent_workspace_enabled
-        );
-        PATACON::set_cuda_device_reset_enabled(
-            saved_cuda_device_reset_enabled
-        );
+        PATACON::set_runtime_control_state(saved_runtime_control);
 
         AORRTCResult<Robot> res;
         static_cast<PlannerResult<Robot> &>(res) = std::move(initial_result);
@@ -3212,8 +3154,6 @@ namespace AORRTC {
         int *parents[2] = {nullptr, nullptr};
         float *node_costs[2] = {nullptr, nullptr};
         int *node_ready[2] = {nullptr, nullptr};
-        float *radii[2] = {nullptr, nullptr};
-
         int *node_ts_id[2] = {nullptr, nullptr};
         float *node_ts_q[2] = {nullptr, nullptr};
         int *ts_root_node_idx[2] = {nullptr, nullptr};
@@ -3228,7 +3168,6 @@ namespace AORRTC {
         int **d_parents = nullptr;
         float **d_node_costs = nullptr;
         int **d_node_ready = nullptr;
-        float **d_radii = nullptr;
         int **d_node_ts_id = nullptr;
         float **d_node_ts_q = nullptr;
         int **d_ts_root_node_idx = nullptr;
@@ -3244,7 +3183,6 @@ namespace AORRTC {
         cudaMalloc(&d_parents, 2 * sizeof(int *));
         cudaMalloc(&d_node_costs, 2 * sizeof(float *));
         cudaMalloc(&d_node_ready, 2 * sizeof(int *));
-        cudaMalloc(&d_radii, 2 * sizeof(float *));
         cudaMalloc(&d_node_ts_id, 2 * sizeof(int *));
         cudaMalloc(&d_node_ts_q, 2 * sizeof(float *));
         cudaMalloc(&d_ts_root_node_idx, 2 * sizeof(int *));
@@ -3261,7 +3199,6 @@ namespace AORRTC {
             cudaMalloc(&parents[tree], node_count * sizeof(int));
             cudaMalloc(&node_costs[tree], node_count * sizeof(float));
             cudaMalloc(&node_ready[tree], node_count * sizeof(int));
-            cudaMalloc(&radii[tree], node_count * sizeof(float));
             cudaMalloc(&node_ts_id[tree], node_count * sizeof(int));
             cudaMalloc(&node_ts_q[tree], node_count * config_size);
             cudaMalloc(
@@ -3314,7 +3251,6 @@ namespace AORRTC {
             2 * sizeof(int *),
             cudaMemcpyHostToDevice
         );
-        cudaMemcpy(d_radii, radii, 2 * sizeof(float *), cudaMemcpyHostToDevice);
         cudaMemcpy(
             d_node_ts_id,
             node_ts_id,
@@ -3450,9 +3386,7 @@ namespace AORRTC {
         std::iota(goal_parents.begin(), goal_parents.end(), 0);
         std::vector<int> goal_ready(num_goals, 1);
         std::vector<float> goal_costs(num_goals, 0.0f);
-        std::vector<float> goal_radii(num_goals, FLT_MAX);
         const float start_cost = 0.0f;
-        const float root_radius = FLT_MAX;
         const int start_ready = 1;
 
         auto initialize_fresh_search = [&]() {
@@ -3556,13 +3490,6 @@ namespace AORRTC {
                 cudaMemcpyHostToDevice
             );
             cudaMemcpy(
-                radii[0],
-                &root_radius,
-                sizeof(float),
-                cudaMemcpyHostToDevice
-            );
-
-            cudaMemcpy(
                 nodes[1],
                 goals.data(),
                 static_cast<std::size_t>(num_goals) * config_size,
@@ -3586,13 +3513,6 @@ namespace AORRTC {
                 static_cast<std::size_t>(num_goals) * sizeof(int),
                 cudaMemcpyHostToDevice
             );
-            cudaMemcpy(
-                radii[1],
-                goal_radii.data(),
-                static_cast<std::size_t>(num_goals) * sizeof(float),
-                cudaMemcpyHostToDevice
-            );
-
             int zero_ts_count[2] = {0, 0};
             cudaMemcpy(
                 ts_count,
@@ -3671,7 +3591,6 @@ namespace AORRTC {
                         d_ts_node_count,
                         d_ts_lane_head,
                         d_node_next_in_ts,
-                        d_radii,
                         halton_states,
                         rng_states,
                         block_tree_ids,
@@ -3699,7 +3618,6 @@ namespace AORRTC {
                         d_ts_node_count,
                         d_ts_lane_head,
                         d_node_next_in_ts,
-                        d_radii,
                         halton_states,
                         rng_states,
                         block_tree_ids,
@@ -3916,7 +3834,6 @@ namespace AORRTC {
             cudaFree(parents[tree]);
             cudaFree(node_costs[tree]);
             cudaFree(node_ready[tree]);
-            cudaFree(radii[tree]);
             cudaFree(node_ts_id[tree]);
             cudaFree(node_ts_q[tree]);
             cudaFree(ts_root_node_idx[tree]);
@@ -3945,7 +3862,6 @@ namespace AORRTC {
         cudaFree(d_parents);
         cudaFree(d_node_costs);
         cudaFree(d_node_ready);
-        cudaFree(d_radii);
         cudaFree(d_node_ts_id);
         cudaFree(d_node_ts_q);
         cudaFree(ts_count);

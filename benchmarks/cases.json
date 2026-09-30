@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "description": "Representative deterministic planning cases used for pre-refactor performance baselines.",
+  "cases": [
+    {
+      "robot": "franka_single",
+      "problem": "demo",
+      "problem_index": 1
+    },
+    {
+      "robot": "franka",
+      "problem": "demo",
+      "problem_index": 1
+    },
+    {
+      "robot": "ffw_sg2",
+      "problem": "tray_lift",
+      "problem_index": 1
+    },
+    {
+      "robot": "ffw_sg2_mobility",
+      "problem": "tray_lift",
+      "problem_index": 1
+    },
+    {
+      "robot": "g1",
+      "problem": "humanoid_shelf",
+      "problem_index": 1
+    },
+    {
+      "robot": "igris_c",
+      "problem": "igris_c_shelf_lift",
+      "problem_index": 1
+    }
+  ]
+}

@@ -120,7 +120,7 @@ __device__ __forceinline__ void franka_attached_sphere_object_center(
 }
 
 template <typename Robot>
-__device__ __noinline__ bool franka_attached_object_env_collision_check(
+inline __device__ __noinline__ bool franka_attached_object_env_collision_check(
     const float *q,
     Environment<float> *environment,
     int tid
@@ -384,7 +384,7 @@ __device__ __forceinline__ bool env_collision_check_approx<ppln::robots::FrankaS
 }
 
 template <>
-__device__ __noinline__ void fk<ppln::robots::Franka>(
+inline __device__ __noinline__ void fk<ppln::robots::Franka>(
     const float *q,
     volatile float *sphere_positions,
     float *transforms,
@@ -411,7 +411,7 @@ __device__ __noinline__ void fk<ppln::robots::Franka>(
 }
 
 template <>
-__device__ __noinline__ void fk_approx<ppln::robots::Franka>(
+inline __device__ __noinline__ void fk_approx<ppln::robots::Franka>(
     const float *q,
     volatile float *sphere_positions,
     float *transforms,
@@ -438,7 +438,7 @@ __device__ __noinline__ void fk_approx<ppln::robots::Franka>(
 }
 
 template <>
-__device__ __noinline__ bool env_collision_check<ppln::robots::Franka>(
+inline __device__ __noinline__ bool env_collision_check<ppln::robots::Franka>(
     volatile float *sphere_positions,
     volatile int *joint_in_collision,
     Environment<float> *environment,
@@ -456,7 +456,7 @@ __device__ __noinline__ bool env_collision_check<ppln::robots::Franka>(
 }
 
 template <>
-__device__ __noinline__ bool env_collision_check_approx<ppln::robots::Franka>(
+inline __device__ __noinline__ bool env_collision_check_approx<ppln::robots::Franka>(
     volatile float *sphere_positions,
     volatile int *joint_in_collision,
     Environment<float> *environment,
@@ -474,7 +474,7 @@ __device__ __noinline__ bool env_collision_check_approx<ppln::robots::Franka>(
 }
 
 template <>
-__device__ __noinline__ bool self_collision_check<ppln::robots::Franka>(
+inline __device__ __noinline__ bool self_collision_check<ppln::robots::Franka>(
     volatile float *sphere_positions,
     volatile int *joint_in_collision,
     int tid
@@ -495,7 +495,7 @@ __device__ __noinline__ bool self_collision_check<ppln::robots::Franka>(
 }
 
 template <>
-__device__ __noinline__ bool self_collision_check_approx<ppln::robots::Franka>(
+inline __device__ __noinline__ bool self_collision_check_approx<ppln::robots::Franka>(
     volatile float *sphere_positions,
     volatile int *joint_in_collision,
     int tid

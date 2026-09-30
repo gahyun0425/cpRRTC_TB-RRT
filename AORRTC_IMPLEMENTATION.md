@@ -24,11 +24,11 @@ Set another total AORRTC planning budget:
 
 ## Algorithm mapping
 
-The implementation uses the repository's current bidirectional PATACON/TB-RRT search as the satisficing search inside AORRTC. Its Tangent-Space sampling, ConCon expansion, projection, collision checking, Dynamic Domain and balanced tree-selection logic are retained.
+The implementation uses the repository's current bidirectional PATACON/TB-RRT search as the satisficing search inside AORRTC. Its Tangent-Space sampling, ConCon expansion, projection, collision checking, and balanced tree-selection logic are retained.
 
 AORRTC-specific behavior is isolated in
-`src/planning/AORRTCOptimization.cuh`, which is included by
-`src/planning/PATACON.cu`:
+`src/planning/AORRTCOptimization.cuh`, compiled through the independent
+`src/planning/AORRTCOptimization.cu` translation-unit entry:
 
 1. **Initial search:** calls the same PATACON first-feasible-path implementation used when `--aorrtc` is absent. The resulting path cost becomes the initial `c_max`.
 2. **Augmented vertex cost:** each tree node stores `g_T(v)`, with root cost zero and child cost `parent_cost + edge_cost`.
@@ -57,9 +57,12 @@ When `--save-json` is used with `--aorrtc`, the result is tagged as `AORRTC` and
 
 ## Build note
 
-`src/planning/PATACON.cu` and its included
-`src/planning/AORRTCOptimization.cuh` form one CUDA translation unit and one
-`PATACON.cu.o`. The initial search owns the common sampling, projection,
-collision, and Tangent-Space helpers; the AORRTC phase reuses them instead of
-defining another copy. Both benchmark frontends link the resulting
-`patacon_planners` library.
+`src/planning/PATACON.cu` and
+`src/planning/AORRTCOptimization.cu` compile into separate CUDA objects in the
+same `patacon_planners` library. AORRTC calls PATACON's public host `solve()`
+for the initial feasible path, while its optimization kernel compiles the
+required sampling, projection, collision, and Tangent-Space device helpers
+into its own CUDA image. Runtime controls are saved and restored through
+`PATACON::RuntimeControlState`; AORRTC does not access PATACON translation-unit
+globals directly. This boundary lets ordinary PATACON algorithm edits reuse
+the expensive AORRTC object during incremental builds.

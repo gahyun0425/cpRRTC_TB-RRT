@@ -30,13 +30,10 @@ option(
     "Parallelize optimization inside large CUDA translation units"
     ON
 )
-option(
-    PATACON_CUDA_SEPARABLE_COMPILATION
-    "Build the shared planner backend with relocatable device code"
-    ON
-)
-
-set(CMAKE_CUDA_SEPARABLE_COMPILATION ON)
+# Each planner translation unit contains the header-defined robot device code
+# it needs. Keep whole-program CUDA compilation per object; enabling RDC would
+# merge those private robot definitions and recreate duplicate device symbols.
+set(CMAKE_CUDA_SEPARABLE_COMPILATION OFF)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -54,15 +51,18 @@ set(CMAKE_CUDA_FLAGS ${CMAKE_CUDA_FLAGS} "-lineinfo")  # enable line info in ncu
 
 ### Unified PATACON CUDA backend
 
-# Compile the initial PATACON search and the opt-in AORRTC optimization phase
-# as one CUDA translation unit. The implementation is split into .cuh files
-# for navigation without introducing cross-translation-unit device calls.
+# Keep the standard PATACON search and opt-in AORRTC optimization in separate
+# self-contained CUDA translation units. Both remain in the same static
+# backend library, while header-defined robot device code stays local to each
+# object instead of being merged by nvlink.
 add_library(patacon_planners STATIC
+    src/planning/patacon/RuntimeControl.cpp
     src/planning/PATACON.cu
+    src/planning/AORRTCOptimization.cu
 )
 
 set_target_properties(patacon_planners PROPERTIES
-    CUDA_SEPARABLE_COMPILATION ${PATACON_CUDA_SEPARABLE_COMPILATION}
+    CUDA_SEPARABLE_COMPILATION OFF
 )
 
 target_include_directories(patacon_planners
@@ -150,7 +150,7 @@ target_link_libraries(validate_problem_config
 )
 
 set_target_properties(evaluate_mbm single_mbm PROPERTIES
-    CUDA_SEPARABLE_COMPILATION ${PATACON_CUDA_SEPARABLE_COMPILATION}
+    CUDA_SEPARABLE_COMPILATION OFF
 )
 
 ### FFW SG2 CUDA projection validation
@@ -444,3 +444,204 @@ target_link_libraries(validate_franka_collision
 target_compile_options(validate_franka_collision PRIVATE
     -Wno-c++11-narrowing
 )
+
+
+### Pre-refactor behavior contracts
+
+include(CTest)
+
+if(BUILD_TESTING)
+    find_package(Python3 REQUIRED COMPONENTS Interpreter)
+
+    set(PATACON_TEST_RESULT_DIRECTORY
+        "${CMAKE_BINARY_DIR}/test-results"
+    )
+    set(PATACON_RESULT_SCHEMA
+        "${CMAKE_CURRENT_SOURCE_DIR}/schemas/planner-result-v1.schema.json"
+    )
+    set(PATACON_PROBLEM_SET_SCHEMA
+        "${CMAKE_CURRENT_SOURCE_DIR}/schemas/problem-set-results-v1.schema.json"
+    )
+
+    function(add_patacon_planning_regression
+        test_name robot problem problem_index dimension
+    )
+        add_test(
+            NAME "planning.${test_name}"
+            COMMAND
+                "${Python3_EXECUTABLE}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/tests/run_planning_regression.py"
+                --planner "$<TARGET_FILE:single_mbm>"
+                --schema "${PATACON_RESULT_SCHEMA}"
+                --repository "${CMAKE_CURRENT_SOURCE_DIR}"
+                --output
+                    "${PATACON_TEST_RESULT_DIRECTORY}/${test_name}.json"
+                --robot "${robot}"
+                --problem "${problem}"
+                --problem-index "${problem_index}"
+                --dimension "${dimension}"
+                --seed 1
+        )
+        set_tests_properties("planning.${test_name}" PROPERTIES
+            LABELS "planning;schema;${robot}"
+            RESOURCE_LOCK patacon_gpu
+            TIMEOUT 120
+            WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+        )
+    endfunction()
+
+    add_patacon_planning_regression(
+        franka_single franka_single demo 1 7
+    )
+    add_patacon_planning_regression(
+        franka_dual franka demo 1 14
+    )
+    add_patacon_planning_regression(
+        ffw_sg2 ffw_sg2 tray_lift 1 15
+    )
+    add_patacon_planning_regression(
+        ffw_sg2_mobility ffw_sg2_mobility tray_lift 1 18
+    )
+    add_patacon_planning_regression(
+        g1 g1 humanoid_shelf 1 35
+    )
+    add_patacon_planning_regression(
+        igris_c igris_c igris_c_shelf_lift 1 35
+    )
+
+    add_test(
+        NAME contract.aorrtc_result_v1
+        COMMAND
+            "${Python3_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/run_planning_regression.py"
+            --planner "$<TARGET_FILE:single_mbm>"
+            --schema "${PATACON_RESULT_SCHEMA}"
+            --repository "${CMAKE_CURRENT_SOURCE_DIR}"
+            --output
+                "${PATACON_TEST_RESULT_DIRECTORY}/aorrtc_result_v1.json"
+            --robot franka_single
+            --problem demo
+            --problem-index 1
+            --dimension 7
+            --seed 1
+            --aorrtc-time 0.05
+    )
+    set_tests_properties(contract.aorrtc_result_v1 PROPERTIES
+        LABELS "planning;schema;aorrtc"
+        RESOURCE_LOCK patacon_gpu
+        TIMEOUT 120
+        WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    )
+
+    add_test(
+        NAME contract.repeated_result_v1
+        COMMAND
+            "${Python3_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/run_planning_regression.py"
+            --planner "$<TARGET_FILE:single_mbm>"
+            --schema "${PATACON_RESULT_SCHEMA}"
+            --repository "${CMAKE_CURRENT_SOURCE_DIR}"
+            --output
+                "${PATACON_TEST_RESULT_DIRECTORY}/repeated_result_v1.json"
+            --robot franka_single
+            --problem demo
+            --problem-index 1
+            --dimension 7
+            --seed 1
+            --runs 2
+    )
+    set_tests_properties(contract.repeated_result_v1 PROPERTIES
+        LABELS "planning;schema;repeated"
+        RESOURCE_LOCK patacon_gpu
+        TIMEOUT 120
+        WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    )
+
+    add_test(
+        NAME contract.problem_set_result_v1
+        COMMAND
+            "${Python3_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/run_problem_set_regression.py"
+            --evaluator "$<TARGET_FILE:evaluate_mbm>"
+            --schema "${PATACON_PROBLEM_SET_SCHEMA}"
+            --planner-schema "${PATACON_RESULT_SCHEMA}"
+            --repository "${CMAKE_CURRENT_SOURCE_DIR}"
+            --output
+                "${PATACON_TEST_RESULT_DIRECTORY}/problem_set_result_v1.json"
+            --robot franka_single
+    )
+    set_tests_properties(contract.problem_set_result_v1 PROPERTIES
+        LABELS "planning;schema;problem-set"
+        RESOURCE_LOCK patacon_gpu
+        TIMEOUT 120
+        WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    )
+
+    add_test(
+        NAME validation.problem_config
+        COMMAND "$<TARGET_FILE:validate_problem_config>"
+    )
+    set_tests_properties(validation.problem_config PROPERTIES
+        LABELS "validation;config"
+        TIMEOUT 30
+        WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    )
+
+    function(add_patacon_cuda_validation test_name target_name)
+        add_test(
+            NAME "validation.${test_name}"
+            COMMAND "$<TARGET_FILE:${target_name}>" ${ARGN}
+        )
+        set_tests_properties("validation.${test_name}" PROPERTIES
+            LABELS "validation;${test_name}"
+            RESOURCE_LOCK patacon_gpu
+            TIMEOUT 120
+            WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+        )
+    endfunction()
+
+    add_patacon_cuda_validation(
+        franka_single.constraints validate_franka_constraints
+    )
+    add_patacon_cuda_validation(
+        franka_single.collision validate_franka_collision franka_single
+    )
+    add_patacon_cuda_validation(
+        franka_dual.collision validate_franka_collision franka
+    )
+    add_patacon_cuda_validation(
+        g1.constraints validate_g1_constraints
+    )
+    add_patacon_cuda_validation(
+        g1.constraints_axis validate_g1_constraints --axis
+    )
+    add_patacon_cuda_validation(
+        g1.collision validate_g1_collision
+    )
+    add_patacon_cuda_validation(
+        g1.collision_axis validate_g1_collision
+        "${CMAKE_CURRENT_SOURCE_DIR}/scripts/g1_problems.json" --axis
+    )
+    add_patacon_cuda_validation(
+        igris_c.kinematics validate_igris_c_kinematics
+    )
+    add_patacon_cuda_validation(
+        igris_c.constraints validate_igris_c_constraints
+    )
+    add_patacon_cuda_validation(
+        igris_c.collision validate_igris_c_collision
+    )
+
+    # This executable already fails on the current pre-refactor code
+    # (motion segments: 1/3). Keep it visible without making a known failure
+    # look like a passing regression test.
+    add_patacon_cuda_validation(
+        ffw_sg2.projection_known_failure validate_ffw_sg2_projection
+    )
+    set_tests_properties(
+        validation.ffw_sg2.projection_known_failure
+        PROPERTIES
+            DISABLED TRUE
+            LABELS "validation;ffw_sg2;known-failure"
+    )
+endif()

@@ -22,14 +22,15 @@
 #include <cuda_runtime.h>
 
 #include "src/collision/environment.hh"
-#include "src/collision/factory.hh"
 #include "src/planning/Planners.hh"
 #include "src/planning/AORRTC.hh"
 #include "src/planning/PATACON_settings.hh"
+#include "src/planning/RobotDispatch.hh"
 #include "src/config/PlanningProblemJson.hh"
+#include "src/config/PrimitiveEnvironmentJson.hh"
 #include "src/constraints/RobotConstraintAdapter.hh"
 #include "scripts/ffw_sg2_attached_object_collision.hh"
-#include "scripts/planner_result_json.hh"
+#include "src/io/PlannerResultJson.hh"
 
 using json = nlohmann::json;
 using namespace ppln::collision;
@@ -299,83 +300,6 @@ int export_trace_files(
 }
 
 
-Environment<float> problem_dict_to_env(const json& problem, const std::string& name) {
-    Environment<float> env{};
-
-    std::vector<Sphere<float>> spheres;
-    std::vector<Capsule<float>> capsules;
-    std::vector<Cuboid<float>> cuboids;
-    // Fill spheres
-    for (const auto& obj : problem["sphere"]) {
-        const json& position = obj["position"];
-        Sphere<float> sphere(position[0], position[1], position[2], obj["radius"]);
-        sphere.name = obj["name"];
-        spheres.push_back(sphere);
-    }
-    // Handle cylinders based on name
-    if (name == "box") {
-        for (const auto& obj : problem["cylinder"]) {
-            const json& position = obj["position"];
-            const json& orientation = obj["orientation_euler_xyz"];
-            const float radius = obj["radius"];
-            const std::array<float, 3> dims = {radius, radius, radius/2.0f};
-            auto cuboid = factory::cuboid::array(
-                position, orientation,
-                dims
-            );
-            cuboid.name = obj["name"];
-            cuboids.push_back(cuboid);
-        }
-    } else {
-        for (const auto& obj : problem["cylinder"]) {
-            const json& position = obj["position"];
-            const json& orientation = obj["orientation_euler_xyz"];
-            const float radius = obj["radius"];
-            const float length = obj["length"];
-            auto cylinder = factory::cylinder::center::array(
-                position, orientation,
-                radius, length
-            );
-            cylinder.name = obj["name"];
-            capsules.push_back(cylinder);
-        }
-    }
-
-    // Fill boxes
-    for (const auto& obj : problem["box"]) {
-        const json& position = obj["position"];
-        const json& orientation = obj["orientation_euler_xyz"];
-        const json& half_extents = obj["half_extents"];
-        auto cuboid = factory::cuboid::array(
-            position, orientation, half_extents
-        );
-        cuboid.name = obj["name"];
-        cuboids.push_back(cuboid);
-    }
-
-    // Allocate memory on the heap for the arrays
-    if (!spheres.empty()) {
-        env.spheres = new Sphere<float>[spheres.size()];
-        std::copy(spheres.begin(), spheres.end(), env.spheres);
-        env.num_spheres = spheres.size();
-    }
-
-    if (!capsules.empty()) {
-        env.capsules = new Capsule<float>[capsules.size()];
-        std::copy(capsules.begin(), capsules.end(), env.capsules);
-        env.num_capsules = capsules.size();
-    }
-
-    if (!cuboids.empty()) {
-        env.cuboids = new Cuboid<float>[cuboids.size()];
-        std::copy(cuboids.begin(), cuboids.end(), env.cuboids);
-        env.num_cuboids = cuboids.size();
-    }
-
-    return env;
-}
-
-
 std::size_t measure_planner_warmup_ns() {
     const auto warmup_start = std::chrono::steady_clock::now();
     const cudaError_t free_status = cudaFree(nullptr);
@@ -611,14 +535,11 @@ void visualize_ffw_sg2_path(
     );
     const bool mobility_model =
         !joint_names.empty() && joint_names.front() == "base_x";
-    const auto model_path = std::filesystem::absolute(
-        mobility_model
-            ? "ffw_lift/ffw_sg2_rack_upper_to_lower.xml"
-            : "ffw_lift/ffw_sg2_lift.xml"
-    );
+    const std::string scene =
+        mobility_model ? "rack_upper_to_lower" : "lift";
     const std::string command =
         "python3 \"" + visualizer_path.string() + "\""
-        + " --model \"" + model_path.string() + "\""
+        + " --scene " + scene
         + " --trajectory \"" + trajectory_path.string() + "\""
         + (use_ctrl ? " --input-mode ctrl" : " --input-mode qpos");
 
@@ -788,12 +709,8 @@ void visualize_ffw_sg2_mobility_ctrl_path(
     const auto visualizer_path = std::filesystem::absolute(
         "scripts/sim_ffw_sg2_rack_upper_to_lower.py"
     );
-    const auto model_path = std::filesystem::absolute(
-        "ffw_lift/ffw_sg2_rack_upper_to_lower.xml"
-    );
     std::string command =
         "python3 " + shell_quote(visualizer_path.string())
-        + " --model " + shell_quote(model_path.string())
         + " --trajectory " + shell_quote(trajectory_path.string())
         + " --attach-payload"
         + " --object-mass " + std::to_string(object_mass_kg)
@@ -1628,7 +1545,7 @@ int run_g1_replan_server(
                 problem["box"] = request_environment.at("box");
             }
 
-            auto environment = problem_dict_to_env(
+            auto environment = ppln::config::environment_from_problem_json(
                 problem,
                 "g1_continuous_replan"
             );
@@ -1705,7 +1622,7 @@ int main(int argc, char* argv[]) {
     std::string save_json_path;
     TraceExportOptions trace_options;
     G1ReplanningOptions g1_replanning;
-    std::optional<ppln::config::SelectedPlanningProblem> selected_problem;
+    std::optional<ppln::config::PlanningProblem> selected_problem;
     const bool standalone_config_mode = argc >= 2 &&
         std::string(argv[1]) == "--config";
     int option_start = 4;
@@ -2042,31 +1959,12 @@ int main(int argc, char* argv[]) {
             problem_idx
         );
     }
-    const bool robot_supported =
-        robot_name == "franka_single" ||
-        robot_name == "franka" ||
-        robot_name == "ffw_sg2" ||
-        robot_name == "ffw_sg2_mobility" ||
-        robot_name == "g1" ||
-        robot_name == "igris_c";
-    if (!robot_supported) {
+    if (!ppln::config::is_supported_robot(robot_name)) {
         std::cerr << "Unsupported robot type: " << robot_name << "\n";
         return 1;
     }
-    if (visualize
-        && robot_name != "ffw_sg2"
-        && robot_name != "ffw_sg2_mobility"
-        && robot_name != "g1"
-        && robot_name != "igris_c"
-        && robot_name != "franka_single"
-        && robot_name != "franka") {
-        std::cerr
-            << "--visualize supports only ffw_sg2, ffw_sg2_mobility, "
-            << "g1, igris_c, franka_single, and franka\n";
-        return 1;
-    }
     const std::string path = problem_file_path.empty()
-        ? "scripts/" + robot_name + "_problems.json"
+        ? ppln::config::default_problem_file(robot_name)
         : problem_file_path;
     try {
         if (!selected_problem.has_value()) {
@@ -2155,7 +2053,7 @@ int main(int argc, char* argv[]) {
             }
         );
     }
-    auto env = problem_dict_to_env(data, name);
+    auto env = ppln::config::environment_from_problem_json(data, name);
     AORRTC_settings settings;
     settings.num_new_configs = 512; //usually:512
     settings.max_iters = 100000000;
@@ -2170,14 +2068,10 @@ int main(int argc, char* argv[]) {
     settings.projection_smoothness = projection_smoothness;
     settings.balance = 2;
     settings.tree_ratio = 1.0;
-    settings.dynamic_domain = false;
     settings.trace_trees = trace_trees;
     settings.collect_diagnostics = collect_diagnostics;
     // Always use the TB-RRT forward-half-space rule for PATACON and AORRTC.
     settings.prevent_ts_backtracking = true;
-    settings.dd_radius = 4.0;
-    settings.dd_min_radius = 1.0;
-    settings.dd_alpha = 0.0001;
     settings.em_threshold = 0.1f;
     settings.max_concon_nodes = max_concon_nodes;
     settings.max_connect_concon_chunks = 16;
@@ -2223,29 +2117,28 @@ int main(int argc, char* argv[]) {
         if (g1_replanning.server) {
             return run_g1_replan_server(data, settings, g1_replanning);
         }
-        if (robot_name == "ffw_sg2") {
-            return run_planner<robots::FfwSg2>(data, env, settings, visualize, path_smoothing, print_path, plot,
-                robot_name, name, problem_idx, save_json_path, trace_options, runs);
-        } else if (robot_name == "ffw_sg2_mobility") {
-            return run_planner<robots::FfwSg2Mobility>(data, env, settings, visualize, path_smoothing, print_path, plot,
-                robot_name, name, problem_idx, save_json_path, trace_options, runs);
-        } else if (robot_name == "g1") {
-            return run_planner<robots::G1>(data, env, settings, visualize, path_smoothing, print_path, plot,
-                robot_name, name, problem_idx, save_json_path, trace_options, runs,
-                g1_replanning);
-        } else if (robot_name == "igris_c") {
-            return run_planner<robots::IgrisC>(data, env, settings, visualize, path_smoothing, print_path, plot,
-                robot_name, name, problem_idx, save_json_path, trace_options, runs);
-        } else if (robot_name == "franka_single") {
-            return run_planner<robots::FrankaSingle>(data, env, settings, visualize, path_smoothing, print_path, plot,
-                robot_name, name, problem_idx, save_json_path, trace_options, runs);
-        } else if (robot_name == "franka") {
-            return run_planner<robots::Franka>(data, env, settings, visualize, path_smoothing, print_path, plot,
-                robot_name, name, problem_idx, save_json_path, trace_options, runs);
-        } else {
-            std::cerr << "Unsupported robot type: " << robot_name << "\n";
-            return 1;
-        }
+        return ppln::planning::dispatch_robot(
+            robot_name,
+            [&](auto robot_tag) {
+                using Robot = typename decltype(robot_tag)::type;
+                return run_planner<Robot>(
+                    data,
+                    env,
+                    settings,
+                    visualize,
+                    path_smoothing,
+                    print_path,
+                    plot,
+                    robot_name,
+                    name,
+                    problem_idx,
+                    save_json_path,
+                    trace_options,
+                    runs,
+                    g1_replanning
+                );
+            }
+        );
     } catch (const std::exception &error) {
         std::cerr << "single_mbm error: " << error.what() << "\n";
         return 1;

@@ -227,7 +227,7 @@ __device__ __forceinline__ void franka_single_constraint_residual_and_jacobian(
     );
 }
 
-__device__ __noinline__ void franka_dual_constraint_residual_and_jacobian(
+inline __device__ __noinline__ void franka_dual_constraint_residual_and_jacobian(
     const float q[14],
     const constraints::FrankaConstraintParameters &parameters,
     bool axis_enabled,

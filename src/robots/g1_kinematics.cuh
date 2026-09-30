@@ -5,7 +5,7 @@
 
 namespace ppln::collision {
 
-__device__ __noinline__ void g1_end_effector_fk(
+inline __device__ __noinline__ void g1_end_effector_fk(
     const float *x,
     float *output
 ) {
@@ -394,7 +394,7 @@ v[0] = cosf(x[4]);
     }
 }
 
-__device__ __noinline__ void g1_center_of_mass(
+inline __device__ __noinline__ void g1_center_of_mass(
     const float *x,
     float *output
 ) {
@@ -583,7 +583,7 @@ v[0] = cosf(x[4]);
 // Input layout is base/leg q[18], then left/right foot reference[7], target[7].
 // Output is the nonzero position J[6][18], followed by position error[6].
 // Stable SO(3) orientation residuals/Jacobians are assembled separately.
-__device__ __noinline__ void g1_feet_position_error_analytic(
+inline __device__ __noinline__ void g1_feet_position_error_analytic(
     const float *x,
     float *out
 ) {
@@ -1811,7 +1811,7 @@ y[101] = 0.;
 }
 
 // Output is CoM[3], followed by its row-major 3x35 analytic Jacobian.
-__device__ __noinline__ void g1_com_kinematics_analytic(
+inline __device__ __noinline__ void g1_com_kinematics_analytic(
     const float *x,
     float *out
 ) {
@@ -2828,7 +2828,7 @@ v[0] = cosf(x[4]);
 
 // Input layout is base/upper-body q[23], then target relative pose[7].
 // Output is the nonzero position J[3][23], followed by position error[3].
-__device__ __noinline__ void g1_bimanual_position_error_analytic(
+inline __device__ __noinline__ void g1_bimanual_position_error_analytic(
     const float *x,
     float *out
 ) {

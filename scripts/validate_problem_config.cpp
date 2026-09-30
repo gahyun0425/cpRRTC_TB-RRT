@@ -1,7 +1,9 @@
 #include <nlohmann/json.hpp>
 
+#include <array>
 #include <iostream>
 #include <stdexcept>
+#include <utility>
 #include <vector>
 
 #include "src/config/PlanningProblemJson.hh"
@@ -82,6 +84,33 @@ json make_unified_problem() {
 
 int main() {
     try {
+        constexpr std::array<std::pair<const char *, int>, 6> robots = {{
+            {"franka_single", 7},
+            {"franka", 14},
+            {"ffw_sg2", 15},
+            {"ffw_sg2_mobility", 18},
+            {"g1", 35},
+            {"igris_c", 35},
+        }};
+        for (const auto &[name, dimension] : robots) {
+            require(
+                ppln::config::is_supported_robot(name),
+                "registered robot is not supported"
+            );
+            require(
+                ppln::config::compiled_robot_dimension(name) == dimension,
+                "registered robot dimension changed"
+            );
+            require(
+                !ppln::config::default_problem_file(name).empty(),
+                "registered robot has no default problem file"
+            );
+        }
+        require(
+            !ppln::config::is_supported_robot("unknown"),
+            "unknown robot was accepted"
+        );
+
         const auto selected = ppln::config::select_problem(
             make_unified_problem()
         );

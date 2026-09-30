@@ -3073,7 +3073,7 @@ igris_c_self_collision_groups[IGRIS_C_SELF_COLLISION_GROUP_COUNT] = {
 };
 
 template <>
-__device__ void fk<ppln::robots::IgrisC>(
+inline __device__ void fk<ppln::robots::IgrisC>(
     const float *q,
     volatile float *sphere_pos,
     float *,
@@ -3104,7 +3104,7 @@ __device__ void fk<ppln::robots::IgrisC>(
 }
 
 template <>
-__device__ void fk_approx<ppln::robots::IgrisC>(
+inline __device__ void fk_approx<ppln::robots::IgrisC>(
     const float *q,
     volatile float *sphere_pos,
     float *,
@@ -3135,7 +3135,7 @@ __device__ void fk_approx<ppln::robots::IgrisC>(
 }
 
 template <>
-__device__ bool env_collision_check_approx<ppln::robots::IgrisC>(
+inline __device__ bool env_collision_check_approx<ppln::robots::IgrisC>(
     volatile float *sphere_pos,
     volatile int *joint_in_collision,
     Environment<float> *environment,
@@ -3168,7 +3168,7 @@ __device__ bool env_collision_check_approx<ppln::robots::IgrisC>(
 }
 
 template <>
-__device__ bool self_collision_check_approx<ppln::robots::IgrisC>(
+inline __device__ bool self_collision_check_approx<ppln::robots::IgrisC>(
     volatile float *sphere_pos,
     volatile int *joint_in_collision,
     const int tid
@@ -3215,7 +3215,7 @@ __device__ bool self_collision_check_approx<ppln::robots::IgrisC>(
 }
 
 template <>
-__device__ bool env_collision_check<ppln::robots::IgrisC>(
+inline __device__ bool env_collision_check<ppln::robots::IgrisC>(
     volatile float *sphere_pos,
     volatile int *,
     Environment<float> *environment,
@@ -3243,7 +3243,7 @@ __device__ bool env_collision_check<ppln::robots::IgrisC>(
 }
 
 template <>
-__device__ bool self_collision_check<ppln::robots::IgrisC>(
+inline __device__ bool self_collision_check<ppln::robots::IgrisC>(
     volatile float *sphere_pos,
     volatile int *,
     const int tid

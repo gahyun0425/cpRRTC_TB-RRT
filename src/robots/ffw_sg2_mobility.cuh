@@ -617,7 +617,7 @@ __device__ __forceinline__ void ffw_sg2_mobility_write_base_spheres(
 }
 
 template <>
-__device__ void fk_approx<ppln::robots::FfwSg2Mobility>(
+inline __device__ void fk_approx<ppln::robots::FfwSg2Mobility>(
     const float *q,
     volatile float *sphere_pos_approx,
     float *T,
@@ -655,7 +655,7 @@ __device__ void fk_approx<ppln::robots::FfwSg2Mobility>(
 }
 
 template <>
-__device__ void fk<ppln::robots::FfwSg2Mobility>(
+inline __device__ void fk<ppln::robots::FfwSg2Mobility>(
     const float *q,
     volatile float *sphere_pos,
     float *T,
@@ -747,7 +747,7 @@ __device__ __forceinline__ bool ffw_sg2_mobility_base_env_collision(
 }
 
 template <>
-__device__ bool env_collision_check_approx<ppln::robots::FfwSg2Mobility>(
+inline __device__ bool env_collision_check_approx<ppln::robots::FfwSg2Mobility>(
     volatile float *sphere_pos_approx,
     volatile int *joint_in_collision,
     ppln::collision::Environment<float> *env,
@@ -771,7 +771,7 @@ __device__ bool env_collision_check_approx<ppln::robots::FfwSg2Mobility>(
 }
 
 template <>
-__device__ bool env_collision_check<ppln::robots::FfwSg2Mobility>(
+inline __device__ bool env_collision_check<ppln::robots::FfwSg2Mobility>(
     volatile float *sphere_pos,
     volatile int *joint_in_collision,
     ppln::collision::Environment<float> *env,
@@ -824,7 +824,7 @@ __device__ __forceinline__ bool ffw_sg2_mobility_env_collision_check_early(
 }
 
 template <>
-__device__ bool self_collision_check_approx<ppln::robots::FfwSg2Mobility>(
+inline __device__ bool self_collision_check_approx<ppln::robots::FfwSg2Mobility>(
     volatile float *sphere_pos_approx,
     volatile int *joint_in_collision,
     const int tid
@@ -837,7 +837,7 @@ __device__ bool self_collision_check_approx<ppln::robots::FfwSg2Mobility>(
 }
 
 template <>
-__device__ bool self_collision_check<ppln::robots::FfwSg2Mobility>(
+inline __device__ bool self_collision_check<ppln::robots::FfwSg2Mobility>(
     volatile float *sphere_pos,
     volatile int *joint_in_collision,
     const int tid

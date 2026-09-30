@@ -1,0 +1,162 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/gahyun0425/cpRRTC_TB-RRT/schemas/problem-set-results-v1.schema.json",
+  "title": "PATACON problem-set results version 1",
+  "description": "Stable schema for evaluate_mbm result files.",
+  "oneOf": [
+    { "$ref": "#/$defs/pataconProblemSet" },
+    { "$ref": "#/$defs/aorrtcProblemSet" }
+  ],
+  "$defs": {
+    "commonProblemSet": {
+      "type": "object",
+      "required": [
+        "format", "planner", "robot", "run_name", "problem_name",
+        "problem_file", "problems", "runs_per_problem", "runs",
+        "solved_runs", "timing_scope", "time_field", "time_unit",
+        "axis", "settings", "results"
+      ],
+      "properties": {
+        "format": { "type": "string" },
+        "planner": { "type": "string" },
+        "robot": {
+          "type": "string",
+          "enum": ["franka_single", "franka", "ffw_sg2", "ffw_sg2_mobility", "g1", "igris_c"]
+        },
+        "run_name": { "type": "string", "minLength": 1 },
+        "problem_name": { "type": "string", "minLength": 1 },
+        "problem_file": { "type": "string", "minLength": 1 },
+        "problems": { "type": "integer", "minimum": 0 },
+        "runs_per_problem": { "type": "integer", "minimum": 1 },
+        "runs": { "type": "integer", "minimum": 0 },
+        "solved_runs": { "type": "integer", "minimum": 0 },
+        "timing_scope": { "type": "string" },
+        "time_field": { "type": "string" },
+        "time_unit": { "type": "string" },
+        "axis": { "type": "boolean" },
+        "settings": { "type": "object" },
+        "results": { "type": "array" }
+      }
+    },
+    "commonRunResult": {
+      "type": "object",
+      "required": [
+        "run_idx", "problem_name", "problem_idx", "pair_id", "trial_idx",
+        "seed", "solved", "kernel_ns", "wall_ns", "copy_ns", "cost",
+        "path_length", "start_tree_size", "goal_tree_size", "iters",
+        "planning_sec"
+      ],
+      "properties": {
+        "run_idx": { "type": "integer", "minimum": 1 },
+        "problem_name": { "type": "string", "minLength": 1 },
+        "problem_idx": { "type": "integer", "minimum": 1 },
+        "pair_id": { "type": ["integer", "string"] },
+        "trial_idx": { "type": "integer", "minimum": 1 },
+        "seed": { "type": "integer", "minimum": 0 },
+        "solved": { "type": "boolean" },
+        "kernel_ns": { "type": "integer", "minimum": 0 },
+        "wall_ns": { "type": "integer", "minimum": 0 },
+        "copy_ns": { "type": "integer", "minimum": 0 },
+        "cost": { "type": ["number", "null"] },
+        "path_length": { "type": "integer", "minimum": 0 },
+        "start_tree_size": { "type": "integer", "minimum": 0 },
+        "goal_tree_size": { "type": "integer", "minimum": 0 },
+        "iters": { "type": "integer", "minimum": 0 },
+        "planning_sec": { "type": "number", "minimum": 0 },
+        "diagnostics": {
+          "$ref": "planner-result-v1.schema.json#/$defs/diagnostics"
+        }
+      }
+    },
+    "pataconRunResult": {
+      "allOf": [
+        { "$ref": "#/$defs/commonRunResult" }
+      ],
+      "unevaluatedProperties": false
+    },
+    "aorrtcRunResult": {
+      "allOf": [
+        { "$ref": "#/$defs/commonRunResult" },
+        {
+          "type": "object",
+          "required": [
+            "initial_cost", "initial_solution_sec", "best_solution_sec",
+            "solution_updates", "search_restarts",
+            "solution_history_overflow", "solution_history"
+          ],
+          "properties": {
+            "initial_cost": { "type": ["number", "null"] },
+            "initial_solution_sec": { "type": "number", "minimum": 0 },
+            "best_solution_sec": { "type": "number", "minimum": 0 },
+            "solution_updates": { "type": "integer", "minimum": 0 },
+            "search_restarts": { "type": "integer", "minimum": 0 },
+            "solution_history_overflow": { "type": "boolean" },
+            "solution_history": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["found_sec", "cost"],
+                "properties": {
+                  "found_sec": { "type": "number", "minimum": 0 },
+                  "cost": { "type": "number" }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "pataconProblemSet": {
+      "allOf": [
+        { "$ref": "#/$defs/commonProblemSet" },
+        {
+          "type": "object",
+          "properties": {
+            "format": { "const": "PATACON_problem_set_results_v1" },
+            "planner": { "const": "PATACON" },
+            "timing_scope": { "const": "CUDA planning kernel" },
+            "time_field": { "const": "kernel_ns" },
+            "time_unit": { "const": "ns" },
+            "settings": {
+              "$ref": "planner-result-v1.schema.json#/$defs/evaluationSettings"
+            },
+            "results": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/pataconRunResult"
+              }
+            }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "aorrtcProblemSet": {
+      "allOf": [
+        { "$ref": "#/$defs/commonProblemSet" },
+        {
+          "type": "object",
+          "properties": {
+            "format": { "const": "AORRTC_problem_set_results_v1" },
+            "planner": { "const": "AORRTC" },
+            "timing_scope": { "const": "AORRTC end-to-end planning" },
+            "time_field": { "const": "planning_sec" },
+            "time_unit": { "const": "s" },
+            "settings": {
+              "$ref": "planner-result-v1.schema.json#/$defs/evaluationSettings"
+            },
+            "results": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/aorrtcRunResult"
+              }
+            }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    }
+  }
+}

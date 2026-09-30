@@ -65,7 +65,7 @@ g1_hand_collision_spheres[G1_HAND_SPHERES_PER_HAND][4] = {
 };
 
 // g1_kinematics.cuh is included later in each CUDA translation unit.
-__device__ __noinline__ void g1_end_effector_fk(
+inline __device__ __noinline__ void g1_end_effector_fk(
     const float *x,
     float *output
 );
@@ -678,7 +678,7 @@ g1_self_collision_pairs[G1_SELF_COLLISION_PAIR_COUNT][2] = {
     {123, 129}, {123, 130}, {123, 131}, {123, 132}, {124, 125}, {124, 126}, {124, 127}, {124, 128}, {124, 129}, {124, 130}, {124, 131}, {124, 132},
 };
 
-__device__ __noinline__ void g1_sphere_fk_values(
+inline __device__ __noinline__ void g1_sphere_fk_values(
     const float *x,
     float *y
 ) {
@@ -2014,7 +2014,7 @@ __device__ __forceinline__ bool g1_collision_free(
 }
 
 template <>
-__device__ void fk<ppln::robots::G1>(
+inline __device__ void fk<ppln::robots::G1>(
     const float *q,
     volatile float *sphere_pos,
     float *,
@@ -2036,7 +2036,7 @@ __device__ void fk<ppln::robots::G1>(
 }
 
 template <>
-__device__ void fk_approx<ppln::robots::G1>(
+inline __device__ void fk_approx<ppln::robots::G1>(
     const float *q,
     volatile float *sphere_pos,
     float *,
@@ -2050,7 +2050,7 @@ __device__ void fk_approx<ppln::robots::G1>(
 }
 
 template <>
-__device__ bool env_collision_check_approx<ppln::robots::G1>(
+inline __device__ bool env_collision_check_approx<ppln::robots::G1>(
     volatile float *sphere_pos,
     volatile int *joint_in_collision,
     Environment<float> *environment,
@@ -2075,7 +2075,7 @@ __device__ bool env_collision_check_approx<ppln::robots::G1>(
 }
 
 template <>
-__device__ bool self_collision_check_approx<ppln::robots::G1>(
+inline __device__ bool self_collision_check_approx<ppln::robots::G1>(
     volatile float *,
     volatile int *joint_in_collision,
     const int tid
@@ -2090,7 +2090,7 @@ __device__ bool self_collision_check_approx<ppln::robots::G1>(
 }
 
 template <>
-__device__ bool env_collision_check<ppln::robots::G1>(
+inline __device__ bool env_collision_check<ppln::robots::G1>(
     volatile float *sphere_pos,
     volatile int *,
     Environment<float> *environment,
@@ -2112,7 +2112,7 @@ __device__ bool env_collision_check<ppln::robots::G1>(
 }
 
 template <>
-__device__ bool self_collision_check<ppln::robots::G1>(
+inline __device__ bool self_collision_check<ppln::robots::G1>(
     volatile float *sphere_pos,
     volatile int *,
     const int tid

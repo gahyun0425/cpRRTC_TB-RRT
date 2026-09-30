@@ -162,7 +162,7 @@ __device__ __forceinline__ void igris_c_orientation_residual_and_jacobian(
 // One 22x35 system: foot-pose equality[12], CoM inequality[2], bimanual
 // relative-pose equality[6], and bimanual-axis equality[2]. CoM rows are
 // exactly zero in the feasible set.
-__device__ __noinline__ void igris_c_constraint_residual_and_jacobian(
+inline __device__ __noinline__ void igris_c_constraint_residual_and_jacobian(
     const float q[IGRIS_C_DIM],
     const constraints::IgrisCConstraintParameters &parameters,
     float residual[IGRIS_C_CONSTRAINT_DIM],
@@ -681,7 +681,7 @@ __device__ __forceinline__ bool igris_c_task_correction(
     return true;
 }
 
-__device__ __noinline__ bool igris_c_project_configuration(
+inline __device__ __noinline__ bool igris_c_project_configuration(
     float q[IGRIS_C_DIM],
     const constraints::IgrisCConstraintParameters &parameters,
     int max_iterations,

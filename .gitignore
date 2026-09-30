@@ -5,6 +5,9 @@ problems.pkl
 *.out
 *.json
 !CMakePresets.json
+!schemas/*.json
+!benchmarks/cases.json
+!benchmarks/baseline-rtx5090-2026-09-30.json
 !resources/ffw_sg2_main.json
 !resources/ffw_sg2_approx.json
 !resources/ffw_sg2_struct.json

@@ -750,7 +750,7 @@ __device__ __forceinline__ void g1_fill_bimanual_input(
 
 // Build the base 20x35 system (feet[12], CoM[2], bimanual pose[6]) and,
 // in axis mode, append the two carried-object axis rows.
-__device__ __noinline__ void g1_constraint_residual_and_jacobian(
+inline __device__ __noinline__ void g1_constraint_residual_and_jacobian(
     const float q[G1_JOINT_DIM],
     const constraints::G1ConstraintParameters &parameters,
     bool axis,
@@ -1406,7 +1406,7 @@ __device__ __forceinline__ bool g1_task_correction(
     return true;
 }
 
-__device__ __noinline__ bool g1_project_configuration(
+inline __device__ __noinline__ bool g1_project_configuration(
     float q[G1_JOINT_DIM],
     constraints::G1ConstraintParameters parameters,
     bool axis,

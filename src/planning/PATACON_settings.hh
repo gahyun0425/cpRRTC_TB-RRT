@@ -45,7 +45,6 @@ struct PATACON_settings {
     int balance = 1;
     float tree_ratio = 1.0;
 
-    bool dynamic_domain = true;
     bool trace_trees = false;
     // Opt-in device counters for diagnosing TB-RRT expansion behavior.
     bool collect_diagnostics = false;
@@ -75,10 +74,6 @@ struct PATACON_settings {
 
     // CONNECT 동안 허용할 최대 Tangent-Space / ConCon 반복 수
     int max_connect_concon_chunks = 16;
-
-    float dd_alpha = 0.0001;
-    float dd_radius = 4.0;
-    float dd_min_radius = 1.0;
 
     // projection 후 target에 실제로 가까워졌다고 인정할 최소 거리 감소량
     float connect_progress_epsilon = 1.0e-6f;

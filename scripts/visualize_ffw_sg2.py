@@ -11,6 +11,12 @@ from pathlib import Path
 import sys
 import time
 
+from ffw_sg2_mujoco_scene import (
+    SCENE_LIFT,
+    SCENE_OVERLAYS,
+    SCENE_RACK_UPPER_TO_LOWER,
+    temporary_scene,
+)
 from mujoco_primitive_environment import (
     add_primitive_environment,
     normalize_primitive_environment,
@@ -88,7 +94,17 @@ FRANKA_FLOOR_RGBA = (0.48, 0.48, 0.48, 1.0)
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--model", type=Path, required=True)
+    model_source = parser.add_mutually_exclusive_group()
+    model_source.add_argument(
+        "--model",
+        type=Path,
+        help="Use an already composed MuJoCo model instead of runtime composition.",
+    )
+    model_source.add_argument(
+        "--scene",
+        choices=tuple(SCENE_OVERLAYS),
+        help="PATACON scene to compose; defaults from the trajectory joint order.",
+    )
     parser.add_argument("--trajectory", type=Path, required=True)
     parser.add_argument("--fps", type=float, default=60.0)
     parser.add_argument(
@@ -819,16 +835,13 @@ def replay(
                 time.sleep(1.0)
 
 
-def main() -> int:
-    args = parse_args()
-    model_path = args.model.resolve()
-    trajectory_path = args.trajectory.resolve()
-    if not model_path.is_file():
-        raise FileNotFoundError(f"MuJoCo model not found: {model_path}")
-    if not trajectory_path.is_file():
-        raise FileNotFoundError(f"trajectory not found: {trajectory_path}")
-
-    joint_names, trajectories, environment = load_trajectories(trajectory_path)
+def run(
+    args: argparse.Namespace,
+    model_path: Path,
+    joint_names,
+    trajectories,
+    environment,
+) -> int:
     validate_only = args.validate_only or os.environ.get(
         "PATACON_MUJOCO_VALIDATE_ONLY"
     ) == "1"
@@ -910,6 +923,42 @@ def main() -> int:
         args.acceleration,
     )
     return 0
+
+
+def main() -> int:
+    args = parse_args()
+    trajectory_path = args.trajectory.resolve()
+    if not trajectory_path.is_file():
+        raise FileNotFoundError(f"trajectory not found: {trajectory_path}")
+
+    joint_names, trajectories, environment = load_trajectories(trajectory_path)
+    if args.model is not None:
+        model_path = args.model.resolve()
+        if not model_path.is_file():
+            raise FileNotFoundError(f"MuJoCo model not found: {model_path}")
+        return run(
+            args,
+            model_path,
+            joint_names,
+            trajectories,
+            environment,
+        )
+
+    scene = args.scene
+    if scene is None:
+        scene = (
+            SCENE_RACK_UPPER_TO_LOWER
+            if joint_names == MOBILITY_PLANNING_JOINTS
+            else SCENE_LIFT
+        )
+    with temporary_scene(scene) as model_path:
+        return run(
+            args,
+            model_path,
+            joint_names,
+            trajectories,
+            environment,
+        )
 
 
 if __name__ == "__main__":

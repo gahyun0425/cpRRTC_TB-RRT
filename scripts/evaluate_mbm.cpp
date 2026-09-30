@@ -14,14 +14,15 @@
 #include <cuda_runtime.h>
 
 #include "src/collision/environment.hh"
-#include "src/collision/factory.hh"
 #include "src/planning/AORRTC.hh"
 #include "src/planning/Planners.hh"
 #include "src/planning/PATACON_settings.hh"
+#include "src/planning/RobotDispatch.hh"
 #include "src/config/PlanningProblemJson.hh"
+#include "src/config/PrimitiveEnvironmentJson.hh"
 #include "src/constraints/RobotConstraintAdapter.hh"
 #include "scripts/ffw_sg2_attached_object_collision.hh"
-#include "scripts/planner_result_json.hh"
+#include "src/io/PlannerResultJson.hh"
 
 using json = nlohmann::json;
 using namespace ppln::collision;
@@ -311,14 +312,11 @@ void visualize_ffw_sg2_paths(
     );
     const bool mobility_model =
         !joint_names.empty() && joint_names.front() == "base_x";
-    const auto model = std::filesystem::absolute(
-        mobility_model
-            ? "ffw_lift/ffw_sg2_rack_upper_to_lower.xml"
-            : "ffw_lift/ffw_sg2_lift.xml"
-    );
+    const std::string scene =
+        mobility_model ? "rack_upper_to_lower" : "lift";
     const std::string command =
         "python3 " + shell_quote(visualizer.string()) +
-        " --model " + shell_quote(model.string()) +
+        " --scene " + scene +
         " --trajectory " + shell_quote(trajectory_path.string()) +
         " --input-mode " + (use_ctrl ? "ctrl" : "qpos");
     std::cout.flush();
@@ -329,81 +327,6 @@ void visualize_ffw_sg2_paths(
     if (status != 0) {
         throw std::runtime_error("FFW-SG2 MuJoCo visualizer exited with an error");
     }
-}
-
-Environment<float> problem_dict_to_env(const json& problem, const std::string& name) {
-    Environment<float> env{};
-    
-    std::vector<Sphere<float>> spheres;
-    std::vector<Capsule<float>> capsules;
-    std::vector<Cuboid<float>> cuboids;
-    // Fill spheres
-    for (const auto& obj : problem["sphere"]) {
-        const json& position = obj["position"];
-        Sphere<float> sphere(position[0], position[1], position[2], obj["radius"]);
-        sphere.name = obj["name"];
-        spheres.push_back(sphere);
-    }
-    // Handle cylinders based on name
-    if (name == "box") {
-        for (const auto& obj : problem["cylinder"]) {
-            const json& position = obj["position"];
-            const json& orientation = obj["orientation_euler_xyz"];
-            const float radius = obj["radius"];
-            const std::array<float, 3> dims = {radius, radius, radius/2.0f};
-            auto cuboid = factory::cuboid::array(
-                position, orientation,
-                dims
-            );
-            cuboid.name = obj["name"];
-            cuboids.push_back(cuboid);
-        }
-    } else {
-        for (const auto& obj : problem["cylinder"]) {
-            const json& position = obj["position"];
-            const json& orientation = obj["orientation_euler_xyz"];
-            const float radius = obj["radius"];
-            const float length = obj["length"];
-            auto cylinder = factory::cylinder::center::array(
-                position, orientation,
-                radius, length
-            );
-            cylinder.name = obj["name"];
-            capsules.push_back(cylinder);
-        }
-    }
-    // Fill boxes
-    for (const auto& obj : problem["box"]) {
-        const json& position = obj["position"];
-        const json& orientation = obj["orientation_euler_xyz"];
-        const json& half_extents = obj["half_extents"];
-        auto cuboid = factory::cuboid::array(
-            position, orientation, half_extents
-        );
-        cuboid.name = obj["name"];
-        cuboids.push_back(cuboid);
-    }
-
-    // Allocate memory on the heap for the arrays
-    if (!spheres.empty()) {
-        env.spheres = new Sphere<float>[spheres.size()];
-        std::copy(spheres.begin(), spheres.end(), env.spheres);
-        env.num_spheres = spheres.size();
-    }
-
-    if (!capsules.empty()) {
-        env.capsules = new Capsule<float>[capsules.size()];
-        std::copy(capsules.begin(), capsules.end(), env.capsules);
-        env.num_capsules = capsules.size();
-    }
-
-    if (!cuboids.empty()) {
-        env.cuboids = new Cuboid<float>[cuboids.size()];
-        std::copy(cuboids.begin(), cuboids.end(), env.cuboids);
-        env.num_cuboids = cuboids.size();
-    }
-
-    return env;
 }
 
 std::size_t warm_up_planner() {
@@ -421,7 +344,7 @@ std::size_t warm_up_planner() {
 
 void print_csv_header(std::ofstream &outfile) {
     outfile << "problem_name,problem_idx,solved,cost,path_length,start_tree_size,goal_tree_size,iters,wall_ns,kernel_ns,";
-    outfile << "copy_ns,num_new_configs,granularity,range,balance,tree_ratio,dynamic_domain,dd_alpha,dd_radius,dd_min_radius\n";
+    outfile << "copy_ns,num_new_configs,granularity,range,balance,tree_ratio\n";
 }
 
 template<typename Robot>
@@ -441,11 +364,7 @@ void print_planner_result_to_file(PlannerResult<Robot> &result, PATACON_settings
     outfile << settings.granularity << ", ";
     outfile << settings.range << ", ";
     outfile << settings.balance << ", ";
-    outfile << settings.tree_ratio << ", ";
-    outfile << settings.dynamic_domain << ", ";
-    outfile << settings.dd_alpha << ", ";
-    outfile << settings.dd_radius << ", ";
-    outfile << settings.dd_min_radius;
+    outfile << settings.tree_ratio;
     outfile << "\n";
 }
 
@@ -499,7 +418,7 @@ void run_planning(
             ppln::config::validate_query(data, robot_name);
             processed_problems++;
             AORRTC_settings problem_settings = settings;
-            auto env = problem_dict_to_env(data, name);
+            auto env = ppln::config::environment_from_problem_json(data, name);
             ppln::constraints::apply_constraint_backend_defaults<Robot>(
                 problem_settings
             );
@@ -898,10 +817,6 @@ int main(int argc, char* argv[]) {
     settings.projection_smoothness = true;
     settings.balance = 2;
     settings.tree_ratio = 1.0;
-    settings.dynamic_domain = false;
-    settings.dd_radius = 4.0;
-    settings.dd_min_radius = 1.0;
-    settings.dd_alpha = 0.0001;
     settings.em_threshold = 0.1f;
     settings.max_concon_nodes = 4;
     settings.max_connect_concon_chunks = 16;
@@ -992,18 +907,6 @@ int main(int argc, char* argv[]) {
             std::cerr << "--com is supported only for ffw_sg2_mobility\n";
             return 1;
         }
-        if (visualize
-            && robot_name != "g1"
-            && robot_name != "franka_single"
-            && robot_name != "franka"
-            && robot_name != "ffw_sg2"
-            && robot_name != "ffw_sg2_mobility") {
-            std::cerr
-                << "--visualize is currently supported only for g1, "
-                << "franka_single, franka, ffw_sg2, and "
-                << "ffw_sg2_mobility\n";
-            return 1;
-        }
         if (runs > 1
             && settings.random_seed
                 > std::numeric_limits<unsigned long long>::max()
@@ -1023,31 +926,29 @@ int main(int argc, char* argv[]) {
         return -1;
     }
 
-    const bool robot_supported =
-        robot_name == "franka_single" ||
-        robot_name == "franka" ||
-        robot_name == "ffw_sg2" ||
-        robot_name == "ffw_sg2_mobility" ||
-        robot_name == "g1" ||
-        robot_name == "igris_c";
-    if (!robot_supported) {
+    if (!ppln::config::is_supported_robot(robot_name)) {
         std::cerr << "Unsupported robot type: " << robot_name << "\n";
         return 1;
     }
 
-    const std::string path = problem_file_path.empty()
-        ? "scripts/" + robot_name + "_problems.json"
-        : problem_file_path;
-    std::ifstream f(path);
-    if (!f) {
-        std::cerr << "Failed to open problem file: " << path << "\n";
+    const auto &robot_descriptor =
+        ppln::config::require_robot_descriptor(robot_name);
+    if (visualize && !robot_descriptor.evaluate_visualization_supported) {
+        std::cerr
+            << "--visualize is currently supported only for g1, "
+            << "franka_single, franka, ffw_sg2, and "
+            << "ffw_sg2_mobility\n";
         return 1;
     }
+
+    const std::string path = problem_file_path.empty()
+        ? ppln::config::default_problem_file(robot_name)
+        : problem_file_path;
     json all_data;
     try {
-        all_data = json::parse(f);
+        all_data = ppln::config::read_json_file(path);
     } catch (const std::exception &error) {
-        std::cerr << "Failed to parse problem file: " << error.what() << "\n";
+        std::cerr << error.what() << "\n";
         return 1;
     }
     try {
@@ -1063,29 +964,32 @@ int main(int argc, char* argv[]) {
         return 1;
     }
     json problems = all_data["problems"];
-    if (robot_name == "g1") {
-        settings.granularity = robots::G1::resolution;
-        settings.projection_max_iters = 60;
-        settings.max_concon_nodes = 4;
-    } else if (robot_name == "igris_c") {
-        settings.granularity = robots::IgrisC::resolution;
-        settings.projection_max_iters = 60;
-        settings.max_concon_nodes = 4;
-    }
-    if (robot_name == "ffw_sg2") {
-        run_planning<robots::FfwSg2>(problems, settings, run_name, robot_name, runs, max_problems, print_path, visualize, plot, save_json_path, path);
-    } else if (robot_name == "ffw_sg2_mobility") {
-        run_planning<robots::FfwSg2Mobility>(problems, settings, run_name, robot_name, runs, max_problems, print_path, visualize, plot, save_json_path, path);
-    } else if (robot_name == "g1") {
-        run_planning<robots::G1>(problems, settings, run_name, robot_name, runs, max_problems, print_path, visualize, plot, save_json_path, path);
-    } else if (robot_name == "igris_c") {
-        run_planning<robots::IgrisC>(problems, settings, run_name, robot_name, runs, max_problems, print_path, visualize, plot, save_json_path, path);
-    } else if (robot_name == "franka_single") {
-        run_planning<robots::FrankaSingle>(problems, settings, run_name, robot_name, runs, max_problems, print_path, visualize, plot, save_json_path, path);
-    } else if (robot_name == "franka") {
-        run_planning<robots::Franka>(problems, settings, run_name, robot_name, runs, max_problems, print_path, visualize, plot, save_json_path, path);
-    } else {
-        std::cerr << "Unsupported robot type: " << robot_name << "\n";
-        return 1;
-    }
+    ppln::planning::dispatch_robot(
+        robot_name,
+        [&](auto robot_tag) {
+            using Robot = typename decltype(robot_tag)::type;
+            if constexpr (
+                std::is_same_v<Robot, robots::G1> ||
+                std::is_same_v<Robot, robots::IgrisC>
+            ) {
+                settings.granularity = Robot::resolution;
+                settings.projection_max_iters = 60;
+                settings.max_concon_nodes = 4;
+            }
+            run_planning<Robot>(
+                problems,
+                settings,
+                run_name,
+                robot_name,
+                runs,
+                max_problems,
+                print_path,
+                visualize,
+                plot,
+                save_json_path,
+                path
+            );
+        }
+    );
+    return 0;
 }

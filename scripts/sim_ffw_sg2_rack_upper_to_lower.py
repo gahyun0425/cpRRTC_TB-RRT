@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import ExitStack
 from dataclasses import dataclass
 import json
 import math
@@ -16,6 +17,10 @@ import xml.etree.ElementTree as ET
 
 import numpy as np
 
+from ffw_sg2_mujoco_scene import (
+    SCENE_RACK_UPPER_TO_LOWER,
+    temporary_scene,
+)
 from mujoco_primitive_environment import (
     add_primitive_environment,
     empty_primitive_environment,
@@ -37,9 +42,6 @@ from mujoco_video import (
     video_view_elevation,
 )
 
-
-REPO_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_MODEL = REPO_ROOT / "ffw_lift" / "ffw_sg2_rack_upper_to_lower.xml"
 DEFAULT_PAYLOAD_MASS_KG = 3.0
 DEFAULT_SUPPORT_MARGIN_M = 0.05
 DEFAULT_SETTLE_STEPS = 12
@@ -194,7 +196,11 @@ class RealBaseTracking:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--model", type=Path, default=DEFAULT_MODEL)
+    parser.add_argument(
+        "--model",
+        type=Path,
+        help="Use an already composed MuJoCo model instead of runtime composition.",
+    )
     parser.add_argument("--trajectory", type=Path)
     parser.add_argument("--fps", type=float, default=60.0)
     parser.add_argument(
@@ -2339,29 +2345,30 @@ def main() -> int:
     except ImportError as error:
         raise RuntimeError("MuJoCo Python package is required: python3 -m pip install mujoco") from error
 
-    model_path = args.model.resolve()
-    if not model_path.is_file():
-        raise FileNotFoundError(f"MuJoCo model not found: {model_path}")
+    with ExitStack() as model_files:
+        if args.model is not None:
+            model_path = args.model.resolve()
+            if not model_path.is_file():
+                raise FileNotFoundError(f"MuJoCo model not found: {model_path}")
+        else:
+            model_path = model_files.enter_context(
+                temporary_scene(SCENE_RACK_UPPER_TO_LOWER)
+            )
 
-    temporary_model_path: Path | None = None
-    loaded_model_path = model_path
-    if args.real:
-        temporary_model_path = write_real_model_xml(
-            model_path,
-            payload_offset,
-            args.real_payload_mode,
-        )
-        loaded_model_path = temporary_model_path
+        loaded_model_path = model_path
+        if args.real:
+            loaded_model_path = write_real_model_xml(
+                model_path,
+                payload_offset,
+                args.real_payload_mode,
+            )
+            model_files.callback(loaded_model_path.unlink, missing_ok=True)
 
-    try:
         model = build_model(mujoco, loaded_model_path, environment)
         reference_model = (
             build_model(mujoco, loaded_model_path, environment)
             if waypoints else None
         )
-    finally:
-        if temporary_model_path is not None:
-            temporary_model_path.unlink(missing_ok=True)
 
     data = mujoco.MjData(model)
     payload_body_id = set_payload_mass(mujoco, model, data, args.object_mass)

@@ -1,0 +1,288 @@
+{
+  "format": "PATACON_performance_baseline_v1",
+  "recorded_at_utc": "2026-09-30T03:51:00Z",
+  "source": {
+    "commit": "139cbf618ba8e0c6611c3d828d58772b07c749cd",
+    "working_tree_dirty": false,
+    "executable_sha256": "6b0880e543b886ddd2b4e7a51cb771fb8a7c08c03b8f54e91d80904935c463f2"
+  },
+  "system": {
+    "platform": "Linux 6.17.0-35-generic x86_64",
+    "cpu": "AMD Ryzen 7 9800X3D 8-Core Processor",
+    "gpu": "NVIDIA GeForce RTX 5090",
+    "nvidia_driver": "595.71.05",
+    "cuda": "13.1",
+    "cxx_compiler": "Ubuntu clang 18.1.3",
+    "cuda_architecture": 120
+  },
+  "method": {
+    "cases_file": "benchmarks/cases.json",
+    "runs_per_case": 20,
+    "first_seed": 1,
+    "seeds": "1..20",
+    "primary_timing_field": "kernel_ns",
+    "warmup": "single_mbm CUDA warmup before the first measured run",
+    "execution": "cases run serially on one GPU"
+  },
+  "cases": [
+    {
+      "robot": "franka_single",
+      "problem": "demo",
+      "problem_index": 1,
+      "runs": 20,
+      "solved_runs": 20,
+      "kernel_ms": {
+        "min": 1.629054,
+        "median": 1.768103,
+        "mean": 1.76411205,
+        "p95": 1.870902,
+        "max": 1.934182
+      },
+      "wall_ms": {
+        "min": 65.776929,
+        "median": 68.881236,
+        "mean": 81.91745835,
+        "p95": 73.27747,
+        "max": 330.954366
+      },
+      "cost": {
+        "min": 4.585301876068115,
+        "median": 5.569742918014526,
+        "mean": 5.791819167137146,
+        "p95": 6.857119560241699,
+        "max": 8.634259223937988
+      },
+      "path_waypoint_count": {
+        "min": 14,
+        "median": 16,
+        "mean": 16.95,
+        "p95": 20,
+        "max": 24
+      },
+      "iterations": {
+        "min": 2,
+        "median": 4,
+        "mean": 4.4,
+        "p95": 6,
+        "max": 6
+      }
+    },
+    {
+      "robot": "franka",
+      "problem": "demo",
+      "problem_index": 1,
+      "runs": 20,
+      "solved_runs": 20,
+      "kernel_ms": {
+        "min": 4.724861,
+        "median": 5.2446495,
+        "mean": 5.2486066,
+        "p95": 5.722747,
+        "max": 5.826287
+      },
+      "wall_ms": {
+        "min": 89.755014,
+        "median": 92.1385145,
+        "mean": 104.45925565,
+        "p95": 95.486751,
+        "max": 337.022832
+      },
+      "cost": {
+        "min": 5.191835880279541,
+        "median": 5.7938573360443115,
+        "mean": 5.748240399360657,
+        "p95": 6.339966773986816,
+        "max": 6.410836696624756
+      },
+      "path_waypoint_count": {
+        "min": 16,
+        "median": 17.5,
+        "mean": 17.55,
+        "p95": 19,
+        "max": 19
+      },
+      "iterations": {
+        "min": 4,
+        "median": 5,
+        "mean": 5,
+        "p95": 6,
+        "max": 7
+      }
+    },
+    {
+      "robot": "ffw_sg2",
+      "problem": "tray_lift",
+      "problem_index": 1,
+      "runs": 20,
+      "solved_runs": 20,
+      "kernel_ms": {
+        "min": 17.67305,
+        "median": 20.5379835,
+        "mean": 20.3634186,
+        "p95": 22.77056,
+        "max": 23.123118
+      },
+      "wall_ms": {
+        "min": 105.436072,
+        "median": 110.780471,
+        "mean": 122.94053055,
+        "p95": 118.135641,
+        "max": 361.907414
+      },
+      "cost": {
+        "min": 5.913427352905273,
+        "median": 8.008620262145996,
+        "mean": 7.899204611778259,
+        "p95": 9.748621940612793,
+        "max": 10.218212127685547
+      },
+      "path_waypoint_count": {
+        "min": 19,
+        "median": 23,
+        "mean": 23.65,
+        "p95": 28,
+        "max": 29
+      },
+      "iterations": {
+        "min": 4,
+        "median": 14.5,
+        "mean": 13.5,
+        "p95": 18,
+        "max": 23
+      }
+    },
+    {
+      "robot": "ffw_sg2_mobility",
+      "problem": "tray_lift",
+      "problem_index": 1,
+      "runs": 20,
+      "solved_runs": 20,
+      "kernel_ms": {
+        "min": 31.661104,
+        "median": 33.901501,
+        "mean": 33.9874084,
+        "p95": 37.519132,
+        "max": 38.800597
+      },
+      "wall_ms": {
+        "min": 125.081635,
+        "median": 130.790587,
+        "mean": 141.8600357,
+        "p95": 134.048659,
+        "max": 363.777968
+      },
+      "cost": {
+        "min": 6.558836936950684,
+        "median": 6.646404504776001,
+        "mean": 6.788333678245545,
+        "p95": 7.88652229309082,
+        "max": 8.025108337402344
+      },
+      "path_waypoint_count": {
+        "min": 19,
+        "median": 20,
+        "mean": 20.1,
+        "p95": 24,
+        "max": 25
+      },
+      "iterations": {
+        "min": 2,
+        "median": 2,
+        "mean": 2.05,
+        "p95": 2,
+        "max": 3
+      }
+    },
+    {
+      "robot": "g1",
+      "problem": "humanoid_shelf",
+      "problem_index": 1,
+      "runs": 20,
+      "solved_runs": 20,
+      "kernel_ms": {
+        "min": 38.11005,
+        "median": 40.5942895,
+        "mean": 42.0862381,
+        "p95": 50.948079,
+        "max": 51.874495
+      },
+      "wall_ms": {
+        "min": 167.354798,
+        "median": 175.52958,
+        "mean": 187.1341341,
+        "p95": 187.273578,
+        "max": 418.732932
+      },
+      "cost": {
+        "min": 3.8362553119659424,
+        "median": 3.8566269874572754,
+        "mean": 3.8601000785827635,
+        "p95": 3.8935136795043945,
+        "max": 3.9213197231292725
+      },
+      "path_waypoint_count": {
+        "min": 13,
+        "median": 13,
+        "mean": 13,
+        "p95": 13,
+        "max": 13
+      },
+      "iterations": {
+        "min": 1,
+        "median": 1,
+        "mean": 1,
+        "p95": 1,
+        "max": 1
+      }
+    },
+    {
+      "robot": "igris_c",
+      "problem": "igris_c_shelf_lift",
+      "problem_index": 1,
+      "runs": 20,
+      "solved_runs": 20,
+      "kernel_ms": {
+        "min": 60.287382,
+        "median": 67.447358,
+        "mean": 67.19424595,
+        "p95": 74.136078,
+        "max": 76.666397
+      },
+      "wall_ms": {
+        "min": 190.726926,
+        "median": 198.7250595,
+        "mean": 210.07843215,
+        "p95": 209.311963,
+        "max": 429.598101
+      },
+      "cost": {
+        "min": 3.5939955711364746,
+        "median": 4.5374391078948975,
+        "mean": 4.446506822109223,
+        "p95": 5.194122314453125,
+        "max": 5.231782913208008
+      },
+      "path_waypoint_count": {
+        "min": 13,
+        "median": 14,
+        "mean": 14.55,
+        "p95": 16,
+        "max": 16
+      },
+      "iterations": {
+        "min": 3,
+        "median": 25.5,
+        "mean": 30.6,
+        "p95": 67,
+        "max": 73
+      }
+    }
+  ],
+  "known_validation_failures": [
+    {
+      "test": "validation.ffw_sg2.projection_known_failure",
+      "observed": "configuration projection 11/11; motion segments 1/3",
+      "policy": "registered but disabled until the pre-existing motion-projection failure is resolved"
+    }
+  ]
+}
