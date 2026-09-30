@@ -33,7 +33,7 @@ constexpr int kDefaultCount = 100;
 constexpr int kCandidateBatchSize = 1024;
 constexpr int kDefaultMaximumCandidates = 200000;
 constexpr std::uint64_t kDefaultSeed = 20260918ULL;
-constexpr std::uint64_t kRigidOrientationSeed = 20260919ULL;
+constexpr std::uint64_t kAxisSeed = 20260919ULL;
 constexpr float kDuplicateDistanceSquared = 1.0e-8f;
 
 using Configuration = std::array<float, kDimension>;
@@ -57,17 +57,17 @@ struct CandidateResult {
 struct Options {
     std::filesystem::path template_path = "scripts/g1_problems.json";
     std::filesystem::path output_path =
-        "scripts/g1_random_pairs_no_rigid_orientation_100.json";
+        "scripts/g1_random_pairs_no_axis_100.json";
     std::string source_name = "humanoid_shelf";
     int source_index = 1;
     std::string problem_name =
-        "humanoid_shelf_random_pairs_no_rigid_orientation";
+        "humanoid_shelf_random_pairs_no_axis";
     int count = kDefaultCount;
     int maximum_candidates = kDefaultMaximumCandidates;
     std::uint64_t seed = kDefaultSeed;
     float start_sigma = 0.08f;
     float goal_sigma = 0.10f;
-    bool rigid_orientation = false;
+    bool axis = false;
     bool output_path_provided = false;
     bool problem_name_provided = false;
     bool seed_provided = false;
@@ -168,7 +168,7 @@ void print_usage() {
         << "  --source-name NAME --source-index N\n"
         << "  --problem-name NAME --count N --seed N\n"
         << "  --start-sigma RAD --goal-sigma RAD\n"
-        << "  --rigid-orientation\n"
+        << "  --axis\n"
         << "  --start-region xmin xmax ymin ymax zmin zmax\n"
         << "  --goal-region xmin xmax ymin ymax zmin zmax\n"
         << "  --max-candidates N\n";
@@ -211,8 +211,8 @@ Options parse_options(int argc, char **argv) {
             options.goal_sigma = parse_positive_float(
                 argument, require_value()
             );
-        } else if (argument == "--rigid-orientation") {
-            options.rigid_orientation = true;
+        } else if (argument == "--axis") {
+            options.axis = true;
         } else if (argument == "--start-region") {
             options.start_region = parse_region(
                 argc, argv, index, argument
@@ -234,17 +234,17 @@ Options parse_options(int argc, char **argv) {
             throw std::invalid_argument("unknown option: " + argument);
         }
     }
-    if (options.rigid_orientation) {
+    if (options.axis) {
         if (!options.output_path_provided) {
             options.output_path =
-                "scripts/g1_random_pairs_rigid_orientation_100.json";
+                "scripts/g1_random_pairs_axis_100.json";
         }
         if (!options.problem_name_provided) {
             options.problem_name =
-                "humanoid_shelf_random_pairs_rigid_orientation";
+                "humanoid_shelf_random_pairs_axis";
         }
         if (!options.seed_provided) {
-            options.seed = kRigidOrientationSeed;
+            options.seed = kAxisSeed;
         }
     }
     return options;
@@ -470,7 +470,7 @@ __global__ void project_and_validate_candidates(
     CandidateResult *results,
     ppln::collision::Environment<float> *environment,
     ppln::constraints::G1ConstraintParameters parameters,
-    bool rigid_orientation,
+    bool axis,
     int count
 ) {
     const int candidate = static_cast<int>(blockIdx.x);
@@ -486,7 +486,7 @@ __global__ void project_and_validate_candidates(
     result.projection_valid = ppln::collision::g1_project_configuration(
         configuration,
         parameters,
-        rigid_orientation,
+        axis,
         100,
         0.6f,
         1.0e-4f,
@@ -501,11 +501,11 @@ __global__ void project_and_validate_candidates(
     }
     float residual[ppln::collision::G1_CONSTRAINT_DIM]{};
     ppln::collision::g1_constraint_residual(
-        configuration, parameters, rigid_orientation, residual
+        configuration, parameters, axis, residual
     );
     result.constraint_error_squared = 0.0f;
     const int constraint_dimension =
-        ppln::collision::g1_constraint_dim(rigid_orientation);
+        ppln::collision::g1_constraint_dim(axis);
     for (int row = 0; row < constraint_dimension; ++row) {
         result.constraint_error_squared += residual[row] * residual[row];
     }
@@ -519,7 +519,7 @@ __global__ void project_and_validate_candidates(
          ++row) {
         result.equality_residual += residual[row] * residual[row];
     }
-    if (rigid_orientation) {
+    if (axis) {
         for (int row = ppln::collision::G1_BASE_CONSTRAINT_DIM;
              row < ppln::collision::G1_CONSTRAINT_DIM;
              ++row) {
@@ -574,7 +574,7 @@ CandidateResult validate_reference(
     const Configuration &reference,
     ppln::collision::Environment<float> *device_environment,
     const ppln::constraints::G1ConstraintParameters &parameters,
-    bool rigid_orientation
+    bool axis
 ) {
     float *device_input = nullptr;
     CandidateResult *device_result = nullptr;
@@ -604,7 +604,7 @@ CandidateResult validate_reference(
         device_result,
         device_environment,
         parameters,
-        rigid_orientation,
+        axis,
         1
     );
     check_cuda(cudaGetLastError(), "reference validation launch");
@@ -650,7 +650,7 @@ std::vector<CandidateResult> sample_pool(
     std::mt19937_64 &rng,
     ppln::collision::Environment<float> *device_environment,
     const ppln::constraints::G1ConstraintParameters &parameters,
-    bool rigid_orientation,
+    bool axis,
     const std::string &label
 ) {
     std::normal_distribution<float> normal(0.0f, 1.0f);
@@ -724,7 +724,7 @@ std::vector<CandidateResult> sample_pool(
             device_results,
             device_environment,
             parameters,
-            rigid_orientation,
+            axis,
             batch_count
         );
         check_cuda(cudaGetLastError(), "candidate validation launch");
@@ -847,14 +847,14 @@ json generate_output(
         problem["start"] = start;
         problem["goals"] = json::array({goal});
         // g1_goals_from_problem intentionally reads this goal in both modes.
-        // Keep it synchronized so the generated non-rigid query is evaluated.
-        problem["rigid_orientation_endpoints"]["start"] = start;
-        problem["rigid_orientation_endpoints"]["goals"] =
+        // Keep it synchronized so the generated axis-disabled query is evaluated.
+        problem["axis_endpoints"]["start"] = start;
+        problem["axis_endpoints"]["goals"] =
             json::array({goal});
         problem["pair_id"] = index + 1;
         problem["sampling"] = {
             {"base_seed", options.seed},
-            {"rigid_orientation", options.rigid_orientation},
+            {"axis", options.axis},
             {"start_object_position", position_json(starts[index])},
             {"goal_object_position", position_json(goals[index])},
             {"start_constraint_error_squared",
@@ -878,27 +878,27 @@ json generate_output(
             {"executable", "build/generate_g1_random_pairs"},
             {"seed", options.seed},
             {"count", options.count},
-            {"sampling", options.rigid_orientation
+            {"sampling", options.axis
                 ? "Gaussian joint perturbation followed by G1 base-plus-axis-constraint projection and rejection"
                 : "Gaussian joint perturbation followed by G1 base-constraint projection and rejection"},
             {"start_joint_sigma_rad", options.start_sigma},
             {"goal_joint_sigma_rad", options.goal_sigma},
-            {"rigid_orientation", options.rigid_orientation},
+            {"axis", options.axis},
             {"constraint_dimension",
                 ppln::collision::G1_BASE_CONSTRAINT_DIM +
-                (options.rigid_orientation
+                (options.axis
                     ? ppln::collision::G1_AXIS_CONSTRAINT_DIM
                     : 0)},
             {"equality_constraint_dimension",
                 ppln::collision::G1_FEET_CONSTRAINT_DIM +
                 ppln::collision::G1_BIMANUAL_CONSTRAINT_DIM +
-                (options.rigid_orientation
+                (options.axis
                     ? ppln::collision::G1_AXIS_CONSTRAINT_DIM
                     : 0)},
             {"tangent_dimension", kDimension -
                 ppln::collision::G1_FEET_CONSTRAINT_DIM -
                 ppln::collision::G1_BIMANUAL_CONSTRAINT_DIM -
-                (options.rigid_orientation
+                (options.axis
                     ? ppln::collision::G1_AXIS_CONSTRAINT_DIM
                     : 0)},
             {"source_problem", {
@@ -913,8 +913,8 @@ json generate_output(
                 {"feet_pose_constraint", true},
                 {"center_of_mass_support_constraint", true},
                 {"bimanual_relative_pose_constraint", true},
-                {"rigid_orientation_axis_constraint",
-                    options.rigid_orientation},
+                {"axis_constraint",
+                    options.axis},
                 {"robot_self_collision", true},
                 {"robot_environment_collision", true},
                 {"attached_object_robot_collision", true},
@@ -965,13 +965,13 @@ int main(int argc, char **argv) {
         const json source_problem = problem_set.at(options.source_index - 1);
         const Configuration reference_start = json_configuration(
             g1_start_from_problem(
-                source_problem, options.rigid_orientation
+                source_problem, options.axis
             ),
             "start"
         );
         const Configuration reference_goal = json_configuration(
             g1_goals_from_problem(
-                source_problem, options.rigid_orientation
+                source_problem, options.axis
             ).at(0),
             "goals[0]"
         );
@@ -992,13 +992,13 @@ int main(int argc, char **argv) {
             reference_start,
             device_environment.environment,
             parameters,
-            options.rigid_orientation
+            options.axis
         );
         const CandidateResult validated_goal = validate_reference(
             reference_goal,
             device_environment.environment,
             parameters,
-            options.rigid_orientation
+            options.axis
         );
         if (!options.start_region_provided) {
             options.start_region = centered_region(
@@ -1029,7 +1029,7 @@ int main(int argc, char **argv) {
             rng,
             device_environment.environment,
             parameters,
-            options.rigid_orientation,
+            options.axis,
             "start"
         );
         const auto goals = sample_pool(
@@ -1041,7 +1041,7 @@ int main(int argc, char **argv) {
             rng,
             device_environment.environment,
             parameters,
-            options.rigid_orientation,
+            options.axis,
             "goal"
         );
         const json output = generate_output(
@@ -1057,9 +1057,9 @@ int main(int argc, char **argv) {
 
         std::cout << "generated " << options.count
                   << " collision-free G1 "
-                  << (options.rigid_orientation
-                      ? "rigid-orientation"
-                      : "non-rigid-orientation")
+                  << (options.axis
+                      ? "axis"
+                      : "no-axis")
                   << " start-goal pairs: "
                   << options.output_path << '\n';
         return 0;

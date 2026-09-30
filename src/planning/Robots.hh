@@ -10,10 +10,10 @@
 namespace ppln::robots {
     // Internal tag for the collision kernels shared by the supported Franka
     // models.  This is not a planner-visible robot type.
-    struct PandaCollisionModel {};
+    struct FrankaFerCollisionModel {};
 
-    // Franka models imported from cptbrrt_pkg use the official joint limits
-    // and, for the dual model, two fixed arm mounts.
+    // The official Franka FER description supplies these limits. The dual
+    // planning model uses two FER arms on PATACON's fixed parallel mounts.
     struct FrankaSingle
     {
         static constexpr auto name = "franka_single";
@@ -130,14 +130,14 @@ namespace ppln::robots {
                 -2.9361f,
                 -3.14f,
                 -1.57f,
-                -1.8201f,
+                -1.5804f,
                 -3.14f,
                 -3.14f,
                 -3.14f,
                 -2.9361f,
                 -3.14f,
                 -1.57f,
-                -1.5804f
+                -1.8201f
             };
             return values[i];
         }
@@ -206,14 +206,14 @@ namespace ppln::robots {
                 -2.9361f,
                 -3.14f,
                 -1.57f,
-                -1.8201f,
+                -1.5804f,
                 -3.14f,
                 -3.14f,
                 -3.14f,
                 -2.9361f,
                 -3.14f,
                 -1.57f,
-                -1.5804f
+                -1.8201f
             };
             return values[i];
         }

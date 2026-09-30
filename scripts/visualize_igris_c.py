@@ -94,8 +94,7 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help=(
             "Maximum planning-coordinate change per second. Defaults to "
-            f"{DEFAULT_TRAJECTORY_SPEED:g}, or {REAL_DEFAULT_SPEED:g} with "
-            "--real."
+            f"{REAL_DEFAULT_SPEED:g}."
         ),
     )
     parser.add_argument(
@@ -105,21 +104,14 @@ def parse_args() -> argparse.Namespace:
         help="Maximum planning-coordinate acceleration per second squared.",
     )
     parser.add_argument(
-        "--real",
-        action="store_true",
-        help=(
-            "Replay with MuJoCo dynamics, joint position actuators, a free "
-            "floating base, ground/shelf contacts, and an equality-attached payload."
-        ),
-    )
-    parser.add_argument(
         "--settle-steps",
         type=int,
         default=None,
-        help="Simulation steps per trajectory target (default: 35 with --real).",
+        help="Simulation steps per trajectory target (default: 35).",
     )
     parser.add_argument(
-        "--real-initial-settle-steps",
+        "--initial-settle-steps",
+        dest="real_initial_settle_steps",
         type=int,
         default=REAL_DEFAULT_INITIAL_SETTLE_STEPS,
         help="Simulation steps used to settle the initial dynamic state.",
@@ -137,12 +129,11 @@ def parse_args() -> argparse.Namespace:
     )
     add_video_arguments(parser, "PATACON_IGRIS_C_VIDEO")
     args = parser.parse_args()
+    args.real = True
     if args.speed is None:
-        args.speed = (
-            REAL_DEFAULT_SPEED if args.real else DEFAULT_TRAJECTORY_SPEED
-        )
+        args.speed = REAL_DEFAULT_SPEED
     if args.settle_steps is None:
-        args.settle_steps = REAL_DEFAULT_SETTLE_STEPS if args.real else 0
+        args.settle_steps = REAL_DEFAULT_SETTLE_STEPS
     if (
         not math.isfinite(args.fps)
         or not math.isfinite(args.speed)
@@ -347,6 +338,14 @@ def build_viewer_xml(
         collision_material = root.find(".//material[@name='collision_material']")
         if collision_material is not None:
             collision_material.set("rgba", "1.0 0.28 0.1 0.0")
+        for collision_geom in root.findall(".//geom[@class='collision']"):
+            rgba = collision_geom.get("rgba", "1.0 0.28 0.1 1.0").split()
+            if len(rgba) != 4:
+                raise ValueError(
+                    "IGRIS-C collision geom rgba must contain four components"
+                )
+            rgba[3] = "0.0"
+            collision_geom.set("rgba", " ".join(rgba))
     else:
         # Show the public visual geometry once; the planner collision backend is
         # validated separately from the live viewer.
@@ -902,7 +901,7 @@ def save_video(
             renderer.update_scene(data, camera=camera)
             writer.write(view, renderer.render())
 
-    mode = "real dynamics" if real else "qpos"
+    mode = "ctrl dynamics" if real else "qpos"
     print(
         f"rendering {len(views)} IGRIS-C MP4 view(s) at {fps:g} fps "
         f"({width}x{height}, {mode}): {', '.join(views)}"
@@ -927,7 +926,7 @@ def save_video(
                     )
                     if not np.all(np.isfinite(data.qpos)):
                         raise RuntimeError(
-                            "IGRIS-C real-mode simulation became non-finite"
+                            "IGRIS-C ctrl-dynamics simulation became non-finite"
                         )
                 else:
                     apply_configuration(
@@ -1006,7 +1005,7 @@ def replay_real(
     seed_real_configuration(mujoco, model, data, layout, waypoints[0])
     for _ in range(initial_settle_steps):
         mujoco.mj_step(model, data)
-    print("MuJoCo viewer: IGRIS-C planning 경로를 --real 동역학 모드로 재생합니다.")
+    print("MuJoCo viewer: IGRIS-C planning 경로를 ctrl 동역학 모드로 재생합니다.")
     print("floating base는 시작 시에만 초기화하며 경로 중에는 직접 덮어쓰지 않습니다.")
     payload_mass = float(model.body_mass[layout.payload_body])
     print(
@@ -1097,7 +1096,7 @@ def main() -> int:
                         "IGRIS-C dynamic validation produced a non-finite state"
                     )
                 print(
-                    "PASS: IGRIS-C MuJoCo --real input validated "
+                    "PASS: IGRIS-C MuJoCo ctrl-dynamics input validated "
                     f"({len(waypoints)} waypoints, 29 position-controlled joints, "
                     f"free floating base, payload={args.object_mass:.3f} kg)"
                 )

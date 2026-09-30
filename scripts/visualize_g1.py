@@ -133,14 +133,8 @@ class G1BalanceReference:
 
 
 def default_model_path() -> Path:
-    vamp_root = os.environ.get("VAMP_ROOT")
-    if vamp_root:
-        root = Path(vamp_root).expanduser()
-    else:
-        root = Path.home() / "gh_ws" / "vamp"
     return (
-        root
-        / "third_party"
+        Path(__file__).resolve().parents[1]
         / "unitree_ros"
         / "robots"
         / "g1_description"
@@ -860,7 +854,8 @@ def build_control_model(
         elif geom.contype or geom.conaffinity:
             # Match the planner split: robot geoms interact with the physical
             # environment, while self-collision remains governed by the
-            # planner's VAMP sphere-pair table rather than MuJoCo's mesh pairs.
+            # planner's validated sphere-pair table rather than MuJoCo's
+            # mesh pairs.
             geom.contype = 1
             geom.conaffinity = 0
 
@@ -1719,7 +1714,8 @@ def main() -> int:
     trajectory_path = args.trajectory.expanduser().resolve()
     if not model_path.is_file():
         raise FileNotFoundError(
-            f"G1 MuJoCo model not found: {model_path}; set VAMP_ROOT if needed"
+            f"G1 MuJoCo model not found: {model_path}; initialize the "
+            "unitree_ros submodule"
         )
     if not trajectory_path.is_file():
         raise FileNotFoundError(f"trajectory not found: {trajectory_path}")

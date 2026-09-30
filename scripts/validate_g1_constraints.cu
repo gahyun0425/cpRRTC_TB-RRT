@@ -32,7 +32,7 @@ __global__ void validate_constraints_kernel(
     const float *start,
     const float *goal,
     ppln::constraints::G1ConstraintParameters parameters,
-    bool rigid_orientation,
+    bool axis,
     ConstraintValidationResult *result
 ) {
     if (threadIdx.x != 0 || blockIdx.x != 0) {
@@ -42,18 +42,18 @@ __global__ void validate_constraints_kernel(
     result->start_error = ppln::collision::g1_constraint_error_squared(
         start,
         parameters,
-        rigid_orientation
+        axis
     );
     result->goal_error = ppln::collision::g1_constraint_error_squared(
         goal,
         parameters,
-        rigid_orientation
+        axis
     );
     ppln::collision::g1_constraint_residual(
-        start, parameters, rigid_orientation, result->start_residual
+        start, parameters, axis, result->start_residual
     );
     ppln::collision::g1_constraint_residual(
-        goal, parameters, rigid_orientation, result->goal_residual
+        goal, parameters, axis, result->goal_residual
     );
 
     float equality_residual[ppln::collision::G1_EQUALITY_CONSTRAINT_DIM];
@@ -65,19 +65,19 @@ __global__ void validate_constraints_kernel(
     ppln::collision::g1_equality_residual_and_jacobian(
         start,
         parameters,
-        rigid_orientation,
+        axis,
         equality_residual,
         equality_jacobian
     );
     result->tangent_basis_valid = ppln::collision::g1_tangent_basis_from_jacobian(
         equality_jacobian,
-        rigid_orientation,
+        axis,
         tangent_basis
     );
     const int equality_dim =
-        ppln::collision::g1_equality_constraint_dim(rigid_orientation);
+        ppln::collision::g1_equality_constraint_dim(axis);
     const int tangent_dim =
-        ppln::collision::g1_tangent_dim(rigid_orientation);
+        ppln::collision::g1_tangent_dim(axis);
     result->maximum_tangent_nullspace_error = 0.0f;
     for (int row = 0; row < equality_dim; ++row) {
         for (int column = 0; column < tangent_dim; ++column) {
@@ -126,7 +126,7 @@ __global__ void validate_constraints_kernel(
     perturbed[21] += 0.10f;
     result->perturbed_error_before =
         ppln::collision::g1_constraint_error_squared(
-            perturbed, parameters, rigid_orientation
+            perturbed, parameters, axis
         );
 
     float analytic_residual[ppln::collision::G1_CONSTRAINT_DIM];
@@ -136,7 +136,7 @@ __global__ void validate_constraints_kernel(
     ppln::collision::g1_constraint_residual_and_jacobian(
         perturbed,
         parameters,
-        rigid_orientation,
+        axis,
         analytic_residual,
         analytic_jacobian
     );
@@ -144,7 +144,7 @@ __global__ void validate_constraints_kernel(
     result->active_jacobian_rows = 0;
     constexpr float difference_step = 1.0e-4f;
     const int constraint_dim =
-        ppln::collision::g1_constraint_dim(rigid_orientation);
+        ppln::collision::g1_constraint_dim(axis);
     for (int row = 0; row < constraint_dim; ++row) {
         if (fabsf(analytic_residual[row]) <= 1.0e-4f) {
             continue;
@@ -164,13 +164,13 @@ __global__ void validate_constraints_kernel(
             ppln::collision::g1_constraint_residual(
                 plus,
                 parameters,
-                rigid_orientation,
+                axis,
                 plus_residual
             );
             ppln::collision::g1_constraint_residual(
                 minus,
                 parameters,
-                rigid_orientation,
+                axis,
                 minus_residual
             );
             const float numerical =
@@ -188,7 +188,7 @@ __global__ void validate_constraints_kernel(
     result->projected = ppln::collision::g1_project_configuration(
         perturbed,
         parameters,
-        rigid_orientation,
+        axis,
         50,
         0.5f,
         1.0e-4f,
@@ -196,7 +196,7 @@ __global__ void validate_constraints_kernel(
     );
     result->perturbed_error_after =
         ppln::collision::g1_constraint_error_squared(
-            perturbed, parameters, rigid_orientation
+            perturbed, parameters, axis
         );
 
 }
@@ -212,8 +212,8 @@ void check_cuda(cudaError_t status, const char *operation) {
 }  // namespace
 
 int main(int argc, char **argv) {
-    const bool rigid_orientation =
-        argc > 1 && std::string(argv[1]) == "--rigid-orientation";
+    const bool axis =
+        argc > 1 && std::string(argv[1]) == "--axis";
     std::ifstream input("scripts/g1_problems.json");
     if (!input) {
         std::cerr << "failed to open scripts/g1_problems.json\n";
@@ -224,10 +224,10 @@ int main(int argc, char **argv) {
     const auto &problem = problems.at("problems").at("humanoid_shelf").at(0);
     const auto parameters = g1_constraint_parameters_from_problem(problem);
     const std::array<float, 35> start =
-        g1_start_from_problem(problem, rigid_orientation)
+        g1_start_from_problem(problem, axis)
             .get<std::array<float, 35>>();
     const std::array<float, 35> goal =
-        g1_goals_from_problem(problem, rigid_orientation)
+        g1_goals_from_problem(problem, axis)
             .at(0)
             .get<std::array<float, 35>>();
 
@@ -244,7 +244,7 @@ int main(int argc, char **argv) {
         device_start,
         device_goal,
         parameters,
-        rigid_orientation,
+        axis,
         device_result
     );
     check_cuda(cudaDeviceSynchronize(), "constraint validation kernel");
@@ -261,9 +261,9 @@ int main(int argc, char **argv) {
     cudaFree(device_start);
 
     const int constraint_dim =
-        ppln::collision::g1_constraint_dim(rigid_orientation);
-    std::cout << "G1 constraint validation (rigid orientation: "
-              << (rigid_orientation ? "on" : "off") << ")\n"
+        ppln::collision::g1_constraint_dim(axis);
+    std::cout << "G1 constraint validation (axis: "
+              << (axis ? "on" : "off") << ")\n"
               << "start error squared: " << result.start_error << "\n"
               << "goal error squared: " << result.goal_error << "\n"
               << "perturbed before: " << result.perturbed_error_before << "\n"

@@ -1,12 +1,11 @@
 <mujoco model="g1_humanoid_shelf">
   <!--
-    The G1 source model and meshes live in the sibling VAMP checkout.
-    Paths are resolved relative to this file:
-      PATACON/resources/g1 -> gh_ws/vamp
+    Official Unitree G1 model pinned by PATACON's repository-local
+    unitree_ros submodule. Paths are resolved relative to this file.
   -->
-  <include file="../../../../vamp/third_party/unitree_ros/robots/g1_description/g1_29dof.xml"/>
+  <include file="../../unitree_ros/robots/g1_description/g1_29dof.xml"/>
 
-  <compiler meshdir="../../../../vamp/third_party/unitree_ros/robots/g1_description/meshes"/>
+  <compiler meshdir="../../unitree_ros/robots/g1_description/meshes"/>
 
   <worldbody>
     <geom name="shelf_0" type="box"

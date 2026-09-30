@@ -190,8 +190,8 @@ bool check_configuration(
 
 int main(int argc, char **argv) {
     const char *problem_path = argc > 1 ? argv[1] : "scripts/g1_problems.json";
-    const bool rigid_orientation =
-        argc > 2 && std::string(argv[2]) == "--rigid-orientation";
+    const bool axis =
+        argc > 2 && std::string(argv[2]) == "--axis";
     std::ifstream input(problem_path);
     if (!input) {
         std::cerr << "failed to open " << problem_path << "\n";
@@ -199,9 +199,9 @@ int main(int argc, char **argv) {
     }
     const json problems = json::parse(input);
     const json &problem = problems.at("problems").at("humanoid_shelf").at(0);
-    const auto start = g1_start_from_problem(problem, rigid_orientation)
+    const auto start = g1_start_from_problem(problem, axis)
         .get<std::array<float, ppln::collision::G1_DIM>>();
-    const auto goal = g1_goals_from_problem(problem, rigid_orientation)
+    const auto goal = g1_goals_from_problem(problem, axis)
         .at(0)
         .get<std::array<float, ppln::collision::G1_DIM>>();
     const auto parameters = g1_constraint_parameters_from_problem(problem);
@@ -361,8 +361,8 @@ int main(int argc, char **argv) {
     cudaFree(device_obstacle);
     cudaFree(device_environment);
 
-    std::cout << "G1 collision validation (rigid orientation: "
-              << (rigid_orientation ? "on" : "off") << ")\n"
+    std::cout << "G1 collision validation (axis: "
+              << (axis ? "on" : "off") << ")\n"
               << "start empty environment: " << (start_free ? "free" : "collision") << "\n"
               << "goal empty environment: " << (goal_free ? "free" : "collision") << "\n"
               << "start problem environment: "

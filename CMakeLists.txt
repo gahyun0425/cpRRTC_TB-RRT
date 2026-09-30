@@ -96,7 +96,6 @@ add_executable(evaluate_mbm
 target_include_directories(evaluate_mbm
     PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
-    #${CMAKE_CURRENT_SOURCE_DIR}/extern/vamp/src/impl
 )
 
 
@@ -120,7 +119,6 @@ add_executable(single_mbm
 target_include_directories(single_mbm
     PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
-    #${CMAKE_CURRENT_SOURCE_DIR}/extern/vamp/src/impl
 )
 
 target_link_libraries(single_mbm
@@ -222,7 +220,7 @@ target_compile_options(generate_ffw_sg2_mobility_random_pairs PRIVATE
     -Wno-c++11-narrowing
 )
 
-### Reproducible G1 non-rigid-orientation start-goal generation
+### Reproducible G1 no-axis start-goal generation
 
 add_executable(generate_g1_random_pairs
     scripts/generate_g1_random_pairs.cu

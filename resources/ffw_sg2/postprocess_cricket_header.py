@@ -15,7 +15,7 @@ DEFAULT_OUTPUT = REPOSITORY_DIR / "src" / "robots" / "ffw_sg2.cuh"
 
 CRICKET_COMMIT = "98582c35d81c6ed0d8c4badb7fdf78327523524c"
 EXPECTED_RAW_SHA256 = (
-    "1d07485ad5763a55bcbc5a3baaf5ffc81a74cdb130a58dc098448b582bd31950"
+    "dbd1af2d4375affad4b51bcea53c8dfd0a97fda492f0e5f873e8287d095c1a9f"
 )
 EXPECTED_FINE_SPHERES = 124
 EXPECTED_APPROX_SPHERES = 27
@@ -23,6 +23,10 @@ EXPECTED_JOINTS = 16  # Pinocchio universe joint plus 15 active joints.
 EXPECTED_TRANSFORM_SLOTS = 2
 EXPECTED_RAW_STRIDE_OCCURRENCES = 5
 EXPECTED_UNSIGNED_SENTINEL_OCCURRENCES = 2
+PRESERVED_EXTENSION_FUNCTIONS = (
+    "ffw_sg2_self_collision_check_early",
+    "ffw_sg2_env_collision_check_early",
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -119,6 +123,56 @@ def deduplicate_generated_macros(source: str) -> str:
     return "\n".join(result) + "\n"
 
 
+def extract_function(source: str, name: str) -> str:
+    match = re.search(
+        rf"__device__ __forceinline__\s+bool\s+{re.escape(name)}\s*\(",
+        source,
+    )
+    if match is None:
+        raise ValueError(f"existing output is missing extension function {name}")
+
+    opening_brace = source.find("{", match.end())
+    if opening_brace < 0:
+        raise ValueError(f"extension function {name} has no body")
+    depth = 0
+    for index in range(opening_brace, len(source)):
+        if source[index] == "{":
+            depth += 1
+        elif source[index] == "}":
+            depth -= 1
+            if depth == 0:
+                return source[match.start() : index + 1]
+    raise ValueError(f"extension function {name} has an unterminated body")
+
+
+def preserve_extension_functions(generated: str, existing: str) -> str:
+    self_check = extract_function(existing, PRESERVED_EXTENSION_FUNCTIONS[0])
+    env_check = extract_function(existing, PRESERVED_EXTENSION_FUNCTIONS[1])
+
+    exact_env_marker = (
+        "// 4 threads per discretized motion for env collision check\n"
+        "template <>\n"
+        "__device__ bool env_collision_check<ppln::robots::FfwSg2>"
+    )
+    if generated.count(exact_env_marker) != 1:
+        raise ValueError("cannot locate the exact environment collision function")
+    generated = generated.replace(
+        exact_env_marker,
+        self_check + "\n\n" + exact_env_marker,
+        1,
+    )
+
+    namespace_end = generated.rfind("\n}")
+    if namespace_end < 0:
+        raise ValueError("cannot locate the generated collision namespace end")
+    return (
+        generated[:namespace_end]
+        + "\n\n"
+        + env_check
+        + generated[namespace_end:]
+    )
+
+
 def postprocess(source: str) -> str:
     validate_raw_header(source)
 
@@ -185,8 +239,13 @@ def postprocess(source: str) -> str:
 def main() -> None:
     args = parse_args()
     source = args.input.resolve().read_text(encoding="utf-8")
-    result = postprocess(source)
     output = args.output.resolve()
+    result = postprocess(source)
+    if output.is_file():
+        result = preserve_extension_functions(
+            result,
+            output.read_text(encoding="utf-8"),
+        )
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(result, encoding="utf-8")
 

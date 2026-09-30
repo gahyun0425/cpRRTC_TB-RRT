@@ -1,6 +1,13 @@
-[submodule "extern/vamp"]
-	path = extern/vamp
-	url = https://github.com/KavrakiLab/vamp.git
 [submodule "igris_c_description_public"]
 	path = igris_c_description_public
 	url = https://github.com/robrosinc/igris_c_description_public.git
+[submodule "franka_description"]
+	path = franka_description
+	url = https://github.com/frankarobotics/franka_description.git
+[submodule "ai_worker"]
+	path = ai_worker
+	url = https://github.com/ROBOTIS-GIT/ai_worker.git
+	branch = jazzy
+[submodule "unitree_ros"]
+	path = unitree_ros
+	url = https://github.com/unitreerobotics/unitree_ros.git

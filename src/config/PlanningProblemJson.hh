@@ -176,9 +176,9 @@ inline Json normalize_problem(
     // The existing G1 backend obtains its goal set through this field in both
     // orientation modes. Unified files may state the query only once.
     if (robot_name == "g1" &&
-        !problem.contains("rigid_orientation_endpoints") &&
+        !problem.contains("axis_endpoints") &&
         problem.contains("start") && problem.contains("goals")) {
-        problem["rigid_orientation_endpoints"] = {
+        problem["axis_endpoints"] = {
             {"start", problem.at("start")},
             {"goals", problem.at("goals")}
         };
@@ -223,21 +223,21 @@ inline void validate_query(Json &problem, const std::string &robot_name) {
         );
     }
 
-    if (problem.contains("rigid_orientation_endpoints")) {
-        auto &endpoints = problem.at("rigid_orientation_endpoints");
+    if (problem.contains("axis_endpoints")) {
+        auto &endpoints = problem.at("axis_endpoints");
         validate_configuration(
             endpoints.at("start"), dimension,
-            "rigid_orientation_endpoints.start"
+            "axis_endpoints.start"
         );
         if (!endpoints.at("goals").is_array() || endpoints.at("goals").empty()) {
             throw std::invalid_argument(
-                "rigid_orientation_endpoints requires at least one goal"
+                "axis_endpoints requires at least one goal"
             );
         }
         for (std::size_t index = 0; index < endpoints.at("goals").size(); ++index) {
             validate_configuration(
                 endpoints.at("goals").at(index), dimension,
-                "rigid_orientation_endpoints.goals["
+                "axis_endpoints.goals["
                     + std::to_string(index) + "]"
             );
         }

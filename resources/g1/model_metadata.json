@@ -1,0 +1,225 @@
+{
+  "generated": {
+    "resources/g1/g1_humanoid_shelf.xml": "4db87d2907e550d8c011179905d6f3700a0ea5fcbc8260f9f9bb011a1e2bb6ca",
+    "src/constraints/backends/g1_constraint.cuh": "ae69f931c5ce0d06d133f1393cf452cce4bd346e99314b8f420a22f25b048fb5",
+    "src/robots/g1_collision.cuh": "732264bd3829e15a67989f9ede61a61230facff16d9f9c008fa63cc54f01426a",
+    "src/robots/g1_kinematics.cuh": "120bf1167ccb13e4e824af411bc689b29ad142fc8d74cb3c5c4c4a55378b92bd"
+  },
+  "patacon_contract": {
+    "base_coordinates": [
+      "x",
+      "y",
+      "z",
+      "roll",
+      "pitch",
+      "yaw"
+    ],
+    "base_spheres": 133,
+    "end_effectors": [
+      "left_rubber_hand",
+      "right_rubber_hand",
+      "left_foot",
+      "right_foot"
+    ],
+    "hand_spheres_per_hand": 16,
+    "joint_limits_rad": [
+      [
+        -2.5307,
+        2.8798
+      ],
+      [
+        -0.5236,
+        2.9671
+      ],
+      [
+        -2.7576,
+        2.7576
+      ],
+      [
+        -0.087267,
+        2.8798
+      ],
+      [
+        -0.87267,
+        0.5236
+      ],
+      [
+        -0.2618,
+        0.2618
+      ],
+      [
+        -2.5307,
+        2.8798
+      ],
+      [
+        -2.9671,
+        0.5236
+      ],
+      [
+        -2.7576,
+        2.7576
+      ],
+      [
+        -0.087267,
+        2.8798
+      ],
+      [
+        -0.87267,
+        0.5236
+      ],
+      [
+        -0.2618,
+        0.2618
+      ],
+      [
+        -2.618,
+        2.618
+      ],
+      [
+        -0.52,
+        0.52
+      ],
+      [
+        -0.52,
+        0.52
+      ],
+      [
+        -3.0892,
+        2.6704
+      ],
+      [
+        -1.5882,
+        2.2515
+      ],
+      [
+        -2.618,
+        2.618
+      ],
+      [
+        -1.0472,
+        2.0944
+      ],
+      [
+        -1.972222054,
+        1.972222054
+      ],
+      [
+        -1.614429558,
+        1.614429558
+      ],
+      [
+        -1.614429558,
+        1.614429558
+      ],
+      [
+        -3.0892,
+        2.6704
+      ],
+      [
+        -2.2515,
+        1.5882
+      ],
+      [
+        -2.618,
+        2.618
+      ],
+      [
+        -1.0472,
+        2.0944
+      ],
+      [
+        -1.972222054,
+        1.972222054
+      ],
+      [
+        -1.614429558,
+        1.614429558
+      ],
+      [
+        -1.614429558,
+        1.614429558
+      ]
+    ],
+    "joint_order": [
+      "left_hip_pitch_joint",
+      "left_hip_roll_joint",
+      "left_hip_yaw_joint",
+      "left_knee_joint",
+      "left_ankle_pitch_joint",
+      "left_ankle_roll_joint",
+      "right_hip_pitch_joint",
+      "right_hip_roll_joint",
+      "right_hip_yaw_joint",
+      "right_knee_joint",
+      "right_ankle_pitch_joint",
+      "right_ankle_roll_joint",
+      "waist_yaw_joint",
+      "waist_roll_joint",
+      "waist_pitch_joint",
+      "left_shoulder_pitch_joint",
+      "left_shoulder_roll_joint",
+      "left_shoulder_yaw_joint",
+      "left_elbow_joint",
+      "left_wrist_roll_joint",
+      "left_wrist_pitch_joint",
+      "left_wrist_yaw_joint",
+      "right_shoulder_pitch_joint",
+      "right_shoulder_roll_joint",
+      "right_shoulder_yaw_joint",
+      "right_elbow_joint",
+      "right_wrist_roll_joint",
+      "right_wrist_pitch_joint",
+      "right_wrist_yaw_joint"
+    ],
+    "planning_dof": 35,
+    "self_collision_pairs": 6888,
+    "total_spheres": 165
+  },
+  "source": {
+    "commit": "da52948f035165aae2709d30255f5cd3e62875a0",
+    "files_sha256": {
+      "LICENSE": "84aac59fd3246e3ddc49d1387644e8fcf43b0def4f0b9fe687f372e90446df2d",
+      "robots/g1_description/README.md": "0f3d66629ca904b3d01d8b20186b26d17cca513d7217f66649dc68523aa94f43",
+      "robots/g1_description/g1_29dof.urdf": "e1dc89366bf96aa33ba4ef211884f6d81320ddd2ac6f8b1ad82986e64008be31",
+      "robots/g1_description/g1_29dof.xml": "dfcfd8b41d0980695d0e75d76fdfd9965f71431a1c67afc31c8dbe730eb66c72",
+      "robots/g1_description/meshes/head_link.STL": "005fb67fbd3eff94aa8bf4a6e83238174e9f91b6721f7111594322f223724411",
+      "robots/g1_description/meshes/left_ankle_pitch_link.STL": "d49e3abc6f5b12e532062cd575b87b5ef40cd2a3fc18f54a1ca5bba4f773d51d",
+      "robots/g1_description/meshes/left_ankle_roll_link.STL": "c4092af943141d4d9f74232f3cfa345afc6565f46a077793b8ae0e68b39dc33f",
+      "robots/g1_description/meshes/left_elbow_link.STL": "fa752198accd104d5c4c3a01382e45165b944fbbc5acce085059223324e5bed3",
+      "robots/g1_description/meshes/left_hip_pitch_link.STL": "4725168105ee768ee31638ef22b53f6be2d7641bfd7cfefe803488d884776fa4",
+      "robots/g1_description/meshes/left_hip_roll_link.STL": "91f25922ee8a7c3152790051bebad17b4d9cd243569c38fe340285ff93a97acf",
+      "robots/g1_description/meshes/left_hip_yaw_link.STL": "a16d88aa6ddac8083aa7ad55ed317bea44b1fa003d314fba88965b7ed0f3b55b",
+      "robots/g1_description/meshes/left_knee_link.STL": "8d92b9e3d3a636761150bb8025e32514c4602b91c7028d523ee42b3e632de477",
+      "robots/g1_description/meshes/left_rubber_hand.STL": "cff2221a690fa69303f61fce68f2d155c1517b52efb6ca9262dd56e0bc6e70fe",
+      "robots/g1_description/meshes/left_shoulder_pitch_link.STL": "f0d1cfd02fcf0d42f95e678eeca33da3afbcc366ffba5c052847773ec4f31d52",
+      "robots/g1_description/meshes/left_shoulder_roll_link.STL": "fb9df21687773522598dc384f1a2945c7519f11cbc8bd372a49170316d6eee88",
+      "robots/g1_description/meshes/left_shoulder_yaw_link.STL": "1aa97e9748e924336567992181f78c7cd0652fd52a4afcca3df6b2ef6f9e712e",
+      "robots/g1_description/meshes/left_wrist_pitch_link.STL": "b251d8e05047f695d0f536cd78c11973cfa4e78d08cfe82759336cc3471de3a9",
+      "robots/g1_description/meshes/left_wrist_roll_link.STL": "edc387c9a0ba8c2237e9b296d32531426fabeb6f53e58df45c76106bca74148c",
+      "robots/g1_description/meshes/left_wrist_yaw_link.STL": "83f8fb3a726bf9613d65dd14f0f447cb918c3c95b3938042a0c9c09749267d3b",
+      "robots/g1_description/meshes/logo_link.STL": "8571a0a19bc4916fa55f91449f51d5fdefd751000054865a842449429d5f155b",
+      "robots/g1_description/meshes/pelvis.STL": "5ba6bbc888e630550140d3c26763f10206da8c8bd30ed886b8ede41c61f57a31",
+      "robots/g1_description/meshes/pelvis_contour_link.STL": "5cc5c2c7a312329e3feeb2b03d3fc09fc29705bd01864f6767e51be959662420",
+      "robots/g1_description/meshes/right_ankle_pitch_link.STL": "15be426539ec1be70246d4d82a168806db64a41301af8b35c197a33348c787a9",
+      "robots/g1_description/meshes/right_ankle_roll_link.STL": "4b66222ea56653e627711b56d0a8949b4920da5df091da0ceb343f54e884e3a5",
+      "robots/g1_description/meshes/right_elbow_link.STL": "1be925d7aa268bb8fddf5362b9173066890c7d32092c05638608126e59d1e2ab",
+      "robots/g1_description/meshes/right_hip_pitch_link.STL": "e4f3c99d7f4a7d34eadbef9461fc66e3486cb5442db1ec50c86317d459f1a9c6",
+      "robots/g1_description/meshes/right_hip_roll_link.STL": "4c254ef66a356f492947f360dd931965477b631e3fcc841f91ccc46d945d54f6",
+      "robots/g1_description/meshes/right_hip_yaw_link.STL": "e479c2936ca2057e9eb2f7dff6c189b7419d7b8484dea0b298cbb36a2a6aa668",
+      "robots/g1_description/meshes/right_knee_link.STL": "63c4008449c9bbe701a6e2b557b7a252e90cf3a5abcf54cee46862b9a69f8ec8",
+      "robots/g1_description/meshes/right_rubber_hand.STL": "99533b778bca6246144fa511bb9d4e555e075c641f2a0251e04372869cd99d67",
+      "robots/g1_description/meshes/right_shoulder_pitch_link.STL": "24cdb387e0128dfe602770a81c56cdce3a0181d34d039a11d1aaf8819b7b8c02",
+      "robots/g1_description/meshes/right_shoulder_roll_link.STL": "962b97c48f9ce9e8399f45dd9522e0865d19aa9fd299406b2d475a8fc4a53e81",
+      "robots/g1_description/meshes/right_shoulder_yaw_link.STL": "a0b76489271da0c72461a344c9ffb0f0c6e64f019ea5014c1624886c442a2fe5",
+      "robots/g1_description/meshes/right_wrist_pitch_link.STL": "d22f8f3b3127f15a63e5be1ee273cd5075786c3142f1c3d9f76cbf43d2a26477",
+      "robots/g1_description/meshes/right_wrist_roll_link.STL": "a7ee9212ff5b94d6cb7f52bb1bbf3f352194d5b598acff74f4c77d340c5b344f",
+      "robots/g1_description/meshes/right_wrist_yaw_link.STL": "bc9dece2d12509707e0057ba2e48df8f3d56db0c79410212963a25e8a50f61a6",
+      "robots/g1_description/meshes/torso_link.STL": "e96d023f0368a4e3450b86ca5d4f10227d8141156a373e7da8cb3c93266523e0",
+      "robots/g1_description/meshes/waist_roll_link.STL": "34f0aa73f41131230be4d25876c944fdf6c24d62553f199ff8b980c15e8913df",
+      "robots/g1_description/meshes/waist_support_link.STL": "1fae9e1bb609848a1667d32eed8d6083ae443538a306843056a2a660f1b2926a",
+      "robots/g1_description/meshes/waist_yaw_link.STL": "2883f20e03f09b669b5b4ce10677ee6b5191c0934b584d7cbaef2d0662856ffb"
+    },
+    "model": "g1_29dof",
+    "repository": "https://github.com/unitreerobotics/unitree_ros.git"
+  }
+}

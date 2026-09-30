@@ -11,6 +11,11 @@ from pathlib import Path
 import sys
 import time
 
+from mujoco_primitive_environment import (
+    add_primitive_environment,
+    normalize_primitive_environment,
+    primitive_count,
+)
 from mujoco_video import (
     DEFAULT_TRAJECTORY_ACCELERATION,
     DEFAULT_TRAJECTORY_SPEED,
@@ -61,9 +66,7 @@ GRIPPER_JOINT_NAMES = tuple(
     for index in range(1, 5)
 )
 ATTACHED_OBJECT_FRAME_OFFSET = (0.1, 0.0, 0.0)
-ACTUATOR_NAME_BY_JOINT = {
-    "lift_joint": "actuator_lift_joint",
-}
+ACTUATOR_NAME_BY_JOINT = {}
 SINGLE_ARM_PLANNING_JOINTS = (
     "lift_joint",
     "arm_r_joint1",
@@ -80,9 +83,6 @@ SUPPORTED_JOINT_ORDERS = {
     MOBILITY_PLANNING_JOINTS,
     SINGLE_ARM_PLANNING_JOINTS,
 }
-TRAY_SHELF_MATERIAL_NAME = "M_hinge_blue"
-TRAY_SHELF_RGBA = (1.0, 1.0, 1.0, 1.0)
-TRAY_ROOM_GEOM_NAMES = ("floor", "wall_left", "wall_front")
 FRANKA_FLOOR_RGBA = (0.48, 0.48, 0.48, 1.0)
 
 
@@ -198,52 +198,44 @@ def load_trajectories(path: Path):
     if not isinstance(raw_trajectories, list) or not raw_trajectories:
         raise ValueError("trajectory bundle must contain at least one trajectory")
     trajectories = []
+    environment = None
     for index, trajectory in enumerate(raw_trajectories):
         label = str(trajectory.get("label", f"trajectory {index + 1}"))
         waypoints, offset = normalize_trajectory(
             trajectory, joint_names, label
         )
+        trajectory_environment = normalize_primitive_environment(
+            trajectory.get("environment"), label
+        )
+        if environment is None:
+            environment = trajectory_environment
+        elif trajectory_environment != environment:
+            raise ValueError(
+                "all FFW-SG2 trajectories in one replay must use the same "
+                "primitive environment"
+            )
         trajectories.append((label, waypoints, offset))
-    return joint_names, trajectories
+    return joint_names, trajectories, environment
+
+
+def build_model(mujoco, model_path: Path, environment: dict[str, list]):
+    spec = mujoco.MjSpec.from_file(str(model_path))
+    add_primitive_environment(mujoco, spec, environment, physical=True)
+    return spec.compile()
 
 
 def apply_visual_style(mujoco, model, joint_names: tuple[str, ...]) -> None:
-    """Apply scene colors that are specific to the dual-arm tray visualizer."""
-    if joint_names != DUAL_ARM_PLANNING_JOINTS:
-        return
-
-    for geom_name in TRAY_ROOM_GEOM_NAMES:
-        geom_id = mujoco.mj_name2id(
-            model,
-            mujoco.mjtObj.mjOBJ_GEOM,
-            geom_name,
-        )
-        if geom_id < 0:
-            raise ValueError(f"MuJoCo model is missing tray room geom: {geom_name}")
-        model.geom_matid[geom_id] = -1
-        model.geom_rgba[geom_id] = FRANKA_FLOOR_RGBA
-
-    material_id = mujoco.mj_name2id(
+    """Apply the common neutral color to the visualization floor."""
+    del joint_names
+    floor_id = mujoco.mj_name2id(
         model,
-        mujoco.mjtObj.mjOBJ_MATERIAL,
-        TRAY_SHELF_MATERIAL_NAME,
+        mujoco.mjtObj.mjOBJ_GEOM,
+        "floor",
     )
-    if material_id < 0:
-        raise ValueError(
-            f"MuJoCo model is missing tray shelf material: "
-            f"{TRAY_SHELF_MATERIAL_NAME}"
-        )
-
-    shelf_geom_ids = [
-        geom_id
-        for geom_id in range(model.ngeom)
-        if int(model.geom_matid[geom_id]) == material_id
-    ]
-    if not shelf_geom_ids:
-        raise ValueError("MuJoCo model has no tray shelf visual geoms")
-    for geom_id in shelf_geom_ids:
-        model.geom_matid[geom_id] = -1
-        model.geom_rgba[geom_id] = TRAY_SHELF_RGBA
+    if floor_id < 0:
+        raise ValueError("MuJoCo model is missing floor geom: floor")
+    model.geom_matid[floor_id] = -1
+    model.geom_rgba[floor_id] = FRANKA_FLOOR_RGBA
 
 
 def resolve_qpos_addresses(mujoco, model, joint_names) -> list[int | None]:
@@ -266,11 +258,12 @@ def resolve_qpos_addresses(mujoco, model, joint_names) -> list[int | None]:
     return addresses
 
 
-def resolve_ctrl_addresses(mujoco, model, joint_names) -> list[int]:
-    addresses: list[int] = []
+def resolve_ctrl_addresses(mujoco, model, joint_names) -> list[int | None]:
+    addresses: list[int | None] = []
     for joint_name in joint_names:
         if joint_name in MOBILITY_BASE_JOINTS:
-            raise ValueError("ctrl replay does not support virtual mobility-base joints")
+            addresses.append(None)
+            continue
         actuator_name = ACTUATOR_NAME_BY_JOINT.get(joint_name, joint_name)
         actuator_id = mujoco.mj_name2id(
             model,
@@ -615,6 +608,7 @@ def save_video(
     joint_names,
     waypoints,
     attached_object_frame_offset,
+    environment,
     fps: float,
     speed: float,
     input_mode: str,
@@ -632,7 +626,7 @@ def save_video(
             "MuJoCo is required for MP4 rendering: python3 -m pip install mujoco"
         ) from error
 
-    model = mujoco.MjModel.from_xml_path(str(model_path))
+    model = build_model(mujoco, model_path, environment)
     apply_visual_style(mujoco, model, joint_names)
     configure_model_render_quality(model)
     model.vis.global_.offwidth = max(int(model.vis.global_.offwidth), width)
@@ -729,6 +723,7 @@ def replay(
     model_path: Path,
     joint_names,
     trajectories,
+    environment,
     fps: float,
     speed: float,
     input_mode: str,
@@ -743,7 +738,7 @@ def replay(
             "MuJoCo Python package is required: python3 -m pip install mujoco"
         ) from error
 
-    model = mujoco.MjModel.from_xml_path(str(model_path))
+    model = build_model(mujoco, model_path, environment)
     apply_visual_style(mujoco, model, joint_names)
     data = mujoco.MjData(model)
     qpos_addresses = resolve_qpos_addresses(mujoco, model, joint_names)
@@ -833,14 +828,14 @@ def main() -> int:
     if not trajectory_path.is_file():
         raise FileNotFoundError(f"trajectory not found: {trajectory_path}")
 
-    joint_names, trajectories = load_trajectories(trajectory_path)
+    joint_names, trajectories, environment = load_trajectories(trajectory_path)
     validate_only = args.validate_only or os.environ.get(
         "PATACON_MUJOCO_VALIDATE_ONLY"
     ) == "1"
     if validate_only:
         import mujoco
 
-        model = mujoco.MjModel.from_xml_path(str(model_path))
+        model = build_model(mujoco, model_path, environment)
         apply_visual_style(mujoco, model, joint_names)
         data = mujoco.MjData(model)
         qpos_addresses = resolve_qpos_addresses(mujoco, model, joint_names)
@@ -876,6 +871,7 @@ def main() -> int:
         print(
             f"validated {len(trajectories)} trajectories, "
             f"{waypoint_count} waypoints, {len(joint_names)} joints, "
+            f"{primitive_count(environment)} environment primitives, "
             f"model nq={model.nq}"
         )
         return 0
@@ -889,6 +885,7 @@ def main() -> int:
             joint_names,
             waypoints,
             attached_object_frame_offset,
+            environment,
             args.fps,
             args.speed,
             args.input_mode,
@@ -905,6 +902,7 @@ def main() -> int:
         model_path,
         joint_names,
         trajectories,
+        environment,
         args.fps,
         args.speed,
         args.input_mode,

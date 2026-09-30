@@ -22,7 +22,7 @@ namespace ppln::robots {
         static constexpr int batch_size = 16;
         static constexpr int fine_sphere_count = 118;
         static constexpr int approximate_sphere_count = 22;
-        // Both identical arms share the legacy Panda link-flag slots.  A flag
+        // Both identical arms share the FER link-flag slots. A flag
         // activates the corresponding link on both arms during refinement.
         static constexpr int joint_flag_stride = 20;
         static constexpr int transform_slots = 2;

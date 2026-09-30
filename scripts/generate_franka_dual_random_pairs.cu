@@ -21,7 +21,7 @@
 #include "src/collision/factory.hh"
 #include "src/planning/RobotCollisionTraits.hh"
 #include "src/planning/utils.cuh"
-#include "src/robots/panda.cuh"
+#include "src/robots/franka_fer.cuh"
 #include "src/robots/franka_collision.cuh"
 #include "src/robots/franka_constraint.cuh"
 
@@ -40,7 +40,7 @@ constexpr int kDefaultCount = 100;
 constexpr int kCandidateBatchSize = 512;
 constexpr int kDefaultMaximumCandidates = 200000;
 constexpr std::uint64_t kDefaultSeed = 20260922ULL;
-constexpr std::uint64_t kRigidOrientationSeed = 20260923ULL;
+constexpr std::uint64_t kAxisSeed = 20260923ULL;
 constexpr float kDuplicateDistanceSquared = 1.0e-8f;
 constexpr float kMinimumPairDistanceSquared = 0.04f;
 constexpr float kProjectionTolerance = 1.0e-3f;
@@ -89,17 +89,17 @@ struct Options {
     std::filesystem::path template_path =
         "scripts/franka_problems.json";
     std::filesystem::path output_path =
-        "scripts/franka_dual_random_pairs_no_rigid_orientation_100.json";
+        "scripts/franka_dual_random_pairs_no_axis_100.json";
     std::string source_name = "demo";
     int source_index = 1;
     std::string problem_name =
-        "franka_dual_random_pairs_no_rigid_orientation";
+        "franka_dual_random_pairs_no_axis";
     int count = kDefaultCount;
     int maximum_candidates = kDefaultMaximumCandidates;
     std::uint64_t seed = kDefaultSeed;
     float start_sigma = 0.12f;
     float goal_sigma = 0.16f;
-    bool rigid_orientation = false;
+    bool axis = false;
     bool output_path_provided = false;
     bool problem_name_provided = false;
     bool seed_provided = false;
@@ -200,7 +200,7 @@ void print_usage() {
         << "  --source-name NAME --source-index N\n"
         << "  --problem-name NAME --count N --seed N\n"
         << "  --start-sigma RAD --goal-sigma RAD\n"
-        << "  --rigid-orientation\n"
+        << "  --axis\n"
         << "  --start-region xmin xmax ymin ymax zmin zmax\n"
         << "  --goal-region xmin xmax ymin ymax zmin zmax\n"
         << "  --max-candidates N\n";
@@ -243,8 +243,8 @@ Options parse_options(int argc, char **argv) {
             options.goal_sigma = parse_positive_float(
                 argument, require_value()
             );
-        } else if (argument == "--rigid-orientation") {
-            options.rigid_orientation = true;
+        } else if (argument == "--axis") {
+            options.axis = true;
         } else if (argument == "--start-region") {
             options.start_region = parse_region(
                 argc, argv, index, argument
@@ -266,17 +266,17 @@ Options parse_options(int argc, char **argv) {
             throw std::invalid_argument("unknown option: " + argument);
         }
     }
-    if (options.rigid_orientation) {
+    if (options.axis) {
         if (!options.output_path_provided) {
             options.output_path =
-                "scripts/franka_dual_random_pairs_rigid_orientation_100.json";
+                "scripts/franka_dual_random_pairs_axis_100.json";
         }
         if (!options.problem_name_provided) {
             options.problem_name =
-                "franka_dual_random_pairs_rigid_orientation";
+                "franka_dual_random_pairs_axis";
         }
         if (!options.seed_provided) {
-            options.seed = kRigidOrientationSeed;
+            options.seed = kAxisSeed;
         }
     }
     return options;
@@ -483,7 +483,7 @@ void destroy_device_environment(DeviceEnvironment &device) {
 __device__ bool project_configuration(
     float configuration[kDimension],
     const ConstraintParameters &parameters,
-    bool rigid_orientation
+    bool axis
 ) {
     ppln::collision::franka_clamp_configuration<Robot>(configuration);
     for (int iteration = 0; iteration < kProjectionIterations; ++iteration) {
@@ -492,7 +492,7 @@ __device__ bool project_configuration(
         if (!ppln::collision::franka_task_correction<Robot>(
                 configuration,
                 parameters,
-                rigid_orientation,
+                axis,
                 kProjectionDamping,
                 kProjectionMaximumStep,
                 correction,
@@ -509,7 +509,7 @@ __device__ bool project_configuration(
         ppln::collision::franka_clamp_configuration<Robot>(configuration);
     }
     return ppln::collision::franka_constraint_error_norm<Robot>(
-        configuration, parameters, rigid_orientation
+        configuration, parameters, axis
     ) < kProjectionTolerance;
 }
 
@@ -573,7 +573,7 @@ __global__ void project_and_validate_candidates(
     const CandidateInput *inputs,
     CandidateResult *results,
     ppln::collision::Environment<float> *environment,
-    bool rigid_orientation,
+    bool axis,
     int count
 ) {
     using Traits = ppln::robots::CollisionTraits<Robot>;
@@ -598,11 +598,11 @@ __global__ void project_and_validate_candidates(
     __syncthreads();
     if (tid == 0) {
         const bool start_projection_valid = project_configuration(
-            result.start, input.parameters, rigid_orientation
+            result.start, input.parameters, axis
         );
         const bool goal_projection_valid = start_projection_valid &&
             project_configuration(
-                result.goal, input.parameters, rigid_orientation
+                result.goal, input.parameters, axis
             );
         projection_valid =
             start_projection_valid && goal_projection_valid ? 1 : 0;
@@ -610,11 +610,11 @@ __global__ void project_and_validate_candidates(
         if (projection_valid != 0) {
             result.start_constraint_residual =
                 ppln::collision::franka_constraint_error_norm<Robot>(
-                    result.start, input.parameters, rigid_orientation
+                    result.start, input.parameters, axis
                 );
             result.goal_constraint_residual =
                 ppln::collision::franka_constraint_error_norm<Robot>(
-                    result.goal, input.parameters, rigid_orientation
+                    result.goal, input.parameters, axis
                 );
             payload_position(result.start, result.start_payload_position);
             payload_position(result.goal, result.goal_payload_position);
@@ -683,7 +683,7 @@ CandidateInput make_candidate_input(
 std::vector<CandidateResult> run_candidate_batch(
     const std::vector<CandidateInput> &inputs,
     ppln::collision::Environment<float> *environment,
-    bool rigid_orientation,
+    bool axis,
     CandidateInput *device_inputs,
     CandidateResult *device_results
 ) {
@@ -708,7 +708,7 @@ std::vector<CandidateResult> run_candidate_batch(
         device_inputs,
         device_results,
         environment,
-        rigid_orientation,
+        axis,
         static_cast<int>(inputs.size())
     );
     check_cuda(cudaGetLastError(), "candidate validation launch");
@@ -831,7 +831,7 @@ std::vector<CandidateResult> sample_pairs(
         const auto results = run_candidate_batch(
             inputs,
             environment,
-            options.rigid_orientation,
+            options.axis,
             device_inputs,
             device_results
         );
@@ -890,7 +890,7 @@ std::vector<CandidateResult> sample_pairs(
 CandidateResult validate_reference_pair(
     const Configuration &start,
     const Configuration &goal,
-    bool rigid_orientation,
+    bool axis,
     ppln::collision::Environment<float> *environment
 ) {
     CandidateInput input{};
@@ -908,7 +908,7 @@ CandidateResult validate_reference_pair(
     const auto results = run_candidate_batch(
         {input},
         environment,
-        rigid_orientation,
+        axis,
         device_input,
         device_result
     );
@@ -965,7 +965,7 @@ json generate_output(
         problem["pair_id"] = index + 1;
         problem["sampling"] = {
             {"base_seed", options.seed},
-            {"rigid_orientation", options.rigid_orientation},
+            {"axis", options.axis},
             {"start_payload_position_m",
                 position_json(pairs[index].start_payload_position)},
             {"goal_payload_position_m",
@@ -985,18 +985,18 @@ json generate_output(
             {"executable", "build/generate_franka_dual_random_pairs"},
             {"seed", options.seed},
             {"count", options.count},
-            {"sampling", options.rigid_orientation
+            {"sampling", options.axis
                 ? "Gaussian joint perturbation; both endpoints projected onto the source Franka dual relative pose plus world-yaw axis, then rejected on validation failure"
                 : "Gaussian joint perturbation; both endpoints projected onto the source Franka dual relative pose, then rejected on validation failure"},
             {"start_joint_sigma_rad", options.start_sigma},
             {"goal_joint_sigma_rad", options.goal_sigma},
-            {"rigid_orientation", options.rigid_orientation},
+            {"axis", options.axis},
             {"constraint_dimension",
                 ppln::collision::FRANKA_POSE_CONSTRAINT_DIM +
-                (options.rigid_orientation
+                (options.axis
                     ? ppln::collision::FRANKA_WORLD_YAW_CONSTRAINT_DIM
                     : 0)},
-            {"tangent_dimension", options.rigid_orientation ? 6 : 8},
+            {"tangent_dimension", options.axis ? 6 : 8},
             {"source_problem", {
                 {"file", options.template_path.string()},
                 {"name", options.source_name},
@@ -1015,8 +1015,8 @@ json generate_output(
                 {"joint_limits", true},
                 {"dual_relative_pose_constraint", true},
                 {"source_dual_relative_pose_preserved", true},
-                {"rigid_orientation_world_yaw_axis_constraint",
-                    options.rigid_orientation},
+                {"world_yaw_axis_constraint",
+                    options.axis},
                 {"robot_self_collision", true},
                 {"robot_environment_collision", true},
                 {"attached_object_environment_collision", true},
@@ -1074,7 +1074,7 @@ int main(int argc, char **argv) {
         const CandidateResult reference = validate_reference_pair(
             reference_start,
             reference_goal,
-            options.rigid_orientation,
+            options.axis,
             device_environment.environment
         );
         if (!options.start_region_provided) {
@@ -1107,9 +1107,9 @@ int main(int argc, char **argv) {
         destroy_device_environment(device_environment);
         std::cout << "generated " << options.count
                   << " collision-free Franka dual "
-                  << (options.rigid_orientation
-                      ? "rigid-orientation"
-                      : "non-rigid-orientation")
+                  << (options.axis
+                      ? "axis"
+                      : "no-axis")
                   << " start-goal pairs: "
                   << options.output_path << '\n';
         return 0;

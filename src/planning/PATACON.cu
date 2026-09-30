@@ -5,7 +5,7 @@
 #include "utils.cuh"
 #include "PATACON_settings.hh"
 #include "src/collision/environment.hh"
-#include "src/robots/panda.cuh"
+#include "src/robots/franka_fer.cuh"
 #include "src/robots/franka_collision.cuh"
 #include "src/robots/franka_constraint.cuh"
 #include "src/robots/ffw_sg2.cuh"
@@ -49,7 +49,7 @@ namespace PATACON {
     __global__ void project_g1_configuration_kernel(
         float *configuration,
         constraints::G1ConstraintParameters parameters,
-        bool rigid_orientation,
+        bool axis,
         int max_iterations,
         float alpha,
         float damping,
@@ -60,7 +60,7 @@ namespace PATACON {
             *success = collision::g1_project_configuration(
                 configuration,
                 parameters,
-                rigid_orientation,
+                axis,
                 max_iterations,
                 alpha,
                 damping,
@@ -142,7 +142,7 @@ namespace PATACON {
         project_g1_configuration_kernel<<<1, 1>>>(
             device_configuration,
             settings.g1_constraints,
-            settings.rigid_orientation,
+            settings.axis,
             settings.projection_max_iters,
             settings.projection_alpha,
             settings.projection_damping,
@@ -174,6 +174,25 @@ namespace PATACON {
         return success;
     }
 
+    static_assert(
+        robots::CollisionTraits<robots::FrankaSingle>::batch_size ==
+            collision::FRANKA_FER_BATCH_SIZE &&
+        robots::CollisionTraits<robots::FrankaSingle>::fine_sphere_count ==
+            collision::FRANKA_FER_SPHERE_COUNT &&
+        robots::CollisionTraits<robots::FrankaSingle>::approximate_sphere_count ==
+            collision::FRANKA_FER_APPROX_SPHERE_COUNT &&
+        robots::CollisionTraits<robots::FrankaSingle>::joint_flag_stride ==
+            collision::FRANKA_COLLISION_JOINT_FLAG_STRIDE &&
+        robots::CollisionTraits<robots::FrankaSingle>::transform_slots == 1 &&
+        robots::CollisionTraits<robots::Franka>::fine_sphere_count ==
+            2 * collision::FRANKA_FER_SPHERE_COUNT &&
+        robots::CollisionTraits<robots::Franka>::approximate_sphere_count ==
+            2 * collision::FRANKA_FER_APPROX_SPHERE_COUNT &&
+        robots::CollisionTraits<robots::Franka>::joint_flag_stride ==
+            collision::FRANKA_COLLISION_JOINT_FLAG_STRIDE &&
+        robots::CollisionTraits<robots::Franka>::transform_slots == 2,
+        "Franka collision traits differ from the FER sphere model"
+    );
     static_assert(robots::CollisionTraits<robots::FfwSg2>::batch_size== FFW_SG2_BATCH_SIZE,
         "FFW-SG2 batch size differs from the generated Cricket code"
     );
@@ -380,17 +399,17 @@ namespace PATACON {
     template <typename Robot>
     __device__ __forceinline__ int patacon_active_tangent_dim() {
         if constexpr (std::is_same_v<Robot, robots::FfwSg2>) {
-            return d_settings.rigid_orientation ? 7 : FFW_SG2_TANGENT_DIM;
+            return d_settings.axis ? 7 : FFW_SG2_TANGENT_DIM;
         } else if constexpr (std::is_same_v<Robot, robots::FfwSg2Mobility>) {
             return FFW_SG2_MOBILITY_TANGENT_DIM;
         } else if constexpr (std::is_same_v<Robot, robots::G1>) {
-            return collision::g1_tangent_dim(d_settings.rigid_orientation);
+            return collision::g1_tangent_dim(d_settings.axis);
         } else if constexpr (std::is_same_v<Robot, robots::IgrisC>) {
             return collision::IGRIS_C_TANGENT_DIM;
         } else if constexpr (std::is_same_v<Robot, robots::FrankaSingle>) {
-            return d_settings.rigid_orientation ? 5 : 7;
+            return d_settings.axis ? 5 : 7;
         } else if constexpr (std::is_same_v<Robot, robots::Franka>) {
-            return d_settings.rigid_orientation ? 6 : 8;
+            return d_settings.axis ? 6 : 8;
         }
         return 0;
     }
@@ -1051,7 +1070,7 @@ namespace PATACON {
             motion_segment,
             motion_segment_next,
             d_settings.granularity,
-            d_settings.rigid_orientation,
+            d_settings.axis,
 
             projection_valid,
             projection_prog,
@@ -1173,7 +1192,7 @@ namespace PATACON {
             motion_segment_next,
             d_settings.granularity,
             d_settings.g1_constraints,
-            d_settings.rigid_orientation,
+            d_settings.axis,
             projection_valid,
             projection_prog,
             projection_success,
@@ -1266,7 +1285,7 @@ namespace PATACON {
             motion_segment_next,
             d_settings.granularity,
             d_settings.franka_constraints,
-            d_settings.rigid_orientation,
+            d_settings.axis,
             projection_valid,
             projection_prog,
             projection_success,
@@ -1309,7 +1328,7 @@ namespace PATACON {
             motion_segment_next,
             d_settings.granularity,
             d_settings.franka_constraints,
-            d_settings.rigid_orientation,
+            d_settings.axis,
             projection_valid,
             projection_prog,
             projection_success,
@@ -1372,7 +1391,7 @@ namespace PATACON {
                 motion_segment,
                 motion_segment_next,
                 waypoint_count,
-                d_settings.rigid_orientation,
+                d_settings.axis,
                 projection_valid,
                 projection_prog,
                 projection_success,
@@ -1435,7 +1454,7 @@ namespace PATACON {
                 motion_segment_next,
                 waypoint_count,
                 d_settings.g1_constraints,
-                d_settings.rigid_orientation,
+                d_settings.axis,
                 projection_valid,
                 projection_prog,
                 projection_success,
@@ -1480,7 +1499,7 @@ namespace PATACON {
                 motion_segment_next,
                 waypoint_count,
                 d_settings.franka_constraints,
-                d_settings.rigid_orientation,
+                d_settings.axis,
                 projection_valid,
                 projection_prog,
                 projection_success,
@@ -1501,7 +1520,7 @@ namespace PATACON {
                 motion_segment_next,
                 waypoint_count,
                 d_settings.franka_constraints,
-                d_settings.rigid_orientation,
+                d_settings.axis,
                 projection_valid,
                 projection_prog,
                 projection_success,
@@ -1745,7 +1764,7 @@ namespace PATACON {
             if constexpr (std::is_same_v<Robot, robots::FfwSg2>) {
                 basis_ok = ppln::collision::ffw_sg2_tangent_basis(
                     q,
-                    d_settings.rigid_orientation,
+                    d_settings.axis,
                     basis
                 );
             } else if constexpr (std::is_same_v<Robot, robots::FfwSg2Mobility>) {
@@ -1757,7 +1776,7 @@ namespace PATACON {
                 basis_ok = ppln::collision::g1_tangent_basis(
                     q,
                     d_settings.g1_constraints,
-                    d_settings.rigid_orientation,
+                    d_settings.axis,
                     basis
                 );
             } else if constexpr (std::is_same_v<Robot, robots::IgrisC>) {
@@ -1770,14 +1789,14 @@ namespace PATACON {
                 basis_ok = ppln::collision::franka_single_tangent_basis(
                     q,
                     d_settings.franka_constraints,
-                    d_settings.rigid_orientation,
+                    d_settings.axis,
                     basis
                 );
             } else if constexpr (std::is_same_v<Robot, robots::Franka>) {
                 basis_ok = ppln::collision::franka_dual_tangent_basis(
                     q,
                     d_settings.franka_constraints,
-                    d_settings.rigid_orientation,
+                    d_settings.axis,
                     basis
                 );
             }
@@ -1940,10 +1959,10 @@ namespace PATACON {
             float h[FFW_SG2_MAX_RESIDUAL_DIM];
 
             // 현재 configuration q의 constraint residual h(q) 계산
-            ppln::collision::ffw_sg2_constraint_residual(q,d_settings.rigid_orientation,h);
+            ppln::collision::ffw_sg2_constraint_residual(q,d_settings.axis,h);
 
             // 현재 constraint의 residual dimension
-            const int residual_dim =ppln::collision::ffw_sg2_constraint_dim(d_settings.rigid_orientation);
+            const int residual_dim =ppln::collision::ffw_sg2_constraint_dim(d_settings.axis);
 
             // EM = ||h(q)||
             return ppln::collision::ffw_sg2_residual_norm(h,residual_dim);
@@ -1955,7 +1974,7 @@ namespace PATACON {
             return ppln::collision::g1_equality_residual_norm(
                 q,
                 d_settings.g1_constraints,
-                d_settings.rigid_orientation
+                d_settings.axis
             );
         } else if constexpr (std::is_same_v<Robot, robots::IgrisC>) {
             return ppln::collision::igris_c_equality_residual_norm(
@@ -1969,7 +1988,7 @@ namespace PATACON {
             return ppln::collision::franka_constraint_error_norm<Robot>(
                 q,
                 d_settings.franka_constraints,
-                d_settings.rigid_orientation
+                d_settings.axis
             );
         }
 

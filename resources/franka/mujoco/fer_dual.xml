@@ -1,0 +1,220 @@
+<?xml version='1.0' encoding='utf-8'?>
+<mujoco model="patacon_fer_dual">
+  <!-- Generated from Franka Robotics franka_description 2.9.0; see resources/franka/prepare_description.py. -->
+  <compiler angle="radian" autolimits="true" balanceinertia="true" />
+  <option timestep="0.002" />
+  <asset>
+    <mesh name="fer_link0_visual" file="../../../franka_description/meshes/robots/fer/collision/link0.stl" />
+    <mesh name="fer_link0_collision" file="../../../franka_description/meshes/robots/fer/collision/link0.stl" />
+    <mesh name="fer_link1_visual" file="../../../franka_description/meshes/robots/fer/collision/link1.stl" />
+    <mesh name="fer_link1_collision" file="../../../franka_description/meshes/robots/fer/collision/link1.stl" />
+    <mesh name="fer_link2_visual" file="../../../franka_description/meshes/robots/fer/collision/link2.stl" />
+    <mesh name="fer_link2_collision" file="../../../franka_description/meshes/robots/fer/collision/link2.stl" />
+    <mesh name="fer_link3_visual" file="../../../franka_description/meshes/robots/fer/collision/link3.stl" />
+    <mesh name="fer_link3_collision" file="../../../franka_description/meshes/robots/fer/collision/link3.stl" />
+    <mesh name="fer_link4_visual" file="../../../franka_description/meshes/robots/fer/collision/link4.stl" />
+    <mesh name="fer_link4_collision" file="../../../franka_description/meshes/robots/fer/collision/link4.stl" />
+    <mesh name="fer_link5_visual" file="../../../franka_description/meshes/robots/fer/collision/link5.stl" />
+    <mesh name="fer_link5_collision" file="../../../franka_description/meshes/robots/fer/collision/link5.stl" />
+    <mesh name="fer_link6_visual" file="../../../franka_description/meshes/robots/fer/collision/link6.stl" />
+    <mesh name="fer_link6_collision" file="../../../franka_description/meshes/robots/fer/collision/link6.stl" />
+    <mesh name="fer_link7_visual" file="../../../franka_description/meshes/robots/fer/collision/link7.stl" />
+    <mesh name="fer_link7_collision" file="../../../franka_description/meshes/robots/fer/collision/link7.stl" />
+    <mesh name="fer_hand_visual" file="../../../franka_description/meshes/robot_ee/franka_hand_white/collision/hand.stl" />
+    <mesh name="fer_hand_collision" file="../../../franka_description/meshes/robot_ee/franka_hand_white/collision/hand.stl" />
+    <texture name="floor_grid_tex" type="2d" builtin="checker" width="1024" height="1024" rgb1="0.48 0.48 0.48" rgb2="0.48 0.48 0.48" />
+    <material name="floor_grid_mat" texture="floor_grid_tex" texrepeat="6 6" texuniform="true" reflectance="0" />
+  </asset>
+  <default>
+    <default class="franka">
+      <default class="franka_visual">
+        <geom type="mesh" contype="0" conaffinity="0" group="0" rgba="0.92 0.92 0.95 1" />
+      </default>
+      <default class="franka_collision">
+        <geom contype="1" conaffinity="1" group="3" rgba="0.5 0.6 0.7 0.25" friction="1 0.005 0.0001" />
+      </default>
+      <default class="franka_finger">
+        <joint damping="0.3" limited="true" />
+      </default>
+    </default>
+  </default>
+  <visual>
+    <headlight ambient="0.65 0.65 0.65" diffuse="0.45 0.45 0.45" specular="0.05 0.05 0.05" />
+    <rgba haze="0.72 0.72 0.72 1" />
+  </visual>
+  <worldbody>
+    <light name="main_light" pos="0 0 5" dir="0 0 -1" diffuse="0.85 0.85 0.85" directional="true" />
+    <geom name="floor" type="plane" size="0 0 0.05" material="floor_grid_mat" friction="1 0.005 0.0001" />
+    <body name="object" pos="0.45 -0.325 0.9">
+      <freejoint />
+      <inertial pos="0 0 0" mass="0.1" diaginertia="0.002 0.002 0.002" />
+      <geom name="pot_bottom" type="box" size="0.08 0.125 0.01" pos="0 0 0" rgba="0.65 0.65 0.68 1" />
+      <geom name="pot_wall_front" type="box" size="0.08 0.005 0.03" pos="0 0.12 0.04" rgba="0.65 0.65 0.68 1" />
+      <geom name="pot_wall_back" type="box" size="0.08 0.005 0.03" pos="0 -0.12 0.04" rgba="0.65 0.65 0.68 1" />
+      <geom name="pot_wall_left" type="box" size="0.005 0.125 0.03" pos="-0.075 0 0.04" rgba="0.65 0.65 0.68 1" />
+      <geom name="pot_wall_right" type="box" size="0.005 0.125 0.03" pos="0.075 0 0.04" rgba="0.65 0.65 0.68 1" />
+    </body>
+    <body name="fer0_link0" pos="0 0.2 0.6" childclass="franka">
+      <inertial pos="-0.0172 0.0004 0.0745" mass="2.3966" fullinertia="0.009 0.0115 0.0085 0 0.002 0" />
+      <geom class="franka_visual" mesh="fer_link0_visual" />
+      <geom class="franka_collision" mesh="fer_link0_collision" />
+      <body name="fer0_link1" pos="0 0 0.333" euler="0 0 0">
+        <joint name="fer0_joint1" type="hinge" axis="0 0 1" range="-2.8973 2.8973" damping="0.003" frictionloss="0.2" />
+        <inertial pos="0.00033 -0.02204 -0.04762" mass="2.7907" fullinertia="0.01564782655 0.01439883526 0.00500443991 5.31236e-06 -3.676721e-05 -0.00248480843" />
+        <geom class="franka_visual" mesh="fer_link1_visual" />
+        <geom class="franka_collision" mesh="fer_link1_collision" />
+        <body name="fer0_link2" pos="0 0 0" euler="-1.5707963267949 0 0">
+          <joint name="fer0_joint2" type="hinge" axis="0 0 1" range="-1.7628 1.7628" damping="0.003" frictionloss="0.2" />
+          <inertial pos="0.00038 -0.09211 0.01908" mass="2.542" fullinertia="0.01662427728 0.00462501261 0.01545124526 3.086077e-05 8.3594e-06 0.0035589983" />
+          <geom class="franka_visual" mesh="fer_link2_visual" />
+          <geom class="franka_collision" mesh="fer_link2_collision" />
+          <body name="fer0_link3" pos="0 -0.316 0" euler="1.5707963267949 0 0">
+            <joint name="fer0_joint3" type="hinge" axis="0 0 1" range="-2.8973 2.8973" damping="0.003" frictionloss="0.2" />
+            <inertial pos="0.05152 0.01696 -0.02971" mass="2.2513" fullinertia="0.00631741992 0.00866285493 0.00657804051 0.00097309955 0.00292525834 0.00093469224" />
+            <geom class="franka_visual" mesh="fer_link3_visual" />
+            <geom class="franka_collision" mesh="fer_link3_collision" />
+            <body name="fer0_link4" pos="0.0825 0 0" euler="1.5707963267949 0 0">
+              <joint name="fer0_joint4" type="hinge" axis="0 0 1" range="-3.0718 -0.0698" damping="0.003" frictionloss="0.2" />
+              <inertial pos="-0.05113 0.05825 0.01698" mass="2.2037" fullinertia="0.00784585566 0.00649543136 0.01003079917 -0.00339591957 0.00158704074 -0.00181477884" />
+              <geom class="franka_visual" mesh="fer_link4_visual" />
+              <geom class="franka_collision" mesh="fer_link4_collision" />
+              <body name="fer0_link5" pos="-0.0825 0.384 0" euler="-1.5707963267949 0 0">
+                <joint name="fer0_joint5" type="hinge" axis="0 0 1" range="-2.8973 2.8973" damping="0.003" frictionloss="0.2" />
+                <inertial pos="-5e-05 0.0373 -0.0928" mass="2.2855" fullinertia="0.02297014781 0.02095060919 0.00430606551 -9.49345e-06 -2.063156e-05 0.00382345782" />
+                <geom class="franka_visual" mesh="fer_link5_visual" />
+                <geom class="franka_collision" mesh="fer_link5_collision" />
+                <body name="fer0_link6" pos="0 0 0" euler="1.5707963267949 0 0">
+                  <joint name="fer0_joint6" type="hinge" axis="0 0 1" range="-0.0175 3.7525" damping="0.003" frictionloss="0.2" />
+                  <inertial pos="0.06572 -0.00371 0.00153" mass="1.353" fullinertia="0.00087964522 0.00277796968 0.00286701969 -0.00021487814 -0.00011911662 1.274322e-05" />
+                  <geom class="franka_visual" mesh="fer_link6_visual" />
+                  <geom class="franka_collision" mesh="fer_link6_collision" />
+                  <body name="fer0_link7" pos="0.088 0 0" euler="1.5707963267949 0 0">
+                    <joint name="fer0_joint7" type="hinge" axis="0 0 1" range="-2.8973 2.8973" damping="0.003" frictionloss="0.2" />
+                    <inertial pos="0.00089 -0.00044 0.05491" mass="0.35973" fullinertia="0.00019541063 0.00019210361 0.00017936256 1.65231e-06 1.48826e-06 -1.31132e-06" />
+                    <geom class="franka_visual" mesh="fer_link7_visual" />
+                    <geom class="franka_collision" mesh="fer_link7_collision" />
+                    <body name="fer0_link8" pos="0 0 0.107">
+                      <body name="fer0_hand" euler="0 0 -0.7853981633974483">
+                        <inertial pos="-3.76e-05 0.0119128 0.020726" mass="0.6544" fullinertia="0.00186 0.0003 0.00174 0 0 -2e-05" />
+                        <geom class="franka_visual" mesh="fer_hand_visual" />
+                        <geom class="franka_collision" mesh="fer_hand_collision" />
+                        <body name="fer0_hand_tcp" pos="0 0 0.1034">
+                          <site name="end_effector" size="0.01" />
+                        </body>
+                        <body name="fer0_leftfinger" pos="0 0 0.0584">
+                          <inertial pos="0 0.015285 0.0219675" mass="0.0291" fullinertia="8.49e-06 8.53e-06 1.77e-06 0 0 -1.06e-06" />
+                          <joint name="fer0_finger_joint1" class="franka_finger" type="slide" axis="0 1 0" range="0 0.04" />
+                          <geom class="franka_visual" type="box" size="0.011 0.0075 0.01" pos="0 0.0185 0.011" />
+                          <geom class="franka_collision" type="box" size="0.011 0.0075 0.01" pos="0 0.0185 0.011" />
+                          <geom class="franka_visual" type="box" size="0.011 0.0044 0.0019" pos="0 0.0068 0.0022" />
+                          <geom class="franka_collision" type="box" size="0.011 0.0044 0.0019" pos="0 0.0068 0.0022" />
+                          <geom class="franka_visual" type="box" size="0.00875 0.0035 0.01175" pos="0 0.0159 0.02835" euler="0.523598775598299 0 0" />
+                          <geom class="franka_collision" type="box" size="0.00875 0.0035 0.01175" pos="0 0.0159 0.02835" euler="0.523598775598299 0 0" />
+                          <geom class="franka_visual" type="box" size="0.00875 0.0076 0.00925" pos="0 0.00758 0.04525" />
+                          <geom class="franka_collision" type="box" size="0.00875 0.0076 0.00925" pos="0 0.00758 0.04525" />
+                        </body>
+                        <body name="fer0_rightfinger" pos="0 0 0.0584" euler="0 0 3.141592653589793">
+                          <inertial pos="0 0.015285 0.0219675" mass="0.0291" fullinertia="8.49e-06 8.53e-06 1.77e-06 0 0 -1.06e-06" />
+                          <joint name="fer0_finger_joint2" class="franka_finger" type="slide" axis="0 1 0" range="0 0.04" />
+                          <geom class="franka_visual" type="box" size="0.011 0.0075 0.01" pos="0 0.0185 0.011" />
+                          <geom class="franka_collision" type="box" size="0.011 0.0075 0.01" pos="0 0.0185 0.011" />
+                          <geom class="franka_visual" type="box" size="0.011 0.0044 0.0019" pos="0 0.0068 0.0022" />
+                          <geom class="franka_collision" type="box" size="0.011 0.0044 0.0019" pos="0 0.0068 0.0022" />
+                          <geom class="franka_visual" type="box" size="0.00875 0.0035 0.01175" pos="0 0.0159 0.02835" euler="-0.523598775598299 0 3.14159265358979" />
+                          <geom class="franka_collision" type="box" size="0.00875 0.0035 0.01175" pos="0 0.0159 0.02835" euler="-0.523598775598299 0 3.14159265358979" />
+                          <geom class="franka_visual" type="box" size="0.00875 0.0076 0.00925" pos="0 0.00758 0.04525" />
+                          <geom class="franka_collision" type="box" size="0.00875 0.0076 0.00925" pos="0 0.00758 0.04525" />
+                        </body>
+                      </body>
+                    </body>
+                  </body>
+                </body>
+              </body>
+            </body>
+          </body>
+        </body>
+      </body>
+    </body>
+    <body name="fer1_link0" pos="0 -0.2 0.6" childclass="franka">
+      <inertial pos="-0.0172 0.0004 0.0745" mass="2.3966" fullinertia="0.009 0.0115 0.0085 0 0.002 0" />
+      <geom class="franka_visual" mesh="fer_link0_visual" />
+      <geom class="franka_collision" mesh="fer_link0_collision" />
+      <body name="fer1_link1" pos="0 0 0.333" euler="0 0 0">
+        <joint name="fer1_joint1" type="hinge" axis="0 0 1" range="-2.8973 2.8973" damping="0.003" frictionloss="0.2" />
+        <inertial pos="0.00033 -0.02204 -0.04762" mass="2.7907" fullinertia="0.01564782655 0.01439883526 0.00500443991 5.31236e-06 -3.676721e-05 -0.00248480843" />
+        <geom class="franka_visual" mesh="fer_link1_visual" />
+        <geom class="franka_collision" mesh="fer_link1_collision" />
+        <body name="fer1_link2" pos="0 0 0" euler="-1.5707963267949 0 0">
+          <joint name="fer1_joint2" type="hinge" axis="0 0 1" range="-1.7628 1.7628" damping="0.003" frictionloss="0.2" />
+          <inertial pos="0.00038 -0.09211 0.01908" mass="2.542" fullinertia="0.01662427728 0.00462501261 0.01545124526 3.086077e-05 8.3594e-06 0.0035589983" />
+          <geom class="franka_visual" mesh="fer_link2_visual" />
+          <geom class="franka_collision" mesh="fer_link2_collision" />
+          <body name="fer1_link3" pos="0 -0.316 0" euler="1.5707963267949 0 0">
+            <joint name="fer1_joint3" type="hinge" axis="0 0 1" range="-2.8973 2.8973" damping="0.003" frictionloss="0.2" />
+            <inertial pos="0.05152 0.01696 -0.02971" mass="2.2513" fullinertia="0.00631741992 0.00866285493 0.00657804051 0.00097309955 0.00292525834 0.00093469224" />
+            <geom class="franka_visual" mesh="fer_link3_visual" />
+            <geom class="franka_collision" mesh="fer_link3_collision" />
+            <body name="fer1_link4" pos="0.0825 0 0" euler="1.5707963267949 0 0">
+              <joint name="fer1_joint4" type="hinge" axis="0 0 1" range="-3.0718 -0.0698" damping="0.003" frictionloss="0.2" />
+              <inertial pos="-0.05113 0.05825 0.01698" mass="2.2037" fullinertia="0.00784585566 0.00649543136 0.01003079917 -0.00339591957 0.00158704074 -0.00181477884" />
+              <geom class="franka_visual" mesh="fer_link4_visual" />
+              <geom class="franka_collision" mesh="fer_link4_collision" />
+              <body name="fer1_link5" pos="-0.0825 0.384 0" euler="-1.5707963267949 0 0">
+                <joint name="fer1_joint5" type="hinge" axis="0 0 1" range="-2.8973 2.8973" damping="0.003" frictionloss="0.2" />
+                <inertial pos="-5e-05 0.0373 -0.0928" mass="2.2855" fullinertia="0.02297014781 0.02095060919 0.00430606551 -9.49345e-06 -2.063156e-05 0.00382345782" />
+                <geom class="franka_visual" mesh="fer_link5_visual" />
+                <geom class="franka_collision" mesh="fer_link5_collision" />
+                <body name="fer1_link6" pos="0 0 0" euler="1.5707963267949 0 0">
+                  <joint name="fer1_joint6" type="hinge" axis="0 0 1" range="-0.0175 3.7525" damping="0.003" frictionloss="0.2" />
+                  <inertial pos="0.06572 -0.00371 0.00153" mass="1.353" fullinertia="0.00087964522 0.00277796968 0.00286701969 -0.00021487814 -0.00011911662 1.274322e-05" />
+                  <geom class="franka_visual" mesh="fer_link6_visual" />
+                  <geom class="franka_collision" mesh="fer_link6_collision" />
+                  <body name="fer1_link7" pos="0.088 0 0" euler="1.5707963267949 0 0">
+                    <joint name="fer1_joint7" type="hinge" axis="0 0 1" range="-2.8973 2.8973" damping="0.003" frictionloss="0.2" />
+                    <inertial pos="0.00089 -0.00044 0.05491" mass="0.35973" fullinertia="0.00019541063 0.00019210361 0.00017936256 1.65231e-06 1.48826e-06 -1.31132e-06" />
+                    <geom class="franka_visual" mesh="fer_link7_visual" />
+                    <geom class="franka_collision" mesh="fer_link7_collision" />
+                    <body name="fer1_link8" pos="0 0 0.107">
+                      <body name="fer1_hand" euler="0 0 -0.7853981633974483">
+                        <inertial pos="-3.76e-05 0.0119128 0.020726" mass="0.6544" fullinertia="0.00186 0.0003 0.00174 0 0 -2e-05" />
+                        <geom class="franka_visual" mesh="fer_hand_visual" />
+                        <geom class="franka_collision" mesh="fer_hand_collision" />
+                        <body name="fer1_hand_tcp" pos="0 0 0.1034">
+                          <site name="end_effector1" size="0.01" />
+                        </body>
+                        <body name="fer1_leftfinger" pos="0 0 0.0584">
+                          <inertial pos="0 0.015285 0.0219675" mass="0.0291" fullinertia="8.49e-06 8.53e-06 1.77e-06 0 0 -1.06e-06" />
+                          <joint name="fer1_finger_joint1" class="franka_finger" type="slide" axis="0 1 0" range="0 0.04" />
+                          <geom class="franka_visual" type="box" size="0.011 0.0075 0.01" pos="0 0.0185 0.011" />
+                          <geom class="franka_collision" type="box" size="0.011 0.0075 0.01" pos="0 0.0185 0.011" />
+                          <geom class="franka_visual" type="box" size="0.011 0.0044 0.0019" pos="0 0.0068 0.0022" />
+                          <geom class="franka_collision" type="box" size="0.011 0.0044 0.0019" pos="0 0.0068 0.0022" />
+                          <geom class="franka_visual" type="box" size="0.00875 0.0035 0.01175" pos="0 0.0159 0.02835" euler="0.523598775598299 0 0" />
+                          <geom class="franka_collision" type="box" size="0.00875 0.0035 0.01175" pos="0 0.0159 0.02835" euler="0.523598775598299 0 0" />
+                          <geom class="franka_visual" type="box" size="0.00875 0.0076 0.00925" pos="0 0.00758 0.04525" />
+                          <geom class="franka_collision" type="box" size="0.00875 0.0076 0.00925" pos="0 0.00758 0.04525" />
+                        </body>
+                        <body name="fer1_rightfinger" pos="0 0 0.0584" euler="0 0 3.141592653589793">
+                          <inertial pos="0 0.015285 0.0219675" mass="0.0291" fullinertia="8.49e-06 8.53e-06 1.77e-06 0 0 -1.06e-06" />
+                          <joint name="fer1_finger_joint2" class="franka_finger" type="slide" axis="0 1 0" range="0 0.04" />
+                          <geom class="franka_visual" type="box" size="0.011 0.0075 0.01" pos="0 0.0185 0.011" />
+                          <geom class="franka_collision" type="box" size="0.011 0.0075 0.01" pos="0 0.0185 0.011" />
+                          <geom class="franka_visual" type="box" size="0.011 0.0044 0.0019" pos="0 0.0068 0.0022" />
+                          <geom class="franka_collision" type="box" size="0.011 0.0044 0.0019" pos="0 0.0068 0.0022" />
+                          <geom class="franka_visual" type="box" size="0.00875 0.0035 0.01175" pos="0 0.0159 0.02835" euler="-0.523598775598299 0 3.14159265358979" />
+                          <geom class="franka_collision" type="box" size="0.00875 0.0035 0.01175" pos="0 0.0159 0.02835" euler="-0.523598775598299 0 3.14159265358979" />
+                          <geom class="franka_visual" type="box" size="0.00875 0.0076 0.00925" pos="0 0.00758 0.04525" />
+                          <geom class="franka_collision" type="box" size="0.00875 0.0076 0.00925" pos="0 0.00758 0.04525" />
+                        </body>
+                      </body>
+                    </body>
+                  </body>
+                </body>
+              </body>
+            </body>
+          </body>
+        </body>
+      </body>
+    </body>
+  </worldbody>
+</mujoco>

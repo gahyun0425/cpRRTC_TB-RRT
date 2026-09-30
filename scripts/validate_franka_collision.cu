@@ -11,7 +11,7 @@
 #include "src/collision/factory.hh"
 #include "src/planning/RobotCollisionTraits.hh"
 #include "src/planning/utils.cuh"
-#include "src/robots/panda.cuh"
+#include "src/robots/franka_fer.cuh"
 #include "src/robots/franka_collision.cuh"
 
 using json = nlohmann::json;
@@ -132,7 +132,7 @@ int validate_problem(const json &problem) {
 
     // Place a tiny synthetic obstacle at one known start-pose payload sphere
     // center.  This regression check proves that the attached-object path is
-    // active independently of the imported world's endpoint clearances.
+    // active independently of the task world's endpoint clearances.
     const std::array<float, 3> probe_center =
         std::is_same_v<Robot, ppln::robots::FrankaSingle>
         ? std::array<float, 3>{0.43f, 0.0f, 1.10f}

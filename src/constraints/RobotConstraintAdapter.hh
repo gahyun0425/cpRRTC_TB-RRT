@@ -33,10 +33,10 @@ inline PreparedConstraintQuery<Robot> prepare_constraint_query(
 
     if constexpr (std::is_same_v<Robot, robots::G1>) {
         query.start = g1_start_from_problem(
-            problem, settings.rigid_orientation
+            problem, settings.axis
         ).template get<typename Robot::Configuration>();
         query.goals = g1_goals_from_problem(
-            problem, settings.rigid_orientation
+            problem, settings.axis
         ).template get<std::vector<typename Robot::Configuration>>();
         settings.g1_constraints = g1_constraint_parameters_from_problem(problem);
     } else if constexpr (std::is_same_v<Robot, robots::IgrisC>) {

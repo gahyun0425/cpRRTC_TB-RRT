@@ -129,6 +129,14 @@ json ordered_trajectory_json(
     return trajectory;
 }
 
+json primitive_environment_json(const json &problem) {
+    return {
+        {"sphere", problem.value("sphere", json::array())},
+        {"cylinder", problem.value("cylinder", json::array())},
+        {"box", problem.value("box", json::array())},
+    };
+}
+
 json g1_trajectory_json(
     const PlannerResult<robots::G1> &result,
     const robots::G1::Configuration &start,
@@ -140,11 +148,7 @@ json g1_trajectory_json(
         result, start, label
     );
     trajectory["planning_time_sec"] = planning_time_sec;
-    trajectory["environment"] = {
-        {"sphere", problem.value("sphere", json::array())},
-        {"cylinder", problem.value("cylinder", json::array())},
-        {"box", problem.value("box", json::array())}
-    };
+    trajectory["environment"] = primitive_environment_json(problem);
     const auto &constraints = problem.at("constraints");
     const auto &center_of_mass = constraints.at("com");
     if (center_of_mass.contains("payload")) {
@@ -190,7 +194,7 @@ void visualize_g1_paths(const json &trajectories) {
     const std::string command =
         "python3 " + shell_quote(visualizer_path.string())
         + " --trajectory " + shell_quote(trajectory_path.string())
-        + " --control-mode qpos";
+        + " --control-mode ctrl";
 
     std::cout.flush();
     std::cerr.flush();
@@ -234,8 +238,8 @@ void visualize_franka_paths(
     );
     const auto model_path = std::filesystem::absolute(
         std::is_same_v<Robot, robots::FrankaSingle>
-            ? "resources/franka/franka_sim/franka_single.xml"
-            : "resources/franka/franka_sim/franka_panda.xml"
+            ? "resources/franka/mujoco/fer_single.xml"
+            : "resources/franka/mujoco/fer_dual.xml"
     );
     std::string command =
         "python3 " + shell_quote(visualizer_path.string())
@@ -260,10 +264,12 @@ template <typename Robot>
 json ffw_sg2_trajectory_json(
     const PlannerResult<Robot> &result,
     const typename Robot::Configuration &start,
+    const json &problem,
     const AORRTC_settings &settings,
     const std::string &label
 ) {
     json trajectory = ordered_trajectory_json<Robot>(result, start, label);
+    trajectory["environment"] = primitive_environment_json(problem);
     const auto &attached = settings.ffw_sg2_attached_object_collision;
     trajectory["attached_object_frame_offset"] = {
         attached.enabled ? attached.world_offset[0] : 0.1f,
@@ -659,10 +665,13 @@ void run_planning(
                         std::is_same_v<Robot, robots::FrankaSingle> ||
                         std::is_same_v<Robot, robots::Franka>
                     ) {
+                        json trajectory = ordered_trajectory_json<Robot>(
+                            planner_result, start, label
+                        );
+                        trajectory["environment"] =
+                            primitive_environment_json(data);
                         visualization_trajectories.push_back(
-                            ordered_trajectory_json<Robot>(
-                                planner_result, start, label
-                            )
+                            std::move(trajectory)
                         );
                     } else if constexpr (std::is_same_v<Robot, robots::G1>) {
                         visualization_trajectories.push_back(
@@ -682,6 +691,7 @@ void run_planning(
                             ffw_sg2_trajectory_json<Robot>(
                                 planner_result,
                                 start,
+                                data,
                                 problem_settings,
                                 label
                             )
@@ -745,7 +755,7 @@ void run_planning(
                 settings.aorrtc ? "planning_sec" : "kernel_ns"
             },
             {"time_unit", settings.aorrtc ? "s" : "ns"},
-            {"rigid_orientation", settings.rigid_orientation},
+            {"axis", settings.axis},
             {"settings", planner_result_json::settings_to_json(settings)},
             {"results", std::move(saved_results)},
         }.dump(2) << '\n';
@@ -829,17 +839,17 @@ void run_planning(
             visualize_g1_paths(visualization_trajectories);
         } else if constexpr (std::is_same_v<Robot, robots::FrankaSingle>) {
             visualize_franka_paths<Robot>(visualization_trajectories, {
-                "panda0_joint1", "panda0_joint2", "panda0_joint3",
-                "panda0_joint4", "panda0_joint5", "panda0_joint6",
-                "panda0_joint7"
+                "fer0_joint1", "fer0_joint2", "fer0_joint3",
+                "fer0_joint4", "fer0_joint5", "fer0_joint6",
+                "fer0_joint7"
             });
         } else if constexpr (std::is_same_v<Robot, robots::Franka>) {
             visualize_franka_paths<Robot>(visualization_trajectories, {
-                "panda0_joint1", "panda0_joint2", "panda0_joint3",
-                "panda0_joint4", "panda0_joint5", "panda0_joint6",
-                "panda0_joint7", "panda1_joint1", "panda1_joint2",
-                "panda1_joint3", "panda1_joint4", "panda1_joint5",
-                "panda1_joint6", "panda1_joint7"
+                "fer0_joint1", "fer0_joint2", "fer0_joint3",
+                "fer0_joint4", "fer0_joint5", "fer0_joint6",
+                "fer0_joint7", "fer1_joint1", "fer1_joint2",
+                "fer1_joint3", "fer1_joint4", "fer1_joint5",
+                "fer1_joint6", "fer1_joint7"
             });
         } else if constexpr (std::is_same_v<Robot, robots::FfwSg2>) {
             visualize_ffw_sg2_paths<Robot>(visualization_trajectories, {
@@ -850,7 +860,7 @@ void run_planning(
                 "arm_r_joint1", "arm_r_joint2", "arm_r_joint3",
                 "arm_r_joint4", "arm_r_joint5", "arm_r_joint6",
                 "arm_r_joint7"
-            }, true);
+            }, false);
         } else if constexpr (
             std::is_same_v<Robot, robots::FfwSg2Mobility>
         ) {
@@ -862,7 +872,7 @@ void run_planning(
                 "arm_r_joint1", "arm_r_joint2", "arm_r_joint3",
                 "arm_r_joint4", "arm_r_joint5", "arm_r_joint6",
                 "arm_r_joint7"
-            }, false);
+            }, true);
         }
     }
 }
@@ -956,8 +966,8 @@ int main(int argc, char* argv[]) {
                     visualize = true;
                 } else if (argument == "--no-print-path") {
                     print_path = false;
-                } else if (argument == "--rigid-orientation") {
-                    settings.rigid_orientation = true;
+                } else if (argument == "--axis") {
+                    settings.axis = true;
                 } else if (argument == "--com") {
                     settings.ffw_sg2_enable_com_constraint = true;
                 } else {
@@ -1009,7 +1019,7 @@ int main(int argc, char* argv[]) {
                   << "[--range VALUE] "
                   << "[--max-problems N] [--aorrtc] [--time SECONDS] "
                   << "[--plot] [--visualize] "
-                  << "[--no-print-path] [--rigid-orientation] [--com]\n";
+                  << "[--no-print-path] [--axis] [--com]\n";
         return -1;
     }
 

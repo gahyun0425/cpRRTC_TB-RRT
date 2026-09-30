@@ -45,15 +45,19 @@ JOINTS_FIXED_AT_ZERO = (
     "rear_wheel_drive",
 )
 
-ORIGINAL_ASSET_PREFIX = (
-    "/home/dam2/gh_ws/tb_rrt_ws/src/"
-    "cptbrrt_pkg/models/ffw_sg2/assets/"
-)
-PLANNING_ASSET_PREFIX = "../../ffw_lift/assets/"
+UPSTREAM_PACKAGE_PREFIX = "package://ffw_description/"
+PLANNING_ASSET_PREFIX = "../../ai_worker/ffw_description/"
 
 RESOURCE_DIR = Path(__file__).resolve().parent
 REPOSITORY_DIR = RESOURCE_DIR.parents[1]
-DEFAULT_SOURCE = REPOSITORY_DIR / "ffw_lift" / "ffw_sg2.urdf"
+DEFAULT_SOURCE = (
+    REPOSITORY_DIR
+    / "ai_worker"
+    / "ffw_description"
+    / "urdf"
+    / "ffw_sg2_rev1_follower"
+    / "ffw_sg2_follower.urdf"
+)
 DEFAULT_OUTPUT = RESOURCE_DIR / "ffw_sg2_planning.urdf"
 
 
@@ -75,6 +79,13 @@ def generate(source: Path, output: Path) -> None:
     if robot.tag != "robot" or robot.get("name") != "ffw_sg2_follower":
         raise ValueError(f"unexpected source robot: {robot.tag} {robot.get('name')!r}")
 
+    # The upstream expanded URDF also contains Gazebo, ros2_control, and
+    # transmission data.  PATACON's collision generator needs only the robot
+    # kinematic tree and collision geometry.
+    for child in list(robot):
+        if child.tag not in {"link", "joint", "material"}:
+            robot.remove(child)
+
     joints = {joint.get("name"): joint for joint in robot.findall("joint")}
     missing = (set(ACTIVE_JOINTS) | set(JOINTS_FIXED_AT_ZERO)) - joints.keys()
     if missing:
@@ -89,9 +100,9 @@ def generate(source: Path, output: Path) -> None:
     # The fixed transform is the original joint origin evaluated at q=0.
     for joint_name in JOINTS_FIXED_AT_ZERO:
         joint = joints[joint_name]
-        if joint.get("type") != "revolute":
+        if joint.get("type") not in {"continuous", "revolute"}:
             raise ValueError(
-                f"joint {joint_name!r} changed type: expected revolute, "
+                f"joint {joint_name!r} changed type: expected a rotary joint, "
                 f"got {joint.get('type')!r}"
             )
         joint.set("type", "fixed")
@@ -100,11 +111,11 @@ def generate(source: Path, output: Path) -> None:
 
     for mesh in robot.findall(".//collision/geometry/mesh"):
         filename = mesh.get("filename", "")
-        if not filename.startswith(ORIGINAL_ASSET_PREFIX):
+        if not filename.startswith(UPSTREAM_PACKAGE_PREFIX):
             raise ValueError(f"unexpected collision mesh path: {filename!r}")
         mesh.set(
             "filename",
-            PLANNING_ASSET_PREFIX + filename[len(ORIGINAL_ASSET_PREFIX) :],
+            PLANNING_ASSET_PREFIX + filename[len(UPSTREAM_PACKAGE_PREFIX) :],
         )
 
     movable = tuple(

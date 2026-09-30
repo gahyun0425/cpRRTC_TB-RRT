@@ -5,6 +5,8 @@
 
 namespace ppln::collision {
 
+constexpr float FRANKA_FER_HAND_TCP_OFFSET_M = 0.1034f;
+
 struct FrankaTransform {
     float rotation[9];  // row major
     float translation[3];
@@ -130,7 +132,7 @@ __host__ __device__ __forceinline__ void franka_arm_kinematics(
         current, franka_z_rotation(-0.7853981633974483f)
     );
     FrankaTransform ee_offset = franka_identity();
-    ee_offset.translation[2] = 0.1f;
+    ee_offset.translation[2] = FRANKA_FER_HAND_TCP_OFFSET_M;
     end_effector = franka_compose(current, ee_offset);
 }
 

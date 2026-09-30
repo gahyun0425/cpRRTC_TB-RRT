@@ -72,12 +72,12 @@ Config lerp(const Config &a, const Config &b, float t) {
 
 void clamp_to_limits(Config &q) {
     constexpr float lower[kDim] = {
-        -0.5f, -3.14f, 0.0f, -3.14f, -2.9361f, -3.14f, -1.57f, -1.8201f,
-        -3.14f, -3.14f, -3.14f, -2.9361f, -3.14f, -1.57f, -1.5804f,
+        -0.5f, -3.14f, 0.0f, -3.14f, -2.9361f, -3.14f, -1.57f, -1.5804f,
+        -3.14f, -3.14f, -3.14f, -2.9361f, -3.14f, -1.57f, -1.8201f,
     };
     constexpr float upper[kDim] = {
-        0.0f, 3.14f, 3.14f, 3.14f, 1.0786f, 3.14f, 1.57f, 1.5804f,
-        3.14f, 0.0f, 3.14f, 1.0786f, 3.14f, 1.57f, 1.8201f,
+        0.0f, 3.14f, 3.14f, 3.14f, 1.0786f, 3.14f, 1.57f, 1.8201f,
+        3.14f, 0.0f, 3.14f, 1.0786f, 3.14f, 1.57f, 1.5804f,
     };
     for (int i = 0; i < kDim; i++) {
         q[i] = std::min(std::max(q[i], lower[i]), upper[i]);

@@ -1,0 +1,35 @@
+<?xml version='1.0' encoding='utf-8'?>
+<mujoco model="ffw_sg2_rack_upper_to_lower">
+  <compiler angle="radian" meshdir="assets" autolimits="true" />
+  <option timestep="0.0015" integrator="implicitfast" gravity="0 0 -9.81" iterations="120" ls_iterations="60" cone="pyramidal" />
+  <asset>
+    <texture name="floor_grid_tex" type="2d" builtin="checker" width="1024" height="1024" rgb1="0.10 0.12 0.18" rgb2="0.14 0.16 0.22" mark="none" />
+    <material name="floor_grid_mat" texture="floor_grid_tex" texrepeat="6 6" texuniform="true" reflectance="0.02" />
+    <texture name="white_sky" type="skybox" builtin="gradient" rgb1="1 1 1" rgb2="1 1 1" width="256" height="1536" />
+    <material name="object_matte" rgba="0.18 0.38 0.62 1" />
+    <material name="object_grasp_matte" rgba="0.08 0.12 0.16 1" />
+  </asset>
+  <worldbody>
+    <light name="main_light" pos="0 0 5" dir="0 0 -1" diffuse="1 1 1" specular="0.1 0.1 0.1" directional="true" />
+    <geom name="floor" type="plane" size="0 0 0.05" material="floor_grid_mat" contype="1" conaffinity="1" friction="1 0.005 0.0001" />
+    <body name="robot_com_marker" mocap="true" pos="0 0 0">
+      <geom name="robot_com_marker_geom" type="sphere" size="0.025" rgba="0.10 0.30 1.00 0.75" contype="0" conaffinity="0" mass="0" />
+    </body>
+    <body name="payload_com_marker" mocap="true" pos="0 0 0">
+      <geom name="payload_com_marker_geom" type="sphere" size="0.025" rgba="1.00 0.48 0.08 0.75" contype="0" conaffinity="0" mass="0" />
+    </body>
+    <body name="combined_com_marker" mocap="true" pos="0 0 0">
+      <geom name="combined_com_marker_geom" type="sphere" size="0.032" rgba="0.00 0.85 0.25 0.85" contype="0" conaffinity="0" mass="0" />
+    </body>
+    <body name="reference_com_marker" mocap="true" pos="0 0 0">
+      <geom name="reference_com_marker_geom" type="sphere" size="0.036" rgba="1.00 0.00 0.95 0.85" contype="0" conaffinity="0" mass="0" />
+    </body>
+    <body name="object_box" pos="0.75 0 1.65">
+      <freejoint name="object_freejoint" />
+      <inertial pos="0 0 0" mass="3.0" diaginertia="0.0180 0.0144 0.0250" />
+      <geom name="object_collision" type="box" size="0.12 0.11 0.06" material="object_matte" friction="1.5 0.02 0.001" contype="1" conaffinity="1" mass="0" />
+      <geom name="object_left_grasp" type="box" size="0.025 0.045 0.025" pos="0 0.155 0" material="object_grasp_matte" contype="0" conaffinity="0" mass="0" />
+      <geom name="object_right_grasp" type="box" size="0.025 0.045 0.025" pos="0 -0.155 0" material="object_grasp_matte" contype="0" conaffinity="0" mass="0" />
+    </body>
+  </worldbody>
+</mujoco>

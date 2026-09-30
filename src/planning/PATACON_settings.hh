@@ -51,7 +51,7 @@ struct PATACON_settings {
     bool collect_diagnostics = false;
 
     // PATACON projection
-    bool rigid_orientation = false;
+    bool axis = false;
 
     int projection_max_iters = 60;
     float projection_alpha = 1.0f;

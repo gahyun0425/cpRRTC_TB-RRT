@@ -152,7 +152,7 @@ namespace ppln::collision {
     __device__ __forceinline__ bool ffw_sg2_solve6(float A_in[36], const float b_in[6], float x[6]);
     __device__ __forceinline__ void ffw_sg2_se3_log(const float R[9], const float p[3], float xi[6]);
     __device__ __forceinline__ bool ffw_sg2_relative_pose_jacobian(const float *q, float h[6], float J[6 * 15]);
-    __device__ __forceinline__ bool ffw_sg2_tangent_basis_from_jacobian(const float J[FFW_SG2_MAX_RESIDUAL_DIM * 15], bool rigid_orientation, float basis[15 * 9]);
+    __device__ __forceinline__ bool ffw_sg2_tangent_basis_from_jacobian(const float J[FFW_SG2_MAX_RESIDUAL_DIM * 15], bool axis, float basis[15 * 9]);
 
     __device__ __forceinline__ void ffw_sg2_cross(const float a[3], const float b[3], float out[3]) {
         out[0] = a[1] * b[2] - a[2] * b[1];
@@ -840,12 +840,12 @@ namespace ppln::collision {
         return ffw_sg2_apply_jr_inv(h, J_rel, J);
     }
 
-    __device__ __forceinline__ int ffw_sg2_constraint_dim(bool rigid_orientation) {
-        return rigid_orientation ? 8 : 6;
+    __device__ __forceinline__ int ffw_sg2_constraint_dim(bool axis) {
+        return axis ? 8 : 6;
     }
 
-    __device__ __forceinline__ int ffw_sg2_tangent_dim(bool rigid_orientation) {
-        return 15 - ffw_sg2_constraint_dim(rigid_orientation);
+    __device__ __forceinline__ int ffw_sg2_tangent_dim(bool axis) {
+        return 15 - ffw_sg2_constraint_dim(axis);
     }
 
     __device__ __forceinline__ void ffw_sg2_axis_residual_and_jacobian(
@@ -878,14 +878,14 @@ namespace ppln::collision {
 
     __device__ __forceinline__ bool ffw_sg2_constraint_jacobian(
         const float *q,
-        bool rigid_orientation,
+        bool axis,
         float h[FFW_SG2_MAX_RESIDUAL_DIM],
         float J[FFW_SG2_MAX_RESIDUAL_DIM * 15]
     ) {
         if (!ffw_sg2_relative_pose_jacobian(q, h, J)) {
             return false;
         }
-        if (rigid_orientation) {
+        if (axis) {
             ffw_sg2_axis_residual_and_jacobian(q, h, J);
         }
         return true;
@@ -893,11 +893,11 @@ namespace ppln::collision {
 
     __device__ __forceinline__ void ffw_sg2_constraint_residual(
         const float *q,
-        bool rigid_orientation,
+        bool axis,
         float h[FFW_SG2_MAX_RESIDUAL_DIM]
     ) {
         ffw_sg2_relative_pose_residual(q, h);
-        if (rigid_orientation) {
+        if (axis) {
             float p_l[3], R_l[9];
             ffw_sg2_fk_left(q, p_l, R_l);
             const int axis_col = 1;
@@ -974,12 +974,12 @@ namespace ppln::collision {
 
     __device__ __forceinline__ bool ffw_sg2_tangent_basis_from_jacobian(
         const float J[FFW_SG2_MAX_RESIDUAL_DIM * 15],
-        bool rigid_orientation,
+        bool axis,
         float basis[15 * 9]
     ) {
-        const int residual_dim = ffw_sg2_constraint_dim(rigid_orientation);
+        const int residual_dim = ffw_sg2_constraint_dim(axis);
 
-        const int active_tangent_dim = ffw_sg2_tangent_dim(rigid_orientation);
+        const int active_tangent_dim = ffw_sg2_tangent_dim(axis);
 
         // 1. 전달받은 Jacobian J를 계산용 행렬 A로 복사
         float A[FFW_SG2_MAX_RESIDUAL_DIM][15];
@@ -1128,7 +1128,7 @@ namespace ppln::collision {
     }
     __device__ __forceinline__ bool ffw_sg2_tangent_basis(
         const float *q,
-        bool rigid_orientation,
+        bool axis,
         float basis[15 * 9]
     ) {
         float h[FFW_SG2_MAX_RESIDUAL_DIM];
@@ -1143,7 +1143,7 @@ namespace ppln::collision {
         // 현재 tree node q에서 Jacobian 새로 1회 계산
         if (!ffw_sg2_constraint_jacobian(
                 q,
-                rigid_orientation,
+                axis,
                 h,
                 J
             )) {
@@ -1153,7 +1153,7 @@ namespace ppln::collision {
         // 이미 구현한 J -> null-space basis 함수 사용
         return ffw_sg2_tangent_basis_from_jacobian(
             J,
-            rigid_orientation,
+            axis,
             basis
         );
     }
@@ -1174,19 +1174,19 @@ namespace ppln::collision {
     // DLS projection
     __device__ __forceinline__ bool ffw_sg2_task_correction(
         const float q[15],
-        bool rigid_orientation,
+        bool axis,
         float damping,
         float max_step,
         float correction[15],
         float &task_error_norm
     ) {
-        const int residual_dim = ffw_sg2_constraint_dim(rigid_orientation);
+        const int residual_dim = ffw_sg2_constraint_dim(axis);
         float h[FFW_SG2_MAX_RESIDUAL_DIM];
         float J[FFW_SG2_MAX_RESIDUAL_DIM * 15];
         for (int i = 0; i < FFW_SG2_MAX_RESIDUAL_DIM * 15; i++) {
             J[i] = 0.0f;
         }
-        if (!ffw_sg2_constraint_jacobian(q, rigid_orientation, h, J)) {
+        if (!ffw_sg2_constraint_jacobian(q, axis, h, J)) {
             return false;
         }
 
@@ -1238,14 +1238,14 @@ namespace ppln::collision {
     // project_config
     __device__ __forceinline__ bool ffw_sg2_project_config(
         float q[15],
-        bool rigid_orientation,
+        bool axis,
         float *projected_jacobian = nullptr
     ) {
         constexpr int max_iters = 15;
         constexpr float tol = 1.0e-3f;
         constexpr float damping = 1.0e-4f;
         constexpr float max_step = 0.2f;
-        const int residual_dim = ffw_sg2_constraint_dim(rigid_orientation);
+        const int residual_dim = ffw_sg2_constraint_dim(axis);
 
         ffw_sg2_clamp(q);
         float h[FFW_SG2_MAX_RESIDUAL_DIM];
@@ -1254,7 +1254,7 @@ namespace ppln::collision {
             for (int i = 0; i < FFW_SG2_MAX_RESIDUAL_DIM * 15; i++) {
                 J[i] = 0.0f;
             }
-            if (!ffw_sg2_constraint_jacobian(q, rigid_orientation, h, J)) {
+            if (!ffw_sg2_constraint_jacobian(q, axis, h, J)) {
                 return false;
             }
             if (ffw_sg2_residual_norm(h, residual_dim) < tol) {
@@ -1300,7 +1300,7 @@ namespace ppln::collision {
         for (int i = 0; i < FFW_SG2_MAX_RESIDUAL_DIM * 15; i++) {
             J[i] = 0.0f;
         }
-        if (!ffw_sg2_constraint_jacobian(q, rigid_orientation, h, J)) {
+        if (!ffw_sg2_constraint_jacobian(q, axis, h, J)) {
             return false;
         }
         const bool ok = ffw_sg2_residual_norm(h, residual_dim) < tol;
@@ -1315,7 +1315,7 @@ namespace ppln::collision {
         volatile float *motion_segment,
         volatile float *motion_segment_next,
         int granularity,
-        bool rigid_orientation,
+        bool axis,
         volatile unsigned char *projection_valid,
         volatile int *projection_prog,
         volatile unsigned int *projection_success,
@@ -1365,7 +1365,7 @@ namespace ppln::collision {
 
                         const bool correction_ok = ffw_sg2_task_correction(
                                 q,
-                                rigid_orientation,
+                                axis,
                                 damping,
                                 max_step,
                                 correction,

@@ -62,7 +62,7 @@ struct Options {
     int count = kDefaultCount;
     int maximum_candidates = kDefaultMaximumCandidates;
     std::uint64_t seed = kDefaultSeed;
-    bool rigid_orientation = false;
+    bool axis = false;
     float start_sigma = 0.12f;
     float goal_sigma = 0.16f;
     Region start_region{{0.53f, -0.05f, 1.04f}, {0.61f, 0.05f, 1.12f}};
@@ -152,7 +152,7 @@ void print_usage() {
         << "  --output PATH\n"
         << "  --source-name NAME --source-index N\n"
         << "  --problem-name NAME --count N --seed N\n"
-        << "  --rigid-orientation\n"
+        << "  --axis\n"
         << "  --start-sigma RAD --goal-sigma RAD\n"
         << "  --start-region xmin xmax ymin ymax zmin zmax\n"
         << "  --goal-region xmin xmax ymin ymax zmin zmax\n"
@@ -183,8 +183,8 @@ Options parse_options(int argc, char **argv) {
             options.count = parse_positive_int(argument, require_value());
         } else if (argument == "--seed") {
             options.seed = parse_seed(require_value());
-        } else if (argument == "--rigid-orientation") {
-            options.rigid_orientation = true;
+        } else if (argument == "--axis") {
+            options.axis = true;
         } else if (argument == "--start-sigma") {
             options.start_sigma = parse_positive_float(argument, require_value());
         } else if (argument == "--goal-sigma") {
@@ -506,7 +506,7 @@ __device__ bool scalar_attached_object_collision_free(
     return true;
 }
 
-template <bool kRigidOrientation>
+template <bool kAxis>
 __global__ void project_and_validate_candidates(
     const float *input,
     CandidateResult *results,
@@ -532,7 +532,7 @@ __global__ void project_and_validate_candidates(
         }
         projection_valid = ppln::collision::ffw_sg2_project_config(
             configuration,
-            kRigidOrientation
+            kAxis
         ) ? 1 : 0;
     }
     __syncthreads();
@@ -560,13 +560,13 @@ __global__ void project_and_validate_candidates(
         float residual[FFW_SG2_MAX_RESIDUAL_DIM]{};
         ppln::collision::ffw_sg2_constraint_residual(
             configuration,
-            kRigidOrientation,
+            kAxis,
             residual
         );
         result.constraint_residual =
             ppln::collision::ffw_sg2_residual_norm(
                 residual,
-                kRigidOrientation ? 8 : 6
+                kAxis ? 8 : 6
             );
         const bool robot_free = scalar_robot_collision_free(
             sphere_positions,
@@ -614,7 +614,7 @@ std::vector<CandidateResult> sample_pool(
     int maximum_candidates,
     std::mt19937_64 &rng,
     ppln::collision::Environment<float> *device_environment,
-    bool rigid_orientation,
+    bool axis,
     const std::string &label
 ) {
     std::normal_distribution<float> normal(0.0f, 1.0f);
@@ -672,7 +672,7 @@ std::vector<CandidateResult> sample_pool(
             ),
             "cudaMemset candidate results"
         );
-        if (rigid_orientation) {
+        if (axis) {
             project_and_validate_candidates<true><<<batch_count, kThreads>>>(
                 device_input,
                 device_results,
@@ -790,8 +790,8 @@ json generate_output(
             {"goal_constraint_residual", goals[index].constraint_residual},
             {"endpoint_collision_free", true},
         };
-        if (options.rigid_orientation) {
-            problem["sampling"]["rigid_orientation"] = true;
+        if (options.axis) {
+            problem["sampling"]["axis"] = true;
         }
         generated_problems.push_back(std::move(problem));
     }
@@ -823,8 +823,8 @@ json generate_output(
         }},
         {"problems", {{options.problem_name, std::move(generated_problems)}}},
     };
-    if (options.rigid_orientation) {
-        output["generator"]["rigid_orientation"] = true;
+    if (options.axis) {
+        output["generator"]["axis"] = true;
         output["generator"]["constraint_dimension"] = 8;
         output["generator"]["validation"]["left_gripper_axis_constraint"] = true;
     }
@@ -901,7 +901,7 @@ int main(int argc, char **argv) {
             options.maximum_candidates,
             rng,
             device_environment.environment,
-            options.rigid_orientation,
+            options.axis,
             "start"
         );
         const auto goals = sample_pool(
@@ -912,7 +912,7 @@ int main(int argc, char **argv) {
             options.maximum_candidates,
             rng,
             device_environment.environment,
-            options.rigid_orientation,
+            options.axis,
             "goal"
         );
         const json output = generate_output(

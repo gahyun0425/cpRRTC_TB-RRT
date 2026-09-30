@@ -45,32 +45,6 @@ struct TraceExportOptions {
     std::string patacon_root;
 };
 
-struct RealDynamicsOptions {
-    int settle_steps = -1;
-    int initial_settle_steps = -1;
-    double speed = 0.0;
-    double base_kp_xy = 0.0;
-    double base_kp_yaw = 0.0;
-    double base_max_speed = 0.0;
-    double base_max_yaw_rate = 0.0;
-    double steer_rate_limit = 0.0;
-    double drive_accel_limit = 0.0;
-    std::string payload_mode;
-
-    bool provided() const {
-        return settle_steps >= 0
-            || initial_settle_steps >= 0
-            || speed > 0.0
-            || base_kp_xy > 0.0
-            || base_kp_yaw > 0.0
-            || base_max_speed > 0.0
-            || base_max_yaw_rate > 0.0
-            || steer_rate_limit > 0.0
-            || drive_accel_limit > 0.0
-            || !payload_mode.empty();
-    }
-};
-
 struct G1ReplanningOptions {
     bool enabled = false;
     bool server = false;
@@ -569,6 +543,7 @@ void visualize_ffw_sg2_path(
     const PlannerResult<Robot> &result,
     const typename Robot::Configuration &start,
     const std::vector<std::string> &joint_names,
+    const json &problem,
     const json &geometric_path,
     std::array<float, 3> attached_object_frame_offset = {0.1f, 0.0f, 0.0f},
     bool use_ctrl = false
@@ -590,6 +565,11 @@ void visualize_ffw_sg2_path(
     trajectory["joint_names"] = joint_names;
     trajectory["waypoints"] = json::array();
     trajectory["start"] = start;
+    trajectory["environment"] = {
+        {"sphere", problem.value("sphere", json::array())},
+        {"cylinder", problem.value("cylinder", json::array())},
+        {"box", problem.value("box", json::array())},
+    };
     trajectory["path_smoothing"] = !geometric_path.is_null();
     if (!geometric_path.is_null()) {
         trajectory["geometric_path"] = geometric_path;
@@ -657,6 +637,7 @@ void visualize_franka_path(
     const PlannerResult<Robot> &result,
     const typename Robot::Configuration &start,
     const std::vector<std::string> &joint_names,
+    const json &problem,
     const json &geometric_path
 ) {
     if (result.path.size() < 2) {
@@ -674,6 +655,11 @@ void visualize_franka_path(
     trajectory["joint_names"] = joint_names;
     trajectory["start"] = start;
     trajectory["waypoints"] = json::array();
+    trajectory["environment"] = {
+        {"sphere", problem.value("sphere", json::array())},
+        {"cylinder", problem.value("cylinder", json::array())},
+        {"box", problem.value("box", json::array())},
+    };
     trajectory["path_smoothing"] = !geometric_path.is_null();
     if (!geometric_path.is_null()) {
         trajectory["geometric_path"] = geometric_path;
@@ -709,13 +695,17 @@ void visualize_franka_path(
     );
     const auto model = std::filesystem::absolute(
         std::is_same_v<Robot, robots::FrankaSingle>
-            ? "resources/franka/franka_sim/franka_single.xml"
-            : "resources/franka/franka_sim/franka_panda.xml"
+            ? "resources/franka/mujoco/fer_single.xml"
+            : "resources/franka/mujoco/fer_dual.xml"
     );
-    const std::string command =
+    std::string command =
         "python3 " + shell_quote(visualizer.string()) +
         " --model " + shell_quote(model.string()) +
         " --trajectory " + shell_quote(trajectory_path.string());
+    const char *validate_only = std::getenv("PATACON_MUJOCO_VALIDATE_ONLY");
+    if (validate_only != nullptr && std::string(validate_only) == "1") {
+        command += " --validate-only";
+    }
     std::cout.flush();
     std::cerr.flush();
     const int status = std::system(command.c_str());
@@ -727,14 +717,14 @@ void visualize_franka_path(
 }
 
 template <typename Robot>
-void visualize_ffw_sg2_rack_real_path(
+void visualize_ffw_sg2_mobility_ctrl_path(
     const PlannerResult<Robot> &result,
     const typename Robot::Configuration &start,
     const std::vector<std::string> &joint_names,
+    const json &problem,
     std::array<float, 3> attached_object_frame_offset,
     float object_mass_kg,
     float support_margin_m,
-    const RealDynamicsOptions &real_options,
     const json &geometric_path
 ) {
     if (result.path.size() < 2) {
@@ -754,6 +744,11 @@ void visualize_ffw_sg2_rack_real_path(
     trajectory["joint_names"] = joint_names;
     trajectory["waypoints"] = json::array();
     trajectory["start"] = start;
+    trajectory["environment"] = {
+        {"sphere", problem.value("sphere", json::array())},
+        {"cylinder", problem.value("cylinder", json::array())},
+        {"box", problem.value("box", json::array())},
+    };
     trajectory["path_smoothing"] = !geometric_path.is_null();
     if (!geometric_path.is_null()) {
         trajectory["geometric_path"] = geometric_path;
@@ -803,58 +798,19 @@ void visualize_ffw_sg2_rack_real_path(
         + " --attach-payload"
         + " --object-mass " + std::to_string(object_mass_kg)
         + " --support-margin " + std::to_string(support_margin_m)
-        + " --input-mode ctrl"
-        + " --real"
         + " --payload-offset "
         + std::to_string(attached_object_frame_offset[0])
         + " "
         + std::to_string(attached_object_frame_offset[1])
         + " "
         + std::to_string(attached_object_frame_offset[2]);
-    if (real_options.settle_steps >= 0) {
-        command += " --settle-steps " + std::to_string(real_options.settle_steps);
-    }
-    if (real_options.initial_settle_steps >= 0) {
-        command += " --real-initial-settle-steps "
-            + std::to_string(real_options.initial_settle_steps);
-    }
-    if (real_options.speed > 0.0) {
-        command += " --speed " + std::to_string(real_options.speed);
-    }
-    if (real_options.base_kp_xy > 0.0) {
-        command += " --real-base-kp-xy " + std::to_string(real_options.base_kp_xy);
-    }
-    if (real_options.base_kp_yaw > 0.0) {
-        command += " --real-base-kp-yaw " + std::to_string(real_options.base_kp_yaw);
-    }
-    if (real_options.base_max_speed > 0.0) {
-        command += " --real-base-max-speed "
-            + std::to_string(real_options.base_max_speed);
-    }
-    if (real_options.base_max_yaw_rate > 0.0) {
-        command += " --real-base-max-yaw-rate "
-            + std::to_string(real_options.base_max_yaw_rate);
-    }
-    if (real_options.steer_rate_limit > 0.0) {
-        command += " --real-steer-rate-limit "
-            + std::to_string(real_options.steer_rate_limit);
-    }
-    if (real_options.drive_accel_limit > 0.0) {
-        command += " --real-drive-accel-limit "
-            + std::to_string(real_options.drive_accel_limit);
-    }
-    if (!real_options.payload_mode.empty()) {
-        command += " --real-payload-mode "
-            + shell_quote(real_options.payload_mode);
-    }
-
     std::cout.flush();
     std::cerr.flush();
     const int status = std::system(command.c_str());
     std::error_code remove_error;
     std::filesystem::remove(trajectory_path, remove_error);
     if (status != 0) {
-        throw std::runtime_error("MuJoCo real rack visualizer exited with an error");
+        throw std::runtime_error("MuJoCo mobility ctrl visualizer exited with an error");
     }
 }
 
@@ -898,7 +854,7 @@ void visualize_g1_path(
     trajectory["constraints"] = constraints;
     const auto &goals = g1_goals_from_problem(
         problem,
-        settings.rigid_orientation
+        settings.axis
     );
     if (!goals.is_array() || goals.empty()) {
         throw std::runtime_error("G1 visualization problem has no goal");
@@ -916,7 +872,7 @@ void visualize_g1_path(
                 : replanning.time_limit_sec
         },
         {"projection_smoothness", settings.projection_smoothness},
-        {"rigid_orientation", settings.rigid_orientation},
+        {"axis", settings.axis},
         {"mouse_obstacle_radius_m", 0.040},
         {"mouse_obstacle_collision_radius_m", 0.040},
         {"mouse_obstacle_initial_position", {0.400, 0.200, 0.800}}
@@ -926,7 +882,7 @@ void visualize_g1_path(
         trajectory["payload"] = center_of_mass.at("payload");
 
         // The bimanual translation is the right-hand frame origin expressed
-        // in the left-hand frame.  The VAMP/MuJoCo rubber-hand endpoint is at
+        // in the left-hand frame.  The Unitree/MuJoCo rubber-hand endpoint is at
         // [0.0415, 0.003, 0] in the left wrist-yaw body.
         const auto &target = constraints.at("bimanual").at("target");
         const auto midpoint_offset = trajectory["payload"].value(
@@ -972,9 +928,10 @@ void visualize_g1_path(
     );
     std::string command =
         "python3 " + shell_quote(visualizer_path.string())
-        + " --trajectory " + shell_quote(trajectory_path.string());
+        + " --trajectory " + shell_quote(trajectory_path.string())
+        + " --control-mode ctrl";
     if (replanning.enabled) {
-        command += " --replanning --control-mode ctrl";
+        command += " --replanning";
     }
 
     std::cout.flush();
@@ -992,9 +949,7 @@ void visualize_igris_c_path(
     const PlannerResult<robots::IgrisC> &result,
     const robots::IgrisC::Configuration &start,
     const json &problem,
-    bool real_dynamics,
     float object_mass_kg,
-    const RealDynamicsOptions &real_options,
     const json &geometric_path
 ) {
     if (result.path.size() < 2) {
@@ -1066,21 +1021,8 @@ void visualize_igris_c_path(
     );
     std::string command =
         "python3 " + shell_quote(visualizer_path.string())
-        + " --trajectory " + shell_quote(trajectory_path.string());
-    if (real_dynamics) {
-        command += " --real --object-mass " + std::to_string(object_mass_kg);
-        if (real_options.settle_steps >= 0) {
-            command += " --settle-steps "
-                + std::to_string(real_options.settle_steps);
-        }
-        if (real_options.initial_settle_steps >= 0) {
-            command += " --real-initial-settle-steps "
-                + std::to_string(real_options.initial_settle_steps);
-        }
-        if (real_options.speed > 0.0) {
-            command += " --speed " + std::to_string(real_options.speed);
-        }
-    }
+        + " --trajectory " + shell_quote(trajectory_path.string())
+        + " --object-mass " + std::to_string(object_mass_kg);
 
     std::cout.flush();
     std::cerr.flush();
@@ -1100,8 +1042,6 @@ int run_planner(
     AORRTC_settings &settings,
     bool visualize,
     bool path_smoothing,
-    bool real_dynamics,
-    const RealDynamicsOptions &real_options,
     bool print_path,
      bool plot,
     const std::string &robot_name,
@@ -1157,8 +1097,8 @@ int run_planner(
             }
             data["start"] = start;
             data["goals"] = goals;
-            data["rigid_orientation_endpoints"]["start"] = start;
-            data["rigid_orientation_endpoints"]["goals"] = goals;
+            data["axis_endpoints"]["start"] = start;
+            data["axis_endpoints"]["goals"] = goals;
         }
     }
     json saved_results = json::array();
@@ -1526,7 +1466,7 @@ int run_planner(
                 "arm_l_joint5", "arm_l_joint6", "arm_l_joint7",
                 "arm_r_joint1", "arm_r_joint2", "arm_r_joint3", "arm_r_joint4",
                 "arm_r_joint5", "arm_r_joint6", "arm_r_joint7"
-            }, visualization_geometric_path, attached_object_frame_offset, true);
+            }, data, visualization_geometric_path, attached_object_frame_offset);
         } else if constexpr (std::is_same_v<Robot, robots::FfwSg2Mobility>) {
             const auto &attached_object =
                 settings.ffw_sg2_attached_object_collision;
@@ -1543,34 +1483,24 @@ int run_planner(
                 "arm_r_joint1", "arm_r_joint2", "arm_r_joint3", "arm_r_joint4",
                 "arm_r_joint5", "arm_r_joint6", "arm_r_joint7"
             };
-            if (real_dynamics) {
-                const float object_mass_kg =
-                    settings.ffw_sg2_object_mass_kg > 0.0f
-                        ? settings.ffw_sg2_object_mass_kg
-                        : 3.0f;
-                const float support_margin_m =
-                    settings.ffw_sg2_support_margin_m > 0.0f
-                        ? settings.ffw_sg2_support_margin_m
-                        : 0.05f;
-                visualize_ffw_sg2_rack_real_path(
-                    visualization_result,
-                    start,
-                    joint_names,
-                    attached_object_frame_offset,
-                    object_mass_kg,
-                    support_margin_m,
-                    real_options,
-                    visualization_geometric_path
-                );
-            } else {
-                visualize_ffw_sg2_path(
-                    visualization_result,
-                    start,
-                    joint_names,
-                    visualization_geometric_path,
-                    attached_object_frame_offset
-                );
-            }
+            const float object_mass_kg =
+                settings.ffw_sg2_object_mass_kg > 0.0f
+                    ? settings.ffw_sg2_object_mass_kg
+                    : 3.0f;
+            const float support_margin_m =
+                settings.ffw_sg2_support_margin_m > 0.0f
+                    ? settings.ffw_sg2_support_margin_m
+                    : 0.05f;
+            visualize_ffw_sg2_mobility_ctrl_path(
+                visualization_result,
+                start,
+                joint_names,
+                data,
+                attached_object_frame_offset,
+                object_mass_kg,
+                support_margin_m,
+                visualization_geometric_path
+            );
         } else if constexpr (std::is_same_v<Robot, robots::G1>) {
             visualize_g1_path(
                 visualization_result,
@@ -1600,25 +1530,23 @@ int run_planner(
                 visualization_result,
                 start,
                 data,
-                real_dynamics,
                 object_mass_kg,
-                real_options,
                 visualization_geometric_path
             );
         } else if constexpr (std::is_same_v<Robot, robots::FrankaSingle>) {
             visualize_franka_path(visualization_result, start, {
-                "panda0_joint1", "panda0_joint2", "panda0_joint3",
-                "panda0_joint4", "panda0_joint5", "panda0_joint6",
-                "panda0_joint7"
-            }, visualization_geometric_path);
+                "fer0_joint1", "fer0_joint2", "fer0_joint3",
+                "fer0_joint4", "fer0_joint5", "fer0_joint6",
+                "fer0_joint7"
+            }, data, visualization_geometric_path);
         } else if constexpr (std::is_same_v<Robot, robots::Franka>) {
             visualize_franka_path(visualization_result, start, {
-                "panda0_joint1", "panda0_joint2", "panda0_joint3",
-                "panda0_joint4", "panda0_joint5", "panda0_joint6",
-                "panda0_joint7", "panda1_joint1", "panda1_joint2",
-                "panda1_joint3", "panda1_joint4", "panda1_joint5",
-                "panda1_joint6", "panda1_joint7"
-            }, visualization_geometric_path);
+                "fer0_joint1", "fer0_joint2", "fer0_joint3",
+                "fer0_joint4", "fer0_joint5", "fer0_joint6",
+                "fer0_joint7", "fer1_joint1", "fer1_joint2",
+                "fer1_joint3", "fer1_joint4", "fer1_joint5",
+                "fer1_joint6", "fer1_joint7"
+            }, data, visualization_geometric_path);
         } else {
             throw std::runtime_error(
                 "--visualize supports only ffw_sg2, ffw_sg2_mobility, "
@@ -1634,7 +1562,6 @@ int run_g1_replan_server(
     AORRTC_settings &settings,
     const G1ReplanningOptions &replanning
 ) {
-    const RealDynamicsOptions no_real_dynamics;
     const G1ReplanningOptions no_nested_replanning;
     const TraceExportOptions no_trace;
 
@@ -1690,9 +1617,9 @@ int run_g1_replan_server(
 
             problem["start"] = projected_start;
             problem["goals"] = json::array({request.at("goal")});
-            problem["rigid_orientation_endpoints"]["start"] =
+            problem["axis_endpoints"]["start"] =
                 projected_start;
-            problem["rigid_orientation_endpoints"]["goals"] =
+            problem["axis_endpoints"]["goals"] =
                 json::array({request.at("goal")});
             if (request.contains("environment")) {
                 const auto &request_environment = request.at("environment");
@@ -1711,8 +1638,6 @@ int run_g1_replan_server(
                 settings,
                 false,
                 false,
-                false,
-                no_real_dynamics,
                 false,
                 false,
                 "g1",
@@ -1755,10 +1680,9 @@ int main(int argc, char* argv[]) {
     int problem_idx = 1;
     bool visualize = false;
     bool path_smoothing = true;
-    bool real_dynamics = false;
     bool plot = false;
     bool trace_trees = false;
-    bool rigid_orientation = false;
+    bool axis = false;
     bool projection_smoothness = true;
     bool print_path = true;
     bool collect_diagnostics = false;
@@ -1769,7 +1693,7 @@ int main(int argc, char* argv[]) {
     bool support_margin_option_provided = false;
     bool time_option_provided = false;
     bool range_option_provided = false;
-    bool rigid_orientation_option_provided = false;
+    bool axis_option_provided = false;
     float object_mass_kg = 0.0f;
     float support_margin_m = 0.0f;
     float planner_range = 0.4f;
@@ -1780,7 +1704,6 @@ int main(int argc, char* argv[]) {
     std::string problem_file_path;
     std::string save_json_path;
     TraceExportOptions trace_options;
-    RealDynamicsOptions real_options;
     G1ReplanningOptions g1_replanning;
     std::optional<ppln::config::SelectedPlanningProblem> selected_problem;
     const bool standalone_config_mode = argc >= 2 &&
@@ -1791,21 +1714,13 @@ int main(int argc, char* argv[]) {
         (standalone_config_mode && argc < 3)) {
         std::cout
             << "Usage: ./single_mbm <robot_name> <problem_name> <problem_idx> "
-            << "[--visualize] [--replanning] [--real] "
+            << "[--visualize] [--replanning] "
             << "[--save-json PATH] [--run N|--runs N] "
             << "[--problem-file PATH] "
             << "[--seed N] [--range VALUE] "
             << "[--aorrtc] [--time SECONDS] [--plot] "
             << "[--com] [--object-mass-kg KG] [--support-margin M] "
-            << "[--real-speed SPEED] [--real-settle-steps N] "
-            << "[--real-initial-settle-steps N] "
-            << "[--real-payload-mode rigid|equality] "
-            << "[--real-base-kp-xy K] [--real-base-kp-yaw K] "
-            << "[--real-base-max-speed MPS] "
-            << "[--real-base-max-yaw-rate RPS] "
-            << "[--real-steer-rate-limit RPS] "
-            << "[--real-drive-accel-limit RPS2] "
-            << "[--rigid-orientation] "
+            << "[--axis] "
             << "[--validate-config] "
             << "[--diagnostics] "
             << "[--no-path-smoothing] "
@@ -1838,16 +1753,6 @@ int main(int argc, char* argv[]) {
         std::cerr << "single_mbm config error: " << error.what() << "\n";
         return 1;
     }
-    auto parse_nonnegative_int = [](const std::string &option, const std::string &value) {
-        std::size_t consumed = 0;
-        const int parsed = std::stoi(value, &consumed);
-        if (consumed != value.size() || parsed < 0) {
-            throw std::invalid_argument(
-                option + " must be an integer greater than or equal to 0"
-            );
-        }
-        return parsed;
-    };
     auto parse_positive_double = [](const std::string &option, const std::string &value) {
         std::size_t consumed = 0;
         const double parsed = std::stod(value, &consumed);
@@ -1898,8 +1803,6 @@ int main(int argc, char* argv[]) {
                 g1_replanning.server = true;
             } else if (argument == "--no-path-smoothing") {
                 path_smoothing = false;
-            } else if (argument == "--real") {
-                real_dynamics = true;
             } else if (argument == "--save-json" && index + 1 < argc) {
                 save_json_path = argv[++index];
             } else if (argument == "--problem-file" && index + 1 < argc) {
@@ -1981,59 +1884,6 @@ int main(int argc, char* argv[]) {
                         "--time must be a finite number greater than 0"
                     );
                 }
-            } else if (argument == "--real-settle-steps" && index + 1 < argc) {
-                real_options.settle_steps = parse_nonnegative_int(
-                    argument,
-                    argv[++index]
-                );
-            } else if (argument == "--real-initial-settle-steps" && index + 1 < argc) {
-                real_options.initial_settle_steps = parse_nonnegative_int(
-                    argument,
-                    argv[++index]
-                );
-            } else if (argument == "--real-speed" && index + 1 < argc) {
-                real_options.speed = parse_positive_double(
-                    argument,
-                    argv[++index]
-                );
-            } else if (argument == "--real-base-kp-xy" && index + 1 < argc) {
-                real_options.base_kp_xy = parse_positive_double(
-                    argument,
-                    argv[++index]
-                );
-            } else if (argument == "--real-base-kp-yaw" && index + 1 < argc) {
-                real_options.base_kp_yaw = parse_positive_double(
-                    argument,
-                    argv[++index]
-                );
-            } else if (argument == "--real-base-max-speed" && index + 1 < argc) {
-                real_options.base_max_speed = parse_positive_double(
-                    argument,
-                    argv[++index]
-                );
-            } else if (argument == "--real-base-max-yaw-rate" && index + 1 < argc) {
-                real_options.base_max_yaw_rate = parse_positive_double(
-                    argument,
-                    argv[++index]
-                );
-            } else if (argument == "--real-steer-rate-limit" && index + 1 < argc) {
-                real_options.steer_rate_limit = parse_positive_double(
-                    argument,
-                    argv[++index]
-                );
-            } else if (argument == "--real-drive-accel-limit" && index + 1 < argc) {
-                real_options.drive_accel_limit = parse_positive_double(
-                    argument,
-                    argv[++index]
-                );
-            } else if (argument == "--real-payload-mode" && index + 1 < argc) {
-                real_options.payload_mode = argv[++index];
-                if (real_options.payload_mode != "rigid"
-                    && real_options.payload_mode != "equality") {
-                    throw std::invalid_argument(
-                        "--real-payload-mode must be one of: rigid, equality"
-                    );
-                }
             } else if (argument == "--trace-trees") {
                 trace_trees = true;
             } else if (argument == "--trace-mode" && index + 1 < argc) {
@@ -2073,12 +1923,9 @@ int main(int argc, char* argv[]) {
             } else if (argument == "--patacon-root" && index + 1 < argc) {
                 trace_options.patacon_root = argv[++index];
                 trace_options.requested = true;
-            }else if (
-                argument == "--rigid-orientation" ||
-                argument == "--rigid-orientiation"
-            ) {
-                rigid_orientation = true;
-                rigid_orientation_option_provided = true;
+            }else if (argument == "--axis") {
+                axis = true;
+                axis_option_provided = true;
             }
             else if (argument == "--diagnostics") {
                 collect_diagnostics = true;
@@ -2110,11 +1957,6 @@ int main(int argc, char* argv[]) {
                     "--replanning requires one planner run"
                 );
             }
-            if (real_dynamics) {
-                throw std::invalid_argument(
-                    "--replanning selects G1 ctrl mode; do not add --real"
-                );
-            }
             visualize = true;
             path_smoothing = false;
             g1_replanning.planner_executable =
@@ -2123,7 +1965,6 @@ int main(int argc, char* argv[]) {
         if (g1_replanning.server
             && (robot_name != "g1"
                 || visualize
-                || real_dynamics
                 || g1_replanning.enabled
                 || runs != 1
                 || plot
@@ -2146,29 +1987,11 @@ int main(int argc, char* argv[]) {
                 "--seed plus the run count exceeds the supported seed range"
             );
         }
-        if (real_dynamics && !visualize) {
-            throw std::invalid_argument(
-                "--real currently applies only to --visualize"
-            );
-        }
         if (!path_smoothing && !visualize) {
             throw std::invalid_argument(
                 "--no-path-smoothing requires --visualize"
             );
         }
-        if (real_dynamics
-            && robot_name != "ffw_sg2_mobility"
-            && robot_name != "igris_c") {
-            throw std::invalid_argument(
-                "--real is supported only for ffw_sg2_mobility and igris_c"
-            );
-        }
-        if (!real_dynamics && real_options.provided()) {
-            throw std::invalid_argument(
-                "real dynamics tuning options require --real"
-            );
-        }
-
         if (
             enable_com_constraint &&
             robot_name != "ffw_sg2_mobility"
@@ -2187,11 +2010,6 @@ int main(int argc, char* argv[]) {
                 "ffw_sg2_mobility and igris_c"
             );
         }
-        if (object_mass_option_provided && !enable_com_constraint && !real_dynamics) {
-            throw std::invalid_argument(
-                "--object-mass-kg requires --com or --real"
-            );
-        }
         if (
             support_margin_option_provided &&
             robot_name != "ffw_sg2_mobility"
@@ -2200,14 +2018,9 @@ int main(int argc, char* argv[]) {
                 "--support-margin is supported only for ffw_sg2_mobility"
             );
         }
-        if (support_margin_option_provided && !enable_com_constraint && !real_dynamics) {
+        if (object_mass_option_provided && object_mass_kg <= 0.0f) {
             throw std::invalid_argument(
-                "--support-margin requires --com or --real"
-            );
-        }
-        if (real_dynamics && object_mass_option_provided && object_mass_kg <= 0.0f) {
-            throw std::invalid_argument(
-                "--object-mass-kg must be greater than 0 with --real"
+                "--object-mass-kg must be greater than 0"
             );
         }
 
@@ -2286,22 +2099,22 @@ int main(int argc, char* argv[]) {
                 return 1;
             }
         }
-        if (!rigid_orientation_option_provided &&
-            planner.contains("rigid_orientation")) {
+        if (!axis_option_provided &&
+            planner.contains("axis")) {
             try {
-                rigid_orientation =
-                    planner.at("rigid_orientation").get<bool>();
+                axis =
+                    planner.at("axis").get<bool>();
             } catch (const std::exception &) {
                 std::cerr << "single_mbm config error: "
-                          << "planner.rigid_orientation must be boolean\n";
+                          << "planner.axis must be boolean\n";
                 return 1;
             }
         }
     }
-    if (!rigid_orientation_option_provided && robot_name == "g1" &&
+    if (!axis_option_provided && robot_name == "g1" &&
         data.contains("constraints") &&
         data.at("constraints").contains("bimanual_axis")) {
-        rigid_orientation = true;
+        axis = true;
     }
     if (validate_config_only) {
         std::cout << "config_valid: " << path << "\n"
@@ -2324,9 +2137,9 @@ int main(int argc, char* argv[]) {
         const json replanning_endpoints = data.at("replanning_endpoints");
         data["start"] = replanning_endpoints.at("start");
         data["goals"] = replanning_endpoints.at("goals");
-        data["rigid_orientation_endpoints"]["start"] =
+        data["axis_endpoints"]["start"] =
             replanning_endpoints.at("start");
-        data["rigid_orientation_endpoints"]["goals"] =
+        data["axis_endpoints"]["goals"] =
             replanning_endpoints.at("goals");
 
         // In replanning mode the moving sphere is the only world obstacle.
@@ -2353,7 +2166,7 @@ int main(int argc, char* argv[]) {
     settings.range = planner_range;
     settings.lift_distance_weight = 1.0f;
     settings.ffw_sg2_enable_com_constraint = enable_com_constraint;
-    settings.rigid_orientation = rigid_orientation;
+    settings.axis = axis;
     settings.projection_smoothness = projection_smoothness;
     settings.balance = 2;
     settings.tree_ratio = 1.0;
@@ -2411,23 +2224,23 @@ int main(int argc, char* argv[]) {
             return run_g1_replan_server(data, settings, g1_replanning);
         }
         if (robot_name == "ffw_sg2") {
-            return run_planner<robots::FfwSg2>(data, env, settings, visualize, path_smoothing, real_dynamics, real_options, print_path, plot,
+            return run_planner<robots::FfwSg2>(data, env, settings, visualize, path_smoothing, print_path, plot,
                 robot_name, name, problem_idx, save_json_path, trace_options, runs);
         } else if (robot_name == "ffw_sg2_mobility") {
-            return run_planner<robots::FfwSg2Mobility>(data, env, settings, visualize, path_smoothing, real_dynamics, real_options, print_path, plot,
+            return run_planner<robots::FfwSg2Mobility>(data, env, settings, visualize, path_smoothing, print_path, plot,
                 robot_name, name, problem_idx, save_json_path, trace_options, runs);
         } else if (robot_name == "g1") {
-            return run_planner<robots::G1>(data, env, settings, visualize, path_smoothing, real_dynamics, real_options, print_path, plot,
+            return run_planner<robots::G1>(data, env, settings, visualize, path_smoothing, print_path, plot,
                 robot_name, name, problem_idx, save_json_path, trace_options, runs,
                 g1_replanning);
         } else if (robot_name == "igris_c") {
-            return run_planner<robots::IgrisC>(data, env, settings, visualize, path_smoothing, real_dynamics, real_options, print_path, plot,
+            return run_planner<robots::IgrisC>(data, env, settings, visualize, path_smoothing, print_path, plot,
                 robot_name, name, problem_idx, save_json_path, trace_options, runs);
         } else if (robot_name == "franka_single") {
-            return run_planner<robots::FrankaSingle>(data, env, settings, visualize, path_smoothing, real_dynamics, real_options, print_path, plot,
+            return run_planner<robots::FrankaSingle>(data, env, settings, visualize, path_smoothing, print_path, plot,
                 robot_name, name, problem_idx, save_json_path, trace_options, runs);
         } else if (robot_name == "franka") {
-            return run_planner<robots::Franka>(data, env, settings, visualize, path_smoothing, real_dynamics, real_options, print_path, plot,
+            return run_planner<robots::Franka>(data, env, settings, visualize, path_smoothing, print_path, plot,
                 robot_name, name, problem_idx, save_json_path, trace_options, runs);
         } else {
             std::cerr << "Unsupported robot type: " << robot_name << "\n";

@@ -1,7 +1,7 @@
 #pragma once
 
-// Generated from VAMP's g1_unitree.hh by scripts/generate_g1_cuda.py.
-// The generated arithmetic is the exact scalar form of VAMP sphere_fk.
+// PATACON's checked-in G1 sphere model, validated against the pinned official
+// Unitree g1_29dof URDF/MJCF by resources/g1/prepare_description.py.
 
 #include "src/collision/environment.hh"
 

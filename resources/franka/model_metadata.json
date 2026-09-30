@@ -1,0 +1,113 @@
+{
+  "generated": {
+    "resources/franka/fer_dual.urdf": "a21d145fd9cfd493e3959234a9fef6eb47861bb78ac90e5ab09d09fa224f598d",
+    "resources/franka/fer_single.urdf": "696c3dbe1a5365249a037b4b3716ffaafd1ad07a70b07423f3f76816db57c539",
+    "resources/franka/mujoco/fer_dual.xml": "cf7cffafcc189d76fe2fd4f54b047dd22940da3ae68d8cddd26acedddf19db8c",
+    "resources/franka/mujoco/fer_single.xml": "57338767292d86964fef647aefc67eafb1b5819fd768d9b57e2230100a57df74",
+    "src/robots/franka_fer.cuh": "ecb8947c8d53726ad7027497dd7c7c7072239a893d079a5088a1c219b07ac836"
+  },
+  "patacon_contract": {
+    "approximate_spheres_per_arm": 11,
+    "dual_mounts_xyz_m": [
+      [
+        0.0,
+        0.2,
+        0.6
+      ],
+      [
+        0.0,
+        -0.2,
+        0.6
+      ]
+    ],
+    "dual_planning_dof": 14,
+    "fine_spheres_per_arm": 59,
+    "hand_tcp_offset_m": 0.1034,
+    "joint_limits_rad": [
+      [
+        -2.8973,
+        2.8973
+      ],
+      [
+        -1.7628,
+        1.7628
+      ],
+      [
+        -2.8973,
+        2.8973
+      ],
+      [
+        -3.0718,
+        -0.0698
+      ],
+      [
+        -2.8973,
+        2.8973
+      ],
+      [
+        -0.0175,
+        3.7525
+      ],
+      [
+        -2.8973,
+        2.8973
+      ]
+    ],
+    "joint_order_per_arm": [
+      "joint1",
+      "joint2",
+      "joint3",
+      "joint4",
+      "joint5",
+      "joint6",
+      "joint7"
+    ],
+    "single_mount_xyz_m": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "single_planning_dof": 7
+  },
+  "source": {
+    "commit": "7aeeddc449edf8d62b594f9e36a81da53e7796f9",
+    "end_effector": "franka_hand",
+    "files_sha256": {
+      "end_effectors/common/franka_hand.xacro": "6edc70dc552caa2596f40695f17dec8afd4eb489d67e36e5d0327d3ee4705ed1",
+      "end_effectors/common/utils.xacro": "29043c9cbd7aa7e0359c1da12c220e78a8ba2467432381ba1975c6295e3e98cd",
+      "end_effectors/franka_hand/franka_hand_arguments.xacro": "496a3b356b31339edeac05f76e08f1a7a34b5794e81419b8c089db74b1942d2c",
+      "end_effectors/franka_hand/inertials.yaml": "6f09ae9ac8838e61d33167d0e6358fd3a61082b432028063805ff6625bc69207",
+      "meshes/robot_ee/franka_hand_white/collision/hand.stl": "94493e94f30fe940f2c8ca2f155c3bbe67bbff406d3edf5e261670d2f0f6e2ed",
+      "meshes/robot_ee/franka_hand_white/visual/finger.dae": "12c7bc9b55ffd0d1d0e3442d3e213ecc4fbebbced15259a20195af464f871fcd",
+      "meshes/robot_ee/franka_hand_white/visual/hand.dae": "1b50601d3157f810176aba6db7164d6bdb4ec8b6546a8a725baba2fa2a21c58a",
+      "meshes/robots/fer/collision/link0.stl": "dfc6d94330de8ddb005b311bfdba9f3b8e1aa7c256b71592ee7ff32cb9a9a5aa",
+      "meshes/robots/fer/collision/link1.stl": "e41a39a94108fcf56aacff603fc91ec80541f4c1af17b51a0de5617f5566e6d2",
+      "meshes/robots/fer/collision/link2.stl": "370f7605a0fae3529db169ded50f52f171024aa792d4d773bc84197301f6a039",
+      "meshes/robots/fer/collision/link3.stl": "0a8d638b9349c6c0eefc4e888636ac4838c4b27170f18a51699321118af709c1",
+      "meshes/robots/fer/collision/link4.stl": "0180ebb5772ec9840cb049750cffb29a9ddc90311752a16ea34757782ef9e48d",
+      "meshes/robots/fer/collision/link5.stl": "dd17e688c7870e722283525879643d53a74c0024d328b0e14b034b54c8b6c31a",
+      "meshes/robots/fer/collision/link6.stl": "20b768e99a0e0440b5754dcca108016434e57937cc356acd9c352ccd3cb27f77",
+      "meshes/robots/fer/collision/link7.stl": "92ac6afcf7574c034d3170d8a68e95ac9048ab9d0dd5bbd8311b86e551b9ab1c",
+      "meshes/robots/fer/visual/link0.dae": "a7f5e5a0143e423ffb5ec1aeaa1cf2ab389ac843d74d8c4ddbebcb1a5ae5a279",
+      "meshes/robots/fer/visual/link1.dae": "92bc7949d546c2e34a7f1af54df7b4f91c34d3012a74c6133020013a544cfd74",
+      "meshes/robots/fer/visual/link2.dae": "e5427e7e0c5f2f0de631650347b7e4e2acef40b8b8d6cc52d98e055bba422da7",
+      "meshes/robots/fer/visual/link3.dae": "feca6e5e97002d454eb1b6482bf07e2574fcf066b8a3cfe81f64e25a23d40573",
+      "meshes/robots/fer/visual/link4.dae": "1ef9069b94d0d26fbf166654789559006d9ff61ae6de056956b469886697ce70",
+      "meshes/robots/fer/visual/link5.dae": "9e3f45fd1a7366949e8e8aa25cee6f90842793276e2d62ac4489f6c58c7f6376",
+      "meshes/robots/fer/visual/link6.dae": "3b55327b084952b49beb6f1f730494f16de6bd4d4b5464cbf1d4f3cd590162b7",
+      "meshes/robots/fer/visual/link7.dae": "5fa145c2c900a3f4c2b328e6ac2e642b7d78461b88f8d19eb9908baa4aa75f79",
+      "package.xml": "ff3d3c63eaccfb28b0d36b5f364be11b0b2406786a8db08253b3e384c436e456",
+      "robots/common/franka_arm.xacro": "3c19225fa490120bb0276faa83b5d8dedab56d21fc0b64a677d5c61136fde81e",
+      "robots/common/franka_robot.xacro": "5f9adfd8570b2f6fea16fb95fc1453f9a6ae2cb382dfd6d1deaf67efa62f90c2",
+      "robots/common/utils.xacro": "b6819d3530d760ae8f4a318348d0125f3a2ae67bf03bfc965060d8388fd060f7",
+      "robots/fer/dynamics.yaml": "e65e145114b431bd17cdebc58b88c43505f0658472cca6ffbc9c32b7a198f79b",
+      "robots/fer/fer.urdf.xacro": "740255b6a268863ea19d02dd93c8cf9cdd176af096eb5bd4185d4bb7ec6d2afc",
+      "robots/fer/inertials.yaml": "213cbf35de6645bee36e8e60f9707ad69972738a12dcb1ec496ed720fb7ffc66",
+      "robots/fer/joint_limits.yaml": "c531201d06715a3c90a9d793748b14d83f5b512c007dd56e3dc712eee6106ec7",
+      "robots/fer/kinematics.yaml": "44326830a6773dd6611cdf9947045eeb3276ea4e3ca47a05272816c862c8e386"
+    },
+    "release": "2.9.0",
+    "repository": "https://github.com/frankarobotics/franka_description.git",
+    "robot_model": "fer"
+  }
+}

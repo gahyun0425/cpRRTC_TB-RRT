@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "robot": {"model": "franka", "dimension": 14},
-  "source": "cptbrrt_pkg robots/franka profile and world_collision.yaml",
+  "source": "PATACON dual-arm task adapted to official franka_description FER 2.9.0",
   "problems": {
     "demo": [
       {

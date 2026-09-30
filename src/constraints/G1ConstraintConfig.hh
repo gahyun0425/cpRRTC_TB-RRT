@@ -13,31 +13,31 @@
 
 inline const nlohmann::json &g1_start_from_problem(
     const nlohmann::json &problem,
-    bool rigid_orientation
+    bool axis
 ) {
-    if (!rigid_orientation) {
+    if (!axis) {
         return problem.at("start");
     }
-    if (!problem.contains("rigid_orientation_endpoints")) {
+    if (!problem.contains("axis_endpoints")) {
         throw std::invalid_argument(
-            "G1 problem is missing rigid_orientation_endpoints"
+            "G1 problem is missing axis_endpoints"
         );
     }
-    return problem.at("rigid_orientation_endpoints").at("start");
+    return problem.at("axis_endpoints").at("start");
 }
 
 inline const nlohmann::json &g1_goals_from_problem(
     const nlohmann::json &problem,
-    bool /*rigid_orientation*/
+    bool /*axis*/
 ) {
-    // Use the axis-feasible goal in both modes so rigid_orientation changes
+    // Use the axis-feasible goal in both modes so axis changes
     // only the active constraint set, not the planning query's goal.
-    if (!problem.contains("rigid_orientation_endpoints")) {
+    if (!problem.contains("axis_endpoints")) {
         throw std::invalid_argument(
-            "G1 problem is missing rigid_orientation_endpoints"
+            "G1 problem is missing axis_endpoints"
         );
     }
-    return problem.at("rigid_orientation_endpoints").at("goals");
+    return problem.at("axis_endpoints").at("goals");
 }
 
 inline ppln::constraints::G1ConstraintParameters g1_constraint_parameters_from_problem(

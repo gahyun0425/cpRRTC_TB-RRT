@@ -29,7 +29,7 @@ json make_unified_problem() {
         {"schema_version", 1},
         {"robot", {{"model", "igris_c"}, {"dimension", 35}}},
         {"name", "codec_test"},
-        {"planner", {{"range", 0.25}, {"rigid_orientation", true}}},
+        {"planner", {{"range", 0.25}, {"axis", true}}},
         {"query", {
             {"start", configuration},
             {"goals", json::array({configuration})}

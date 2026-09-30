@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "robot": {"model": "franka_single", "dimension": 7},
-  "source": "cptbrrt_pkg robots/franka_single profile and single_world_collision.yaml",
+  "source": "PATACON task adapted to official franka_description FER 2.9.0",
   "problems": {
     "demo": [
       {

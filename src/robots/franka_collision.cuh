@@ -1,9 +1,7 @@
 #pragma once
 
-// The imported MuJoCo models use the same Panda link kinematics as the
-// repository's existing Panda collision backend.  Keep that proven sphere
-// model and add the fixed dual-arm mount transforms plus the source models'
-// end-effector-attached payloads here.
+// The sphere model follows the official FER link frames. PATACON adds its
+// fixed parallel dual-arm mounts and task-specific attached payloads here.
 
 #include <type_traits>
 
@@ -14,23 +12,31 @@ namespace ppln::collision {
 constexpr int FRANKA_ARM_FINE_SPHERES = 59;
 constexpr int FRANKA_ARM_APPROX_SPHERES = 11;
 constexpr int FRANKA_COLLISION_BATCH = 16;
+constexpr int FRANKA_COLLISION_JOINT_FLAG_STRIDE = 20;
 constexpr int FRANKA_SINGLE_ATTACHED_SPHERES = 5;
 constexpr int FRANKA_DUAL_ATTACHED_SPHERES = 44;
 constexpr float FRANKA_ATTACHED_SPHERE_RADIUS = 0.02f;
 
-// T_start_EE_object for the object body in franka_single.xml.  The source
-// implementation computes this transform when it attaches the MuJoCo object
-// at the default start configuration.
+static_assert(
+    FRANKA_ARM_FINE_SPHERES == FRANKA_FER_SPHERE_COUNT &&
+    FRANKA_ARM_APPROX_SPHERES == FRANKA_FER_APPROX_SPHERE_COUNT &&
+    FRANKA_COLLISION_BATCH == FRANKA_FER_BATCH_SIZE,
+    "Franka FER wrapper constants differ from the sphere header"
+);
+
+// T_start_EE_object for the single-arm task. The translation is expressed
+// from the official hand TCP at z=0.1034 m; the physical payload placement is
+// unchanged from the previous z=0.1000 m PATACON task frame.
 __device__ __constant__ float franka_single_attached_rotation[9] = {
     5.65184217e-06f, 4.04983458e-06f, -1.0f,
     7.46365351e-06f, 1.0f, 4.04987676e-06f,
     1.0f, -7.46367640e-06f, 5.65181194e-06f
 };
 __device__ __constant__ float franka_single_attached_translation[3] = {
-    -0.0299951539f, -3.27119653e-06f, -0.0200040056f
+    -0.0299951539f, -3.27119653e-06f, -0.0234040056f
 };
 
-// T_start_left_EE_object for the five-box tray in franka_panda.xml.  The
+// T_start_left_EE_object for the five-box tray in fer_dual.xml. The
 // payload is parented to the left EE; the dual relative-pose equality keeps
 // the right grasp fixed with respect to it.
 __device__ __constant__ float franka_dual_attached_rotation[9] = {
@@ -39,7 +45,7 @@ __device__ __constant__ float franka_dual_attached_rotation[9] = {
     4.01249807e-06f, -1.89336233e-06f, -1.0f
 };
 __device__ __constant__ float franka_dual_attached_translation[3] = {
-    -7.26699543e-08f, 0.124998270f, 0.0499992695f
+    -7.26699543e-08f, 0.124998270f, 0.0465992695f
 };
 
 template <typename Robot>
@@ -47,7 +53,7 @@ __device__ __forceinline__ int franka_attached_sphere_count() {
     static_assert(
         std::is_same_v<Robot, robots::FrankaSingle> ||
         std::is_same_v<Robot, robots::Franka>,
-        "attached payload is only defined for imported Franka models"
+        "attached payload is only defined for Franka FER models"
     );
     if constexpr (std::is_same_v<Robot, robots::FrankaSingle>) {
         return FRANKA_SINGLE_ATTACHED_SPHERES;
@@ -176,12 +182,12 @@ __device__ __forceinline__ bool franka_fine_env_check_and_mark(
                 sphere_positions[offset],
                 sphere_positions[offset + 1],
                 sphere_positions[offset + 2],
-                panda_spheres_array[sphere].w
+                franka_fer_spheres_array[sphere].w
             )) {
             collision_found = true;
             atomicAdd(
                 (int *)&joint_in_collision[
-                    20 * batch + panda_sphere_to_joint[sphere]
+                    20 * batch + franka_fer_sphere_to_joint[sphere]
                 ],
                 1
             );
@@ -198,12 +204,12 @@ __device__ __forceinline__ bool franka_fine_arm_self_check_and_mark(
     const int lane = tid % 4;
     const int batch = tid / 4;
     bool collision_found = false;
-    for (int range = lane; range < PANDA_SELF_CC_RANGE_COUNT; range += 4) {
-        const int first = panda_self_cc_ranges[range][0];
+    for (int range = lane; range < FRANKA_FER_SELF_CC_RANGE_COUNT; range += 4) {
+        const int first = franka_fer_self_cc_ranges[range][0];
         const int first_offset =
             first * FRANKA_COLLISION_BATCH * 3 + batch * 3;
-        for (int second = panda_self_cc_ranges[range][1];
-             second <= panda_self_cc_ranges[range][2];
+        for (int second = franka_fer_self_cc_ranges[range][1];
+             second <= franka_fer_self_cc_ranges[range][2];
              ++second) {
             const int second_offset =
                 second * FRANKA_COLLISION_BATCH * 3 + batch * 3;
@@ -211,16 +217,16 @@ __device__ __forceinline__ bool franka_fine_arm_self_check_and_mark(
                     sphere_positions[first_offset],
                     sphere_positions[first_offset + 1],
                     sphere_positions[first_offset + 2],
-                    panda_spheres_array[first].w,
+                    franka_fer_spheres_array[first].w,
                     sphere_positions[second_offset],
                     sphere_positions[second_offset + 1],
                     sphere_positions[second_offset + 2],
-                    panda_spheres_array[second].w
+                    franka_fer_spheres_array[second].w
                 )) {
                 collision_found = true;
                 atomicAdd(
                     (int *)&joint_in_collision[
-                        20 * batch + panda_sphere_to_joint[first]
+                        20 * batch + franka_fer_sphere_to_joint[first]
                     ],
                     1
                 );
@@ -276,11 +282,11 @@ __device__ __forceinline__ bool franka_cross_arm_self_collision(
         const int right_offset = arm_offset +
             right * FRANKA_COLLISION_BATCH * 3 + batch * 3;
         const float left_radius = Approximate
-            ? panda_approx_spheres_array[left].w
-            : panda_spheres_array[left].w;
+            ? franka_fer_approx_spheres_array[left].w
+            : franka_fer_spheres_array[left].w;
         const float right_radius = Approximate
-            ? panda_approx_spheres_array[right].w
-            : panda_spheres_array[right].w;
+            ? franka_fer_approx_spheres_array[right].w
+            : franka_fer_spheres_array[right].w;
         if (sphere_sphere_self_collision(
                 sphere_positions[left_offset],
                 sphere_positions[left_offset + 1],
@@ -294,11 +300,11 @@ __device__ __forceinline__ bool franka_cross_arm_self_collision(
             collision_found = true;
             if (mark_links) {
                 const int left_joint = Approximate
-                    ? panda_approx_sphere_to_joint[left]
-                    : panda_sphere_to_joint[left];
+                    ? franka_fer_approx_sphere_to_joint[left]
+                    : franka_fer_sphere_to_joint[left];
                 const int right_joint = Approximate
-                    ? panda_approx_sphere_to_joint[right]
-                    : panda_sphere_to_joint[right];
+                    ? franka_fer_approx_sphere_to_joint[right]
+                    : franka_fer_sphere_to_joint[right];
                 atomicAdd(
                     (int *)&joint_in_collision[20 * batch + left_joint], 1
                 );
@@ -318,7 +324,7 @@ __device__ __forceinline__ void fk<ppln::robots::FrankaSingle>(
     float *transforms,
     int tid
 ) {
-    fk<ppln::robots::PandaCollisionModel>(q, sphere_positions, transforms, tid);
+    fk<ppln::robots::FrankaFerCollisionModel>(q, sphere_positions, transforms, tid);
 }
 
 template <>
@@ -328,7 +334,7 @@ __device__ __forceinline__ void fk_approx<ppln::robots::FrankaSingle>(
     float *transforms,
     int tid
 ) {
-    fk_approx<ppln::robots::PandaCollisionModel>(q, sphere_positions, transforms, tid);
+    fk_approx<ppln::robots::FrankaFerCollisionModel>(q, sphere_positions, transforms, tid);
 }
 
 template <>
@@ -337,7 +343,7 @@ __device__ __forceinline__ bool self_collision_check<ppln::robots::FrankaSingle>
     volatile int *joint_in_collision,
     int tid
 ) {
-    return self_collision_check<ppln::robots::PandaCollisionModel>(
+    return self_collision_check<ppln::robots::FrankaFerCollisionModel>(
         sphere_positions, joint_in_collision, tid
     );
 }
@@ -349,7 +355,7 @@ __device__ __forceinline__ bool env_collision_check<ppln::robots::FrankaSingle>(
     Environment<float> *environment,
     int tid
 ) {
-    return env_collision_check<ppln::robots::PandaCollisionModel>(
+    return env_collision_check<ppln::robots::FrankaFerCollisionModel>(
         sphere_positions, joint_in_collision, environment, tid
     );
 }
@@ -360,7 +366,7 @@ __device__ __forceinline__ bool self_collision_check_approx<ppln::robots::Franka
     volatile int *joint_in_collision,
     int tid
 ) {
-    return self_collision_check_approx<ppln::robots::PandaCollisionModel>(
+    return self_collision_check_approx<ppln::robots::FrankaFerCollisionModel>(
         sphere_positions, joint_in_collision, tid
     );
 }
@@ -372,7 +378,7 @@ __device__ __forceinline__ bool env_collision_check_approx<ppln::robots::FrankaS
     Environment<float> *environment,
     int tid
 ) {
-    return env_collision_check_approx<ppln::robots::PandaCollisionModel>(
+    return env_collision_check_approx<ppln::robots::FrankaFerCollisionModel>(
         sphere_positions, joint_in_collision, environment, tid
     );
 }
@@ -387,11 +393,11 @@ __device__ __noinline__ void fk<ppln::robots::Franka>(
     constexpr int sphere_stride =
         FRANKA_ARM_FINE_SPHERES * FRANKA_COLLISION_BATCH * 3;
     constexpr int transform_stride = FRANKA_COLLISION_BATCH * 16;
-    fk<ppln::robots::PandaCollisionModel>(q, sphere_positions, transforms, tid);
+    fk<ppln::robots::FrankaFerCollisionModel>(q, sphere_positions, transforms, tid);
     franka_translate_arm_spheres<FRANKA_ARM_FINE_SPHERES>(
         sphere_positions, transforms, 0.0f, 0.2f, 0.6f, tid
     );
-    fk<ppln::robots::PandaCollisionModel>(
+    fk<ppln::robots::FrankaFerCollisionModel>(
         q + 7,
         sphere_positions + sphere_stride,
         transforms + transform_stride,
@@ -414,11 +420,11 @@ __device__ __noinline__ void fk_approx<ppln::robots::Franka>(
     constexpr int sphere_stride =
         FRANKA_ARM_APPROX_SPHERES * FRANKA_COLLISION_BATCH * 3;
     constexpr int transform_stride = FRANKA_COLLISION_BATCH * 16;
-    fk_approx<ppln::robots::PandaCollisionModel>(q, sphere_positions, transforms, tid);
+    fk_approx<ppln::robots::FrankaFerCollisionModel>(q, sphere_positions, transforms, tid);
     franka_translate_arm_spheres<FRANKA_ARM_APPROX_SPHERES>(
         sphere_positions, transforms, 0.0f, 0.2f, 0.6f, tid
     );
-    fk_approx<ppln::robots::PandaCollisionModel>(
+    fk_approx<ppln::robots::FrankaFerCollisionModel>(
         q + 7,
         sphere_positions + sphere_stride,
         transforms + transform_stride,
@@ -440,10 +446,10 @@ __device__ __noinline__ bool env_collision_check<ppln::robots::Franka>(
 ) {
     constexpr int stride =
         FRANKA_ARM_FINE_SPHERES * FRANKA_COLLISION_BATCH * 3;
-    const bool left_ok = env_collision_check<ppln::robots::PandaCollisionModel>(
+    const bool left_ok = env_collision_check<ppln::robots::FrankaFerCollisionModel>(
         sphere_positions, joint_in_collision, environment, tid
     );
-    const bool right_ok = env_collision_check<ppln::robots::PandaCollisionModel>(
+    const bool right_ok = env_collision_check<ppln::robots::FrankaFerCollisionModel>(
         sphere_positions + stride, joint_in_collision, environment, tid
     );
     return left_ok && right_ok;
@@ -458,10 +464,10 @@ __device__ __noinline__ bool env_collision_check_approx<ppln::robots::Franka>(
 ) {
     constexpr int stride =
         FRANKA_ARM_APPROX_SPHERES * FRANKA_COLLISION_BATCH * 3;
-    const bool left_ok = env_collision_check_approx<ppln::robots::PandaCollisionModel>(
+    const bool left_ok = env_collision_check_approx<ppln::robots::FrankaFerCollisionModel>(
         sphere_positions, joint_in_collision, environment, tid
     );
-    const bool right_ok = env_collision_check_approx<ppln::robots::PandaCollisionModel>(
+    const bool right_ok = env_collision_check_approx<ppln::robots::FrankaFerCollisionModel>(
         sphere_positions + stride, joint_in_collision, environment, tid
     );
     return left_ok && right_ok;
@@ -475,10 +481,10 @@ __device__ __noinline__ bool self_collision_check<ppln::robots::Franka>(
 ) {
     constexpr int stride =
         FRANKA_ARM_FINE_SPHERES * FRANKA_COLLISION_BATCH * 3;
-    const bool left_ok = self_collision_check<ppln::robots::PandaCollisionModel>(
+    const bool left_ok = self_collision_check<ppln::robots::FrankaFerCollisionModel>(
         sphere_positions, joint_in_collision, tid
     );
-    const bool right_ok = self_collision_check<ppln::robots::PandaCollisionModel>(
+    const bool right_ok = self_collision_check<ppln::robots::FrankaFerCollisionModel>(
         sphere_positions + stride, joint_in_collision, tid
     );
     const bool cross_ok =
@@ -496,10 +502,10 @@ __device__ __noinline__ bool self_collision_check_approx<ppln::robots::Franka>(
 ) {
     constexpr int stride =
         FRANKA_ARM_APPROX_SPHERES * FRANKA_COLLISION_BATCH * 3;
-    const bool left_ok = self_collision_check_approx<ppln::robots::PandaCollisionModel>(
+    const bool left_ok = self_collision_check_approx<ppln::robots::FrankaFerCollisionModel>(
         sphere_positions, joint_in_collision, tid
     );
-    const bool right_ok = self_collision_check_approx<ppln::robots::PandaCollisionModel>(
+    const bool right_ok = self_collision_check_approx<ppln::robots::FrankaFerCollisionModel>(
         sphere_positions + stride, joint_in_collision, tid
     );
     const bool cross_ok =

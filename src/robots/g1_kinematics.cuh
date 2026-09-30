@@ -1,7 +1,7 @@
 #pragma once
 
-// Generated from VAMP's g1_unitree.hh by scripts/generate_g1_cuda.py.
-// FK, residuals, and Jacobians below preserve VAMP's generated scalar arithmetic.
+// PATACON's checked-in G1 FK and analytic constraint kernels, bound to the
+// pinned official Unitree g1_29dof model by resources/g1/prepare_description.py.
 
 namespace ppln::collision {
 

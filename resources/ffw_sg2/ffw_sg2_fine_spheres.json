@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
   "source": {
-    "format": "curobo_collision_spheres_yaml",
-    "sha256": "915b4fb919d3c4d779956283ba945a0f44a34df27d9c1e23673706674392ea86",
-    "original_filename": "ffw_sg2_spheres.yaml"
+    "format": "patacon_collision_spheres",
+    "description": "PATACON-local checked-in FFW-SG2 collision abstraction",
+    "historical_source_sha256": "915b4fb919d3c4d779956283ba945a0f44a34df27d9c1e23673706674392ea86"
   },
   "link_order": [
     "lift_link",

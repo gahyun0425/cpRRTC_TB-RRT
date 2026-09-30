@@ -248,7 +248,7 @@ inline json settings_to_json(const PATACON_settings &settings) {
         {"range", settings.range},
         {"random_seed", settings.random_seed},
         {"lift_distance_weight", settings.lift_distance_weight},
-        {"rigid_orientation", settings.rigid_orientation},
+        {"axis", settings.axis},
         {"g1_support_margin_m", settings.g1_constraints.support_margin_m},
         {"ffw_sg2_enable_com_constraint", settings.ffw_sg2_enable_com_constraint},
         {"ffw_sg2_support_margin_m", settings.ffw_sg2_support_margin_m},

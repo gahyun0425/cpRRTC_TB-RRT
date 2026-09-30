@@ -16,6 +16,12 @@ import xml.etree.ElementTree as ET
 
 import numpy as np
 
+from mujoco_primitive_environment import (
+    add_primitive_environment,
+    empty_primitive_environment,
+    normalize_primitive_environment,
+    primitive_count,
+)
 from mujoco_video import (
     DEFAULT_TRAJECTORY_ACCELERATION,
     DEFAULT_TRAJECTORY_PLAYBACK_RATE,
@@ -125,9 +131,7 @@ SUPPORTED_JOINT_ORDERS = {
     DUAL_ARM_PLANNING_JOINTS,
     MOBILITY_PLANNING_JOINTS,
 }
-ACTUATOR_NAME_BY_JOINT = {
-    "lift_joint": "actuator_lift_joint",
-}
+ACTUATOR_NAME_BY_JOINT = {}
 
 SUPPORT_POLYGON_BASE_XY = np.array(
     [
@@ -141,24 +145,24 @@ HIDDEN_MARKER_POSITION = np.array([0.0, 0.0, -10.0], dtype=float)
 REAL_WHEEL_MODULES = {
     "left": {
         "xy": (0.1371, 0.2554),
-        "steer_joint": "left_wheel_steer_joint",
-        "steer_actuator": "left_wheel_steer_act",
-        "drive_actuator": "left_wheel_drive_act",
-        "drive_body": "left_wheel_drive",
+        "steer_joint": "left_wheel_steer",
+        "steer_actuator": "left_wheel_steer",
+        "drive_actuator": "left_wheel_drive",
+        "drive_body": "left_wheel_drive_link",
     },
     "right": {
         "xy": (0.1371, -0.2554),
-        "steer_joint": "right_wheel_steer_joint",
-        "steer_actuator": "right_wheel_steer_act",
-        "drive_actuator": "right_wheel_drive_act",
-        "drive_body": "right_wheel_drive",
+        "steer_joint": "right_wheel_steer",
+        "steer_actuator": "right_wheel_steer",
+        "drive_actuator": "right_wheel_drive",
+        "drive_body": "right_wheel_drive_link",
     },
     "rear": {
         "xy": (-0.2899, 0.0),
-        "steer_joint": "rear_wheel_steer_joint",
-        "steer_actuator": "rear_wheel_steer_act",
-        "drive_actuator": "rear_wheel_drive_act",
-        "drive_body": "rear_wheel_drive",
+        "steer_joint": "rear_wheel_steer",
+        "steer_actuator": "rear_wheel_steer",
+        "drive_actuator": "rear_wheel_drive",
+        "drive_body": "rear_wheel_drive_link",
     },
 }
 
@@ -199,8 +203,7 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help=(
             "Maximum configuration-coordinate change per second. Defaults to "
-            f"{DEFAULT_TRAJECTORY_SPEED:g}, or {REAL_DEFAULT_SPEED:g} with "
-            "--real."
+            f"{REAL_DEFAULT_SPEED:g}."
         ),
     )
     parser.add_argument(
@@ -210,18 +213,12 @@ def parse_args() -> argparse.Namespace:
         help="Maximum configuration-coordinate acceleration per second squared.",
     )
     parser.add_argument(
-        "--input-mode",
-        choices=("ctrl", "qpos"),
-        default="ctrl",
-        help="Use MuJoCo actuator ctrl targets or direct qpos assignment for trajectory replay.",
-    )
-    parser.add_argument(
         "--settle-steps",
         type=int,
         default=None,
         help=(
             "MuJoCo simulation steps advanced after each ctrl target update. "
-            "Defaults to 12, or 240 with --real."
+            "Defaults to 240."
         ),
     )
     parser.add_argument(
@@ -239,23 +236,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--attach-payload",
         action="store_true",
-        help="Kinematically place the payload at the gripper midpoint in non-real mode.",
+        help="Kinematically place the payload at the gripper midpoint for scene inspection.",
     )
     parser.add_argument(
-        "--real",
-        action="store_true",
-        help=(
-            "Use a physics-check model: free base, payload mass, "
-            "wheel-contact drive tracking, and no "
-            "kinematic base overwrite."
-        ),
-    )
-    parser.add_argument(
-        "--real-payload-mode",
+        "--payload-mode",
+        dest="real_payload_mode",
         choices=REAL_PAYLOAD_MODES,
         default=REAL_PAYLOAD_MODE_EQUALITY,
         help=(
-            "Payload model used by --real. 'rigid' makes the payload a jointless "
+            "Payload model used by ctrl dynamics. 'rigid' makes the payload a jointless "
             "child body of the left gripper site parent. 'equality' keeps it as a "
             "free body constrained to both gripper sites."
         ),
@@ -269,56 +258,63 @@ def parse_args() -> argparse.Namespace:
         help="Object-frame offset added to the attached payload midpoint.",
     )
     parser.add_argument(
-        "--real-base-kp-xy",
+        "--base-kp-xy",
+        dest="real_base_kp_xy",
         type=float,
         default=REAL_BASE_KP_XY,
-        help="Real-mode proportional gain for planar base tracking.",
+        help="Ctrl-dynamics proportional gain for planar base tracking.",
     )
     parser.add_argument(
-        "--real-base-kp-yaw",
+        "--base-kp-yaw",
+        dest="real_base_kp_yaw",
         type=float,
         default=REAL_BASE_KP_YAW,
-        help="Real-mode proportional gain for base yaw tracking.",
+        help="Ctrl-dynamics proportional gain for base yaw tracking.",
     )
     parser.add_argument(
-        "--real-base-max-speed",
+        "--base-max-speed",
+        dest="real_base_max_speed",
         type=float,
         default=REAL_BASE_MAX_SPEED_MPS,
-        help="Real-mode planar base speed limit in m/s.",
+        help="Ctrl-dynamics planar base speed limit in m/s.",
     )
     parser.add_argument(
-        "--real-base-max-yaw-rate",
+        "--base-max-yaw-rate",
+        dest="real_base_max_yaw_rate",
         type=float,
         default=REAL_BASE_MAX_YAW_RATE_RPS,
-        help="Real-mode base yaw-rate limit in rad/s.",
+        help="Ctrl-dynamics base yaw-rate limit in rad/s.",
     )
     parser.add_argument(
-        "--real-steer-rate-limit",
+        "--steer-rate-limit",
+        dest="real_steer_rate_limit",
         type=float,
         default=REAL_STEER_RATE_LIMIT_RPS,
-        help="Real-mode wheel steering command rate limit in rad/s.",
+        help="Ctrl-dynamics wheel steering command rate limit in rad/s.",
     )
     parser.add_argument(
-        "--real-drive-accel-limit",
+        "--drive-accel-limit",
+        dest="real_drive_accel_limit",
         type=float,
         default=REAL_DRIVE_ACCEL_LIMIT_RPS2,
-        help="Real-mode wheel drive command acceleration limit in rad/s^2.",
+        help="Ctrl-dynamics wheel drive command acceleration limit in rad/s^2.",
     )
     parser.add_argument(
-        "--real-initial-settle-steps",
+        "--initial-settle-steps",
+        dest="real_initial_settle_steps",
         type=int,
         default=REAL_INITIAL_SETTLE_STEPS,
-        help="MuJoCo steps used to settle the initial real-mode grasp before validation or replay.",
+        help="MuJoCo steps used to settle the initial ctrl-dynamics grasp.",
     )
     parser.add_argument("--validate-only", action="store_true")
     add_video_arguments(parser, "PATACON_FFW_SG2_VIDEO")
     args = parser.parse_args()
+    args.real = True
+    args.input_mode = "ctrl"
     if args.speed is None:
-        args.speed = (
-            REAL_DEFAULT_SPEED if args.real else DEFAULT_TRAJECTORY_SPEED
-        )
+        args.speed = REAL_DEFAULT_SPEED
     if args.settle_steps is None:
-        args.settle_steps = REAL_DEFAULT_SETTLE_STEPS if args.real else DEFAULT_SETTLE_STEPS
+        args.settle_steps = REAL_DEFAULT_SETTLE_STEPS
     if (
         not math.isfinite(args.fps)
         or not math.isfinite(args.speed)
@@ -331,24 +327,22 @@ def parse_args() -> argparse.Namespace:
     if args.settle_steps < 0:
         parser.error("--settle-steps must be greater than or equal to 0")
     if args.real_initial_settle_steps < 0:
-        parser.error("--real-initial-settle-steps must be greater than or equal to 0")
+        parser.error("--initial-settle-steps must be greater than or equal to 0")
     if args.object_mass <= 0.0 or not math.isfinite(args.object_mass):
         parser.error("--object-mass must be a finite value greater than 0")
     if args.support_margin < 0.0 or not math.isfinite(args.support_margin):
         parser.error("--support-margin must be a finite value greater than or equal to 0")
     real_tracking_options = (
-        ("--real-base-kp-xy", args.real_base_kp_xy),
-        ("--real-base-kp-yaw", args.real_base_kp_yaw),
-        ("--real-base-max-speed", args.real_base_max_speed),
-        ("--real-base-max-yaw-rate", args.real_base_max_yaw_rate),
-        ("--real-steer-rate-limit", args.real_steer_rate_limit),
-        ("--real-drive-accel-limit", args.real_drive_accel_limit),
+        ("--base-kp-xy", args.real_base_kp_xy),
+        ("--base-kp-yaw", args.real_base_kp_yaw),
+        ("--base-max-speed", args.real_base_max_speed),
+        ("--base-max-yaw-rate", args.real_base_max_yaw_rate),
+        ("--steer-rate-limit", args.real_steer_rate_limit),
+        ("--drive-accel-limit", args.real_drive_accel_limit),
     )
     for option, value in real_tracking_options:
         if value <= 0.0 or not math.isfinite(value):
             parser.error(f"{option} must be a finite value greater than 0")
-    if args.real and args.input_mode != "ctrl":
-        parser.error("--real requires --input-mode ctrl")
     if args.video is not None and args.trajectory is None:
         parser.error("--video requires --trajectory")
     validate_video_arguments(parser, args)
@@ -365,7 +359,7 @@ def parse_attached_object_frame_offset(document) -> tuple[float, float, float]:
     return offset
 
 
-def load_trajectory(path: Path) -> tuple[tuple[str, ...], list[list[float]], tuple[float, float, float]]:
+def load_trajectory(path: Path):
     document = json.loads(path.read_text(encoding="utf-8"))
     joint_names = tuple(document.get("joint_names", ()))
     if joint_names not in SUPPORTED_JOINT_ORDERS:
@@ -390,7 +384,16 @@ def load_trajectory(path: Path) -> tuple[tuple[str, ...], list[list[float]], tup
             document.get("path_smoothing", True),
         ),
         parse_attached_object_frame_offset(document),
+        normalize_primitive_environment(
+            document.get("environment"), "FFW-SG2 real trajectory"
+        ),
     )
+
+
+def build_model(mujoco, model_path: Path, environment: dict[str, list]):
+    spec = mujoco.MjSpec.from_file(str(model_path))
+    add_primitive_environment(mujoco, spec, environment, physical=True)
+    return spec.compile()
 
 
 def find_named_body(root: ET.Element, body_name: str) -> ET.Element:
@@ -1958,7 +1961,10 @@ def rack_contact_records(model, data) -> list[dict]:
             body1_name.lower(),
             body2_name.lower(),
         )
-        if not any("rack" in name or "shelf" in name for name in names):
+        if not any(
+            "rack" in name or "shelf" in name or "planning_" in name
+            for name in names
+        ):
             continue
         records.append(
             {
@@ -2209,7 +2215,7 @@ def validate_real_trajectory(
     if not math.isfinite(min_wheel_force):
         min_wheel_force = 0.0
     com_state = compute_com_state(model, data, robot_body_ids, payload_body_ids)
-    print("real_mode: true")
+    print("control_mode: ctrl")
     print(f"real_payload_mode: {args.real_payload_mode}")
     print(f"real_speed: {args.speed:.4f}")
     print(f"robot_mass_kg: {com_state['robot_mass']:.4f}")
@@ -2304,14 +2310,20 @@ def main() -> int:
     )
     joint_names: tuple[str, ...] = ()
     waypoints: list[list[float]] = []
+    environment = empty_primitive_environment()
     if args.trajectory:
-        joint_names, waypoints, trajectory_payload_offset = load_trajectory(
-            args.trajectory.resolve()
-        )
+        (
+            joint_names,
+            waypoints,
+            trajectory_payload_offset,
+            environment,
+        ) = load_trajectory(args.trajectory.resolve())
         if args.payload_offset is None:
             payload_offset = trajectory_payload_offset
         if args.real and joint_names != MOBILITY_PLANNING_JOINTS:
-            raise ValueError("--real requires base_x/base_y/base_yaw in the trajectory")
+            raise ValueError(
+                "ctrl dynamics requires base_x/base_y/base_yaw in the trajectory"
+            )
 
     real_base_tracking = RealBaseTracking(
         kp_xy=args.real_base_kp_xy,
@@ -2342,9 +2354,9 @@ def main() -> int:
         loaded_model_path = temporary_model_path
 
     try:
-        model = mujoco.MjModel.from_xml_path(str(loaded_model_path))
+        model = build_model(mujoco, loaded_model_path, environment)
         reference_model = (
-            mujoco.MjModel.from_xml_path(str(loaded_model_path))
+            build_model(mujoco, loaded_model_path, environment)
             if waypoints else None
         )
     finally:
@@ -2600,6 +2612,7 @@ def main() -> int:
 
     validate_only = args.validate_only or os.environ.get("PATACON_MUJOCO_VALIDATE_ONLY") == "1"
     if validate_only:
+        print(f"environment_primitives: {primitive_count(environment)}")
         if args.real and waypoints:
             assert real_base is not None
             validate_real_trajectory(
@@ -2729,7 +2742,7 @@ def main() -> int:
                 writer.write(view, renderer.render())
 
         reset_scene_to_start()
-        mode = "real dynamics" if args.real else args.input_mode
+        mode = "ctrl dynamics" if args.real else args.input_mode
         print(
             f"rendering {len(args.video_views)} FFW-SG2 mobility MP4 "
             f"view(s) at {args.fps:g} fps "
@@ -2769,7 +2782,7 @@ def main() -> int:
                         previous_configuration = configuration
                         if not np.all(np.isfinite(data.qpos)):
                             raise RuntimeError(
-                                "FFW-SG2 real-mode simulation became non-finite"
+                                "FFW-SG2 ctrl-dynamics simulation became non-finite"
                             )
                     else:
                         apply_configuration(

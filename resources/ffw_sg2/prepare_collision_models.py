@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build fine and conservative one-sphere-per-link FFW-SG2 URDFs."""
+"""Build FFW-SG2 collision URDFs from PATACON's checked-in sphere data."""
 
 from __future__ import annotations
 
@@ -27,9 +27,6 @@ TRANSFORM_SLOTS_PER_CONFIGURATION = 2
 TRANSFORM_FLOATS = 16
 APPROX_PADDING_METERS = 1.0e-6
 
-EXPECTED_SOURCE_YAML_SHA256 = (
-    "915b4fb919d3c4d779956283ba945a0f44a34df27d9c1e23673706674392ea86"
-)
 EXPECTED_ACTIVE_JOINTS = (
     "lift_joint",
     "arm_l_joint1",
@@ -79,14 +76,15 @@ EXPECTED_SPHERES_PER_LINK = {
 EXPECTED_UNMODELED_COLLISION_LINKS = {
     "base_link",
     "head_link1",
-    "camera_l_link",
-    "camera_r_link",
+    "camera_left_link",
+    "camera_right_link",
     "left_wheel_steer_link",
     "left_wheel_drive_link",
     "right_wheel_steer_link",
     "right_wheel_drive_link",
     "rear_wheel_steer_link",
     "rear_wheel_drive_link",
+    "zed_camera_center",
 }
 
 
@@ -94,11 +92,6 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--planning-urdf", type=Path, default=DEFAULT_PLANNING_URDF)
     parser.add_argument("--sphere-data", type=Path, default=DEFAULT_SPHERE_DATA)
-    parser.add_argument(
-        "--import-yaml",
-        type=Path,
-        help="Import the known 124-sphere cuRobo YAML before generating models.",
-    )
     parser.add_argument("--fine-output", type=Path, default=DEFAULT_FINE_OUTPUT)
     parser.add_argument("--approx-output", type=Path, default=DEFAULT_APPROX_OUTPUT)
     parser.add_argument("--metadata-output", type=Path, default=DEFAULT_METADATA_OUTPUT)
@@ -111,52 +104,6 @@ def sha256_file(path: Path) -> str:
         for chunk in iter(lambda: stream.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
-
-
-def import_yaml(source: Path, destination: Path) -> None:
-    source_hash = sha256_file(source)
-    if source_hash != EXPECTED_SOURCE_YAML_SHA256:
-        raise ValueError(
-            "unexpected fine-sphere YAML hash: "
-            f"expected {EXPECTED_SOURCE_YAML_SHA256}, got {source_hash}"
-        )
-
-    try:
-        import yaml
-    except ImportError as error:
-        raise RuntimeError("PyYAML is required only for --import-yaml") from error
-
-    raw = yaml.safe_load(source.read_text(encoding="utf-8"))
-    sphere_map = raw.get("collision_spheres")
-    if not isinstance(sphere_map, dict):
-        raise ValueError("YAML does not contain a collision_spheres mapping")
-
-    normalized: dict[str, list[dict[str, object]]] = {}
-    for link_name, spheres in sphere_map.items():
-        normalized[link_name] = []
-        for sphere in spheres:
-            normalized[link_name].append(
-                {
-                    "center": [float(value) for value in sphere["center"]],
-                    "radius": float(sphere["radius"]),
-                }
-            )
-
-    imported = {
-        "schema_version": 1,
-        "source": {
-            "format": "curobo_collision_spheres_yaml",
-            "sha256": source_hash,
-            "original_filename": source.name,
-        },
-        "link_order": list(normalized),
-        "collision_spheres": normalized,
-    }
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    destination.write_text(
-        json.dumps(imported, indent=2, ensure_ascii=False) + "\n",
-        encoding="utf-8",
-    )
 
 
 def load_and_validate_spheres(path: Path) -> tuple[dict, dict[str, list[dict]]]:
@@ -350,7 +297,7 @@ def build_metadata(
     unmodeled = planning_collision_links(planning_urdf) - set(fine_spheres)
     if unmodeled != EXPECTED_UNMODELED_COLLISION_LINKS:
         raise ValueError(
-            "unexpected collision links omitted from the inherited sphere model: "
+            "unexpected collision links omitted from the local sphere model: "
             f"{sorted(unmodeled)}"
         )
 
@@ -365,7 +312,7 @@ def build_metadata(
             "planning_urdf_sha256": sha256_file(planning_urdf),
             "fine_sphere_data": sphere_data_path.name,
             "fine_sphere_data_sha256": sha256_file(sphere_data_path),
-            "imported_yaml_sha256": sphere_data["source"]["sha256"],
+            "sphere_data_provenance": sphere_data["source"],
         },
         "fine_model": {
             "urdf": fine_output.name,
@@ -430,9 +377,6 @@ def main() -> None:
     fine_output = args.fine_output.resolve()
     approximate_output = args.approx_output.resolve()
     metadata_output = args.metadata_output.resolve()
-
-    if args.import_yaml is not None:
-        import_yaml(args.import_yaml.resolve(), sphere_data_path)
 
     sphere_data, fine_spheres = load_and_validate_spheres(sphere_data_path)
     approximate_spheres = build_approximation(fine_spheres)

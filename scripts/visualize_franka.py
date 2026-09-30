@@ -13,6 +13,11 @@ import time
 
 import numpy as np
 
+from mujoco_primitive_environment import (
+    add_primitive_environment,
+    normalize_primitive_environment,
+    primitive_count,
+)
 from mujoco_video import (
     DEFAULT_TRAJECTORY_ACCELERATION,
     DEFAULT_TRAJECTORY_SPEED,
@@ -28,9 +33,9 @@ from mujoco_video import (
 )
 
 
-SINGLE_JOINTS = tuple(f"panda0_joint{index}" for index in range(1, 8))
+SINGLE_JOINTS = tuple(f"fer0_joint{index}" for index in range(1, 8))
 DUAL_JOINTS = SINGLE_JOINTS + tuple(
-    f"panda1_joint{index}" for index in range(1, 8)
+    f"fer1_joint{index}" for index in range(1, 8)
 )
 
 # These are the fixed T_EE_object transforms used by
@@ -51,7 +56,7 @@ SINGLE_ATTACHED_ROTATION = (
 SINGLE_ATTACHED_TRANSLATION = (
     -0.0299951539,
     -3.27119653e-06,
-    -0.0200040056,
+    -0.0234040056,
 )
 DUAL_ATTACHED_ROTATION = (
     1.0,
@@ -67,7 +72,7 @@ DUAL_ATTACHED_ROTATION = (
 DUAL_ATTACHED_TRANSLATION = (
     -7.26699543e-08,
     0.124998270,
-    0.0499992695,
+    0.0465992695,
 )
 
 
@@ -116,6 +121,7 @@ def load_trajectories(path: Path):
         raise ValueError("trajectory bundle must contain at least one trajectory")
 
     trajectories = []
+    environment = None
     for trajectory_index, trajectory in enumerate(raw_trajectories):
         if not isinstance(trajectory, dict):
             raise ValueError(f"trajectory {trajectory_index} is not a JSON object")
@@ -149,6 +155,16 @@ def load_trajectories(path: Path):
             for index in range(len(joint_names))
         ) > 1.0e-5:
             raise ValueError(f"{label} was not converted to start-to-goal order")
+        trajectory_environment = normalize_primitive_environment(
+            trajectory.get("environment"), label
+        )
+        if environment is None:
+            environment = trajectory_environment
+        elif trajectory_environment != environment:
+            raise ValueError(
+                "all Franka trajectories in one replay must use the same "
+                "primitive environment"
+            )
         trajectories.append((
             label,
             GeometricPathWaypoints(
@@ -157,7 +173,13 @@ def load_trajectories(path: Path):
                 trajectory.get("path_smoothing", True),
             ),
         ))
-    return joint_names, trajectories
+    return joint_names, trajectories, environment
+
+
+def build_model(mujoco, model_path: Path, environment: dict[str, list]):
+    spec = mujoco.MjSpec.from_file(str(model_path))
+    add_primitive_environment(mujoco, spec, environment, physical=False)
+    return spec.compile()
 
 
 def resolve_addresses(mujoco, model, joint_names: tuple[str, ...]) -> list[int]:
@@ -189,7 +211,7 @@ def set_grippers(mujoco, model, data, dual: bool) -> None:
     arm_indices = (0, 1) if dual else (0,)
     for arm in arm_indices:
         for finger in (1, 2):
-            name = f"panda{arm}_finger_joint{finger}"
+            name = f"fer{arm}_finger_joint{finger}"
             joint_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, name)
             if joint_id >= 0:
                 data.qpos[int(model.jnt_qposadr[joint_id])] = opening
@@ -224,7 +246,7 @@ def resolve_attached_object(mujoco, model, joint_names) -> dict[str, object]:
         raise ValueError("attached object joint is not free")
     qpos_address = int(model.jnt_qposadr[joint_id])
 
-    # Both source models name the left/single attachment site end_effector.
+    # Both generated models name the left/single attachment site end_effector.
     # The dual model additionally names its right attachment site end_effector1;
     # the planner parents the payload to the left site.
     site_name = "end_effector"
@@ -297,6 +319,7 @@ def save_video(
     model_path: Path,
     joint_names,
     trajectories,
+    environment,
     fps: float,
     speed: float,
     output_path: Path,
@@ -312,7 +335,7 @@ def save_video(
             "MuJoCo is required for MP4 rendering: python3 -m pip install mujoco"
         ) from error
 
-    model = mujoco.MjModel.from_xml_path(str(model_path))
+    model = build_model(mujoco, model_path, environment)
     configure_model_render_quality(model)
     model.vis.global_.offwidth = max(int(model.vis.global_.offwidth), width)
     model.vis.global_.offheight = max(int(model.vis.global_.offheight), height)
@@ -386,6 +409,7 @@ def replay(
     model_path,
     joint_names,
     trajectories,
+    environment,
     fps,
     speed,
     acceleration=DEFAULT_TRAJECTORY_ACCELERATION,
@@ -393,7 +417,7 @@ def replay(
     import mujoco
     import mujoco.viewer
 
-    model = mujoco.MjModel.from_xml_path(str(model_path))
+    model = build_model(mujoco, model_path, environment)
     data = mujoco.MjData(model)
     addresses = resolve_addresses(mujoco, model, joint_names)
     for _, waypoints in trajectories:
@@ -445,11 +469,11 @@ def replay(
 def main() -> int:
     args = parse_args()
     model_path = args.model.resolve()
-    joint_names, trajectories = load_trajectories(args.trajectory)
+    joint_names, trajectories, environment = load_trajectories(args.trajectory)
     if args.validate_only:
         import mujoco
 
-        model = mujoco.MjModel.from_xml_path(str(model_path))
+        model = build_model(mujoco, model_path, environment)
         data = mujoco.MjData(model)
         addresses = resolve_addresses(mujoco, model, joint_names)
         attachment = resolve_attached_object(mujoco, model, joint_names)
@@ -465,7 +489,8 @@ def main() -> int:
         print(
             f"validated {len(trajectories)} trajectories, "
             f"{waypoint_count} waypoints, {len(joint_names)} joints, "
-            f"model nq={model.nq}"
+            f"{primitive_count(environment)} "
+            f"environment primitives, model nq={model.nq}"
         )
         return 0
     if args.video is not None:
@@ -473,6 +498,7 @@ def main() -> int:
             model_path,
             joint_names,
             trajectories,
+            environment,
             args.fps,
             args.speed,
             args.video,
@@ -486,6 +512,7 @@ def main() -> int:
         model_path,
         joint_names,
         trajectories,
+        environment,
         args.fps,
         args.speed,
         args.acceleration,
